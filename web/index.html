@@ -1,803 +1,1720 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#090b13">
-<title>GAPCUT AI</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#090812">
+  <title>GAPCUT AI — Умный видеомонтаж</title>
 
-<style>
-:root{
-  --bg:#090b13;--panel:#151a27;--panel2:#1c2232;
-  --purple:#9b79ff;--purple2:#6745ce;--text:#f5f3ff;
-  --muted:#9299ad;--green:#54d9a0;--line:rgba(255,255,255,.09);
-}
-*{box-sizing:border-box}
-body{
-  margin:0;color:var(--text);
-  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:radial-gradient(ellipse at 15% 0%,#302052 0%,transparent 35%),
-  radial-gradient(ellipse at 100% 65%,#202344 0%,transparent 32%),var(--bg);
-  min-height:100vh;
-}
-button,input,textarea{font:inherit}
-button{cursor:pointer;color:inherit}
-.app{width:min(100%,650px);margin:auto;min-height:100vh;padding:16px 15px 105px}
-header{display:flex;align-items:center;justify-content:space-between;padding:9px 2px 19px}
-.brand{display:flex;align-items:center;gap:12px}
-.logo{
-  width:47px;height:47px;border-radius:16px;display:grid;place-items:center;
-  font-size:24px;font-weight:900;background:linear-gradient(145deg,#c4a9ff,#6541c4 65%,#35205e);
-  box-shadow:inset 0 2px 3px #ffffff80,0 8px 25px #895fff55;
-}
-.brand h2{font-size:17px;margin:0;letter-spacing:1px}
-.brand small{font-size:9px;letter-spacing:2px;color:var(--muted)}
-.online{font-size:11px;color:var(--green);background:#143529;padding:8px 11px;border-radius:30px;border:1px solid #286c50}
-.page{display:none;animation:appear .25s ease}
-.page.active{display:block}
-@keyframes appear{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-h1{font-size:28px;margin:8px 0}
-h2{font-size:20px}
-p{line-height:1.6}
-.muted{color:var(--muted)}
-.card{
-  padding:17px;border-radius:21px;margin:14px 0;
-  background:linear-gradient(145deg,#202638e8,#121722f5);
-  border:1px solid var(--line);box-shadow:0 12px 35px #0004,inset 0 1px 0 #ffffff08;
-}
-.hero{
-  position:relative;overflow:hidden;padding:24px 20px;border-radius:25px;
-  background:linear-gradient(135deg,#39275f,#1c1b37 55%,#151a29);
-  border:1px solid #9b79ff40;box-shadow:0 15px 45px #6d48b633,inset 0 1px 0 #ffffff20;
-}
-.hero:after{content:"✦";position:absolute;right:18px;top:12px;font-size:100px;color:#ffffff0b}
-.hero h1{font-size:29px;line-height:1.2;max-width:270px}
-.hero p{font-size:13px;color:#d0c7e9;max-width:290px}
-.section-title{font-size:14px;font-weight:750;margin:22px 0 12px}
-.btn{
-  border:0;width:100%;padding:15px;border-radius:15px;
-  background:linear-gradient(110deg,#a88aff,#6944d0);font-weight:750;color:white;
-  box-shadow:0 8px 25px #8058e64a,inset 0 1px 0 #ffffff55;
-}
-.btn:active{transform:scale(.98)}
-.btn.secondary{background:#262b3d;border:1px solid var(--line);box-shadow:none;margin-top:9px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
-.feature{padding:15px;border-radius:18px;background:linear-gradient(145deg,#202638,#141925);border:1px solid var(--line)}
-.icon3d{
-  width:48px;height:48px;border-radius:15px;display:grid;place-items:center;
-  font-size:25px;margin-bottom:12px;background:linear-gradient(145deg,#9c7bff,#49308b);
-  box-shadow:inset 0 2px 4px #ffffff66,0 7px 16px #0007;
-}
-.feature b{font-size:13px}
-.feature small{display:block;color:var(--muted);margin-top:5px;font-size:11px}
-.nav{
-  position:fixed;z-index:20;bottom:0;left:50%;transform:translateX(-50%);
-  width:min(100%,650px);padding:10px 8px calc(10px + env(safe-area-inset-bottom));
-  display:grid;grid-template-columns:repeat(5,1fr);
-  background:#101522f2;backdrop-filter:blur(22px);border-top:1px solid #ffffff15;
-}
-.nav button{border:0;background:none;color:#7f879b;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10px;padding:5px 0}
-.nav .nav-icon{font-size:21px;filter:drop-shadow(0 3px 4px #000)}
-.nav button.active{color:#c1aaff}
-.nav button.active .nav-icon{filter:drop-shadow(0 0 8px #9b79ff);transform:translateY(-2px)}
-.upload{padding:28px 14px;text-align:center;border:1px dashed #8d70d7;border-radius:17px;background:#1b1930}
-.upload .big{font-size:39px;filter:drop-shadow(0 5px 8px #000)}
-.upload b{display:block;margin:10px 0}
-.upload small{color:var(--muted)}
-input[type=file]{display:none}
-.file-info{color:var(--green);font-size:12px;margin-top:12px}
-.task-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.task{background:#1b2030;border:1px solid var(--line);border-radius:15px;padding:13px;text-align:left}
-.task span{display:block;font-size:23px;margin-bottom:7px}
-.task b{font-size:12px;display:block}
-.task small{display:block;color:var(--muted);font-size:10px;margin-top:5px}
-.task.active{border-color:var(--purple);background:#30244b}
-.textarea{width:100%;min-height:100px;padding:13px;background:#0c1019;border:1px solid var(--line);border-radius:13px;color:white;resize:vertical}
-.preview{padding:23px 12px;border-radius:14px;background:#080a10;text-align:center;border:1px solid #39334e}
-.preview h2{font-size:19px;line-height:1.5;margin:0}
-.preview small{color:#b9a3ff}
-.row{display:flex;align-items:center;gap:12px}
-.between{justify-content:space-between}
-.badge{color:#c9b6ff;background:#392b58;border-radius:20px;padding:6px 10px;font-size:10px}
-.plan{padding:11px 0;border-bottom:1px solid var(--line);font-size:12px}
-.plan:last-child{border:0}
-.time{color:#b99cff;font-weight:800;margin-right:10px}
-.avatar{width:90px;height:90px;border-radius:50%;display:grid;place-items:center;overflow:hidden;background:linear-gradient(145deg,#a88aff,#4c328c);border:3px solid #b99aff;box-shadow:0 8px 25px #855de655;font-size:35px}
-.avatar img{width:100%;height:100%;object-fit:cover}
-.profile-center{text-align:center;display:flex;align-items:center;flex-direction:column;gap:12px}
-.field{width:100%;padding:13px;border-radius:12px;background:#0d111b;border:1px solid var(--line);color:white;outline:none}
-.invite-link{background:#0d111b;border:1px solid var(--line);padding:13px;border-radius:12px;color:#c4adff;word-break:break-all;font-size:12px}
-.result-item{display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
-.result-thumb{width:64px;height:64px;border-radius:13px;background:linear-gradient(145deg,#47346f,#171c2b);display:grid;place-items:center;font-size:25px;flex-shrink:0;overflow:hidden}
-.result-thumb video{width:100%;height:100%;object-fit:cover}
-.result-info{flex:1;min-width:0}
-.result-info b{font-size:12px;display:block;overflow-wrap:anywhere}
-.result-info small{font-size:10px;color:var(--muted);display:block;margin-top:5px}
-.delete-btn{border:0;background:#38202b;color:#ff9aab;border-radius:10px;padding:9px;font-size:12px}
-.empty{text-align:center;padding:35px 10px;color:var(--muted)}
-.hidden{display:none!important}
-.note{font-size:11px;color:var(--muted);line-height:1.6}
-.toast{position:fixed;z-index:50;bottom:95px;left:50%;transform:translateX(-50%);background:#272b3a;padding:12px 18px;border-radius:12px;box-shadow:0 8px 25px #0008;font-size:12px;display:none;max-width:90%;text-align:center}
-.progress-track{height:9px;background:#292d40;border-radius:20px;overflow:hidden;margin:15px 0}
-.progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#a88aff,#54d9a0);transition:width .2s}
-@media(min-width:500px){.app{padding-left:22px;padding-right:22px}h1{font-size:33px}}
-</style>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <style>
+    :root {
+      --bg: #090812;
+      --panel: #151323;
+      --panel2: #1c1930;
+      --purple: #8b5cf6;
+      --pink: #d946ef;
+      --text: #ffffff;
+      --muted: #9994ad;
+      --border: rgba(255,255,255,.09);
+      --green: #35d49a;
+      --red: #ff647c;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 15% 0%, rgba(117,65,220,.19), transparent 35%),
+        radial-gradient(circle at 100% 30%, rgba(200,55,210,.10), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      padding-bottom: 95px;
+    }
+
+    button, input, textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      border: 0;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 600px;
+      margin: auto;
+      padding: 18px 16px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 25px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+
+    .logo {
+      width: 43px;
+      height: 43px;
+      border-radius: 15px;
+      background: linear-gradient(135deg, #8b5cf6, #d946ef);
+      display: grid;
+      place-items: center;
+      font-size: 23px;
+      font-weight: 900;
+      box-shadow: 0 5px 25px rgba(139,92,246,.35);
+    }
+
+    .brand-name {
+      font-size: 18px;
+      font-weight: 850;
+      letter-spacing: .5px;
+    }
+
+    .brand-sub {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 3px;
+    }
+
+    .status {
+      font-size: 11px;
+      color: var(--green);
+      background: rgba(53,212,154,.1);
+      border: 1px solid rgba(53,212,154,.2);
+      padding: 7px 10px;
+      border-radius: 30px;
+    }
+
+    .page {
+      display: none;
+      animation: appear .2s ease;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    @keyframes appear {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .welcome {
+      background: linear-gradient(135deg, #24163f, #171329 70%);
+      border: 1px solid rgba(180,130,255,.18);
+      border-radius: 25px;
+      padding: 23px 20px;
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+
+    .welcome:after {
+      content: "✦";
+      position: absolute;
+      right: 18px;
+      top: 15px;
+      font-size: 75px;
+      color: rgba(255,255,255,.07);
+    }
+
+    .welcome h1 {
+      font-size: 25px;
+      line-height: 1.25;
+      margin-bottom: 10px;
+      max-width: 290px;
+    }
+
+    .welcome p {
+      color: #c3bad9;
+      font-size: 13px;
+      line-height: 1.6;
+      max-width: 300px;
+    }
+
+    .gradient-text {
+      background: linear-gradient(90deg, #b69aff, #f0a4ff);
+      -webkit-background-clip: text;
+      color: transparent;
+    }
+
+    .section-title {
+      font-size: 17px;
+      font-weight: 800;
+      margin: 23px 0 12px;
+    }
+
+    .card {
+      background: rgba(24,21,42,.92);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 17px;
+      margin-bottom: 13px;
+    }
+
+    .upload-box {
+      border: 1.5px dashed rgba(174,139,255,.5);
+      border-radius: 20px;
+      background: rgba(139,92,246,.07);
+      text-align: center;
+      padding: 26px 15px;
+      transition: .2s;
+    }
+
+    .upload-box:active {
+      background: rgba(139,92,246,.16);
+    }
+
+    .upload-icon {
+      width: 55px;
+      height: 55px;
+      border-radius: 18px;
+      background: rgba(139,92,246,.2);
+      display: grid;
+      place-items: center;
+      font-size: 26px;
+      margin: 0 auto 13px;
+    }
+
+    .upload-box h3 {
+      font-size: 15px;
+      margin-bottom: 7px;
+    }
+
+    .upload-box p {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .primary-btn {
+      width: 100%;
+      padding: 15px;
+      border-radius: 15px;
+      color: white;
+      font-weight: 800;
+      font-size: 14px;
+      background: linear-gradient(100deg, #7951ec, #bd4de1);
+      box-shadow: 0 7px 22px rgba(139,92,246,.22);
+      margin-top: 14px;
+    }
+
+    .primary-btn:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    .secondary-btn {
+      width: 100%;
+      padding: 13px;
+      border-radius: 14px;
+      background: #28233e;
+      color: white;
+      font-weight: 700;
+      margin-top: 10px;
+    }
+
+    .file-info {
+      display: none;
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 13px;
+      background: rgba(255,255,255,.05);
+      text-align: left;
+    }
+
+    .file-info strong {
+      display: block;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .file-info span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 5px;
+    }
+
+    .option-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .option {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 15px 12px;
+      text-align: left;
+      color: white;
+      min-height: 91px;
+      transition: .15s;
+    }
+
+    .option.selected {
+      border-color: #a77aff;
+      background: rgba(139,92,246,.16);
+      box-shadow: inset 0 0 0 1px rgba(139,92,246,.2);
+    }
+
+    .option .emoji {
+      font-size: 22px;
+      display: block;
+      margin-bottom: 9px;
+    }
+
+    .option strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .option small {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      margin-top: 5px;
+      line-height: 1.4;
+    }
+
+    .format-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 9px;
+    }
+
+    .format {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: white;
+      border-radius: 14px;
+      padding: 13px 5px;
+      text-align: center;
+    }
+
+    .format.selected {
+      border-color: #a77aff;
+      background: rgba(139,92,246,.16);
+    }
+
+    .format .shape {
+      font-size: 23px;
+      display: block;
+      margin-bottom: 7px;
+    }
+
+    .format strong {
+      font-size: 12px;
+    }
+
+    .format small {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      margin-top: 4px;
+    }
+
+    .notice {
+      padding: 12px 13px;
+      border-radius: 13px;
+      background: rgba(139,92,246,.09);
+      border: 1px solid rgba(139,92,246,.15);
+      color: #c9b9f4;
+      font-size: 11px;
+      line-height: 1.6;
+      margin-top: 13px;
+    }
+
+    .disabled-option {
+      opacity: .42;
+      position: relative;
+    }
+
+    .disabled-option:after {
+      content: "Скоро";
+      position: absolute;
+      right: 9px;
+      top: 9px;
+      font-size: 9px;
+      background: #443b5a;
+      padding: 4px 7px;
+      border-radius: 20px;
+    }
+
+    .progress-card {
+      display: none;
+      margin-top: 15px;
+    }
+
+    .progress-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: #302b43;
+      border-radius: 20px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #8b5cf6, #e879f9);
+      border-radius: 20px;
+      transition: width .2s;
+    }
+
+    .progress-note {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+      margin-top: 9px;
+    }
+
+    .result-box {
+      display: none;
+      margin-top: 15px;
+      border: 1px solid rgba(53,212,154,.25);
+      background: rgba(53,212,154,.07);
+      border-radius: 18px;
+      padding: 16px;
+    }
+
+    .result-box h3 {
+      font-size: 15px;
+      margin-bottom: 7px;
+    }
+
+    .result-box p {
+      color: #b5c9c1;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .result-item {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      padding: 13px;
+      margin-bottom: 10px;
+    }
+
+    .result-item strong {
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .result-item small {
+      color: var(--muted);
+      display: block;
+      margin-top: 5px;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 35px 15px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .profile-avatar {
+      width: 65px;
+      height: 65px;
+      border-radius: 50%;
+      background: linear-gradient(135deg,#7951ec,#d946ef);
+      display: grid;
+      place-items: center;
+      font-size: 26px;
+      margin-bottom: 13px;
+      overflow: hidden;
+    }
+
+    .profile-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 20;
+      display: flex;
+      justify-content: space-around;
+      background: rgba(15,13,27,.96);
+      backdrop-filter: blur(18px);
+      border-top: 1px solid var(--border);
+      padding: 10px 3px calc(10px + env(safe-area-inset-bottom));
+    }
+
+    .nav button {
+      flex: 1;
+      color: #77718c;
+      background: transparent;
+      font-size: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .nav button span {
+      font-size: 19px;
+    }
+
+    .nav button.active {
+      color: #c5a7ff;
+    }
+
+    .toast {
+      position: fixed;
+      z-index: 100;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: max-content;
+      max-width: calc(100% - 35px);
+      padding: 12px 16px;
+      border-radius: 13px;
+      background: #29243c;
+      border: 1px solid var(--border);
+      color: white;
+      font-size: 12px;
+      display: none;
+      text-align: center;
+      box-shadow: 0 8px 30px rgba(0,0,0,.3);
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .field {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      padding: 13px;
+      background: #100e1d;
+      color: white;
+      margin-top: 10px;
+      outline: none;
+    }
+
+    .field:focus {
+      border-color: #9b76ef;
+    }
+
+    @media (min-width: 520px) {
+      .app { padding-top: 25px; }
+    }
+  </style>
 </head>
 
 <body>
+
 <div class="app">
 
-<header>
-  <div class="brand">
-    <div class="logo">G</div>
-    <div><h2>GAPCUT AI</h2><small>AI VIDEO STUDIO</small></div>
-  </div>
-  <div class="online">● AI Online</div>
-</header>
-
-<section class="page active" id="home">
-  <div class="hero">
-    <span class="badge">NEXT GENERATION AI</span>
-    <h1>Твой видео-монтажёр на базе AI ✨</h1>
-    <p>Загрузи видео. AI распознает речь и создаст видео с субтитрами.</p>
-    <button class="btn" onclick="go('montage')">🎬 Начать монтаж</button>
-  </div>
-  <div class="section-title">Возможности GAPCUT AI</div>
-  <div class="grid">
-    <div class="feature"><div class="icon3d">🎬</div><b>AI-обработка</b><small>Автоматическая обработка видео</small></div>
-    <div class="feature"><div class="icon3d">💬</div><b>Субтитры</b><small>Распознавание речи</small></div>
-    <div class="feature"><div class="icon3d">🌍</div><b>Языки</b><small>Распознавание речи на разных языках</small></div>
-    <div class="feature"><div class="icon3d">🎙️</div><b>Оформление</b><small>Стили субтитров</small></div>
-  </div>
-  <div class="card">
-    <div class="row between"><b>🚀 Готов создать свой ролик?</b><span class="badge">AI STUDIO</span></div>
-    <p class="muted" style="font-size:12px">Загрузи видео и получи готовый ролик с субтитрами.</p>
-    <button class="btn" onclick="go('montage')">Создать проект →</button>
-  </div>
-</section>
-
-<section class="page" id="invite">
-  <h1>Пригласить друзей</h1>
-  <p class="muted">Поделись GAPCUT AI с друзьями.</p>
-  <div class="card">
-    <div class="profile-center">
-      <div class="icon3d" style="width:70px;height:70px;font-size:36px">🎁</div>
-      <h2 style="margin:0">Приглашай друзей!</h2>
-      <p class="muted" style="font-size:12px">Отправь свою персональную ссылку друзьям.</p>
-    </div>
-    <div class="section-title">Твоя ссылка приглашения</div>
-    <div class="invite-link" id="inviteLink">Ссылка появится после настройки</div>
-    <button class="btn" style="margin-top:12px" onclick="copyInvite()">📋 Скопировать ссылку</button>
-    <button class="btn secondary" onclick="shareInvite()">↗ Поделиться</button>
-  </div>
-  <div class="card">
-    <b>Как это работает?</b>
-    <div class="plan">1. Скопируй свою ссылку.</div>
-    <div class="plan">2. Отправь её друзьям.</div>
-    <div class="plan">3. Друзья переходят по ней.</div>
-    <p class="note">Подсчёт приглашённых пользователей пока не подключён.</p>
-  </div>
-</section>
-
-<section class="page" id="montage">
-  <h1>Новый монтаж 🎬</h1>
-  <p class="muted">Загрузи видео продолжительностью не более 2 минут.</p>
-
-  <div class="card">
-    <div class="section-title">01 · Загрузить видео</div>
-    <label class="upload" for="videoInput">
-      <div class="big">☁️</div>
-      <b>Нажми, чтобы выбрать видео</b>
-      <small>MP4 · MOV · WEBM · MKV · До 2 минут</small>
-    </label>
-    <input id="videoInput" type="file" accept="video/*">
-    <div id="fileInfo" class="file-info"></div>
-  </div>
-
-  <div class="card">
-    <div class="section-title">02 · Что нужно сделать?</div>
-    <div class="task-grid" id="tasks">
-      <button class="task active" data-value="Полный AI-монтаж"><span>🎬</span><b>Полный монтаж</b><small>Видео с субтитрами</small></button>
-      <button class="task" data-value="Субтитры"><span>💬</span><b>Субтитры</b><small>Распознавание речи</small></button>
-      <button class="task" data-value="Перевод субтитров"><span>🌍</span><b>Перевод</b><small>Пока недоступен</small></button>
-      <button class="task" data-value="Очистка звука"><span>🎙️</span><b>Очистка звука</b><small>Пока недоступна</small></button>
-    </div>
-    <p class="note">Сейчас сервер выполняет распознавание речи и создание субтитров. Перевод и очистка звука ещё не подключены.</p>
-  </div>
-
-  <div class="card">
-    <div class="section-title">03 · Стиль субтитров</div>
-    <div class="task-grid" id="styles">
-      <button class="task active" data-value="Viral Reels"><span>🔥</span><b>Viral Reels</b><small>Динамичный</small></button>
-      <button class="task" data-value="Cinematic"><span>🎥</span><b>Cinematic</b><small>Киношный</small></button>
-      <button class="task" data-value="Podcast"><span>🎙️</span><b>Podcast</b><small>Интервью</small></button>
-      <button class="task" data-value="AI Auto"><span>✨</span><b>AI Auto</b><small>Автоматический</small></button>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="section-title">04 · Формат видео</div>
-    <div class="task-grid" id="formats">
-      <button class="task active" data-value="9:16"><span>📱</span><b>9:16</b><small>Reels / TikTok</small></button>
-      <button class="task" data-value="16:9"><span>🖥️</span><b>16:9</b><small>YouTube</small></button>
-      <button class="task" data-value="1:1"><span>⬜</span><b>1:1</b><small>Instagram</small></button>
-    </div>
-  </div>
-
-  <button class="btn" onclick="preparePreview()">✨ Подготовить монтаж</button>
-
-  <div id="previewSection" class="hidden">
-    <div class="section-title">05 · Предварительный просмотр</div>
-    <div class="card">
-      <div class="row between"><b>📝 Пример субтитров</b><span class="badge">PREVIEW</span></div>
-      <div class="preview">
-        <h2 id="previewTitle">ТВОЯ ИСТОРИЯ НАЧИНАЕТСЯ ЗДЕСЬ...</h2>
-        <small>AI SUBTITLE PREVIEW</small>
-      </div>
-      <p class="note">Настоящий текст будет создан после распознавания речи на сервере.</p>
-      <textarea class="textarea" id="subtitleText">Твоя история начинается здесь...</textarea>
-      <button class="btn secondary" onclick="updatePreview()">Обновить текст</button>
-    </div>
-    <div class="card">
-      <b>⚙️ Настройки проекта</b>
-      <p class="muted" id="summary" style="font-size:12px"></p>
-    </div>
-    <button class="btn" id="confirmButton" onclick="confirmMontage()">✅ Подтвердить обработку</button>
-    <button class="btn secondary" onclick="$('previewSection').classList.add('hidden')">Изменить настройки</button>
-  </div>
-
-  <div id="processing" class="card hidden">
-    <div style="font-size:32px">🤖</div>
-    <h3 id="processingTitle">AI обрабатывает видео...</h3>
-    <p class="note" id="processingMessage">Подготавливаем видео...</p>
-    <div class="progress-track"><div id="uploadProgress" class="progress-fill"></div></div>
-    <b id="progressText">0%</b>
-    <div id="downloadResult" class="hidden" style="margin-top:16px">
-      <span class="badge">✓ Видео готово</span>
-      <button class="btn" id="downloadButton" style="margin-top:12px">⬇️ Скачать видео</button>
-      <button class="btn secondary" onclick="go('results')">🎞️ Мои результаты</button>
-    </div>
-  </div>
-</section>
-
-<section class="page" id="results">
-  <h1>Мои результаты</h1>
-  <p class="muted">Здесь хранятся готовые видео.</p>
-  <div class="card">
-    <div class="row between"><b>🎬 История проектов</b><span class="badge">7 дней хранения</span></div>
-    <div id="resultsList">
-      <div class="empty">
-        <div style="font-size:42px">🎞️</div>
-        <b>Пока нет результатов</b>
-        <p class="note">После обработки видео появятся здесь.</p>
-        <button class="btn" onclick="go('montage')">Создать первый проект</button>
+  <header class="header">
+    <div class="brand">
+      <div class="logo">G</div>
+      <div>
+        <div class="brand-name">GAPCUT <span class="gradient-text">AI</span></div>
+        <div class="brand-sub">Умный видеомонтаж</div>
       </div>
     </div>
-  </div>
-  <p class="note">Результаты хранятся локально на устройстве. При очистке данных приложения они могут быть потеряны.</p>
-</section>
+    <div class="status">● AI ONLINE</div>
+  </header>
 
-<section class="page" id="profile">
-  <h1>Мой профиль</h1>
-  <div class="card">
-    <div class="profile-center">
-      <div class="avatar" id="avatarView">👤</div>
-      <label class="badge" for="avatarInput" style="cursor:pointer">📷 Изменить фото</label>
-      <input type="file" id="avatarInput" accept="image/*">
-      <h2 id="profileHeading" style="margin:4px 0">Пользователь GAPCUT</h2>
-      <span class="badge">GAPCUT AI MEMBER</span>
+  <!-- HOME -->
+  <section class="page active" id="page-home">
+
+    <div class="welcome">
+      <h1>Твой видеомонтаж с помощью <span class="gradient-text">AI</span></h1>
+      <p>Загрузи видео. Выбери стиль. Получи готовое видео с автоматически созданными субтитрами.</p>
     </div>
-    <div class="section-title">Имя пользователя</div>
-    <input class="field" id="profileName" placeholder="Введите своё имя">
-    <button class="btn" style="margin-top:12px" onclick="saveProfile()">Сохранить профиль</button>
-  </div>
-  <div class="card">
-    <b>📦 Хранение результатов</b>
-    <p class="muted" style="font-size:12px">Готовые видео доступны в течение 7 дней в локальном хранилище.</p>
-    <div class="row between"><span class="note">Срок хранения</span><b>7 дней</b></div>
-  </div>
-  <div class="card">
-    <b>О приложении</b>
-    <p class="note">GAPCUT AI — помощник для распознавания речи и создания субтитров в видео.</p>
-    <span class="badge">Version 2.0</span>
-  </div>
-</section>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0">🎬 Начнём монтаж?</div>
+      <p class="muted">Перейди в раздел «Монтаж», загрузи видео и выбери оформление.</p>
+      <button class="primary-btn" onclick="showPage('montage')">Начать монтаж →</button>
+    </div>
+
+    <div class="section-title">Возможности GAPCUT AI</div>
+
+    <div class="option-grid">
+      <div class="option">
+        <span class="emoji">🎙️</span>
+        <strong>AI-субтитры</strong>
+        <small>Распознавание речи в видео</small>
+      </div>
+      <div class="option">
+        <span class="emoji">✨</span>
+        <strong>Стили текста</strong>
+        <small>Оформление субтитров</small>
+      </div>
+      <div class="option">
+        <span class="emoji">📱</span>
+        <strong>Формат Reels</strong>
+        <small>Вертикальный формат 9:16</small>
+      </div>
+      <div class="option">
+        <span class="emoji">⚡</span>
+        <strong>AI-обработка</strong>
+        <small>Автоматическая обработка видео</small>
+      </div>
+    </div>
+
+    <div class="notice">
+      Поддержка видео до 300 MB и продолжительностью до 2 минут. Фактическая возможность загрузки также зависит от ограничений сервера.
+    </div>
+
+  </section>
+
+  <!-- INVITE -->
+  <section class="page" id="page-invite">
+
+    <div class="welcome">
+      <h1>Приглашай друзей 🤝</h1>
+      <p>Поделись GAPCUT AI с друзьями и расскажи им о возможностях AI-монтажа.</p>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0">Твоя ссылка</div>
+      <p class="muted">Поделись ссылкой на Mini App.</p>
+      <input class="field" id="inviteLink" readonly>
+      <button class="primary-btn" onclick="copyInvite()">Копировать ссылку</button>
+      <button class="secondary-btn" onclick="shareInvite()">Поделиться</button>
+    </div>
+
+    <div class="notice">
+      Внимание: система реферального учёта приглашённых пользователей пока не подключена. Эта ссылка предназначена для обычного приглашения.
+    </div>
+
+  </section>
+
+  <!-- MONTAGE -->
+  <section class="page" id="page-montage">
+
+    <div class="welcome">
+      <h1>AI <span class="gradient-text">Монтаж</span></h1>
+      <p>Загрузи исходное видео и настрой обработку.</p>
+    </div>
+
+    <div class="section-title">1. Загрузи видео</div>
+
+    <div class="upload-box" onclick="document.getElementById('videoInput').click()">
+      <div class="upload-icon">📤</div>
+      <h3>Нажми, чтобы выбрать видео</h3>
+      <p>MP4, MOV, WEBM, MKV<br>Максимум 300 MB · До 2 минут</p>
+    </div>
+
+    <input
+      type="file"
+      id="videoInput"
+      accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mp4,.mov,.webm,.mkv"
+      hidden
+    >
+
+    <div class="file-info" id="fileInfo">
+      <strong id="fileName"></strong>
+      <span id="fileSize"></span>
+      <span id="fileDuration"></span>
+      <button class="secondary-btn" onclick="removeVideo()">Удалить видео</button>
+    </div>
+
+    <div class="section-title">2. Выбери стиль субтитров</div>
+
+    <div class="option-grid" id="styleOptions">
+
+      <button class="option selected" data-value="viral" onclick="selectStyle(this)">
+        <span class="emoji">🔥</span>
+        <strong>Viral Reels</strong>
+        <small>Яркий стиль для Reels и TikTok</small>
+      </button>
+
+      <button class="option" data-value="cinema" onclick="selectStyle(this)">
+        <span class="emoji">🎬</span>
+        <strong>Cinematic</strong>
+        <small>Кинематографичный стиль</small>
+      </button>
+
+      <button class="option" data-value="podcast" onclick="selectStyle(this)">
+        <span class="emoji">🎙️</span>
+        <strong>Podcast</strong>
+        <small>Для разговорных видео</small>
+      </button>
+
+      <button class="option" data-value="classic" onclick="selectStyle(this)">
+        <span class="emoji">📝</span>
+        <strong>AI Auto</strong>
+        <small>Автоматическое оформление</small>
+      </button>
+
+    </div>
+
+    <div class="section-title">3. Формат видео</div>
+
+    <div class="format-grid" id="formatOptions">
+
+      <button class="format selected" data-value="9:16" onclick="selectFormat(this)">
+        <span class="shape">▯</span>
+        <strong>9:16</strong>
+        <small>Reels / TikTok</small>
+      </button>
+
+      <button class="format" data-value="16:9" onclick="selectFormat(this)">
+        <span class="shape">▭</span>
+        <strong>16:9</strong>
+        <small>YouTube</small>
+      </button>
+
+      <button class="format" data-value="1:1" onclick="selectFormat(this)">
+        <span class="shape">□</span>
+        <strong>1:1</strong>
+        <small>Instagram</small>
+      </button>
+
+    </div>
+
+    <div class="section-title">4. Дополнительные функции</div>
+
+    <div class="option-grid">
+      <div class="option disabled-option">
+        <span class="emoji">🌍</span>
+        <strong>Перевод субтитров</strong>
+        <small>Пока не подключён</small>
+      </div>
+
+      <div class="option disabled-option">
+        <span class="emoji">🔊</span>
+        <strong>Очистка звука</strong>
+        <small>Пока не подключена</small>
+      </div>
+    </div>
+
+    <div class="notice">
+      Сейчас доступна обработка видео с распознаванием речи и добавлением субтитров. Перевод и очистка звука пока не реализованы.
+    </div>
+
+    <button class="primary-btn" id="processBtn" onclick="startMontage()">
+      ✨ Начать AI-монтаж
+    </button>
+
+    <div class="progress-card card" id="progressCard">
+      <div class="progress-head">
+        <strong id="progressTitle">Подготовка...</strong>
+        <span id="progressPercent">0%</span>
+      </div>
+
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+
+      <div class="progress-note" id="progressNote">
+        Подготовка видео к отправке.
+      </div>
+    </div>
+
+    <div class="result-box" id="resultBox">
+      <h3>✅ Видео готово!</h3>
+      <p id="resultMessage">Обработка завершена.</p>
+      <button class="primary-btn" id="downloadBtn">⬇️ Скачать видео</button>
+      <button class="secondary-btn" onclick="showPage('results')">Открыть результаты</button>
+    </div>
+
+  </section>
+
+  <!-- RESULTS -->
+  <section class="page" id="page-results">
+
+    <div class="welcome">
+      <h1>Твои <span class="gradient-text">результаты</span></h1>
+      <p>Здесь отображаются видео, обработанные в этом Mini App на данном устройстве.</p>
+    </div>
+
+    <div id="resultsList"></div>
+
+  </section>
+
+  <!-- PROFILE -->
+  <section class="page" id="page-profile">
+
+    <div class="welcome">
+      <h1>Профиль</h1>
+      <p>Информация о твоём аккаунте GAPCUT AI.</p>
+    </div>
+
+    <div class="card">
+      <div class="profile-avatar" id="profileAvatar">👤</div>
+      <h3 id="profileName">Пользователь GAPCUT</h3>
+      <p class="muted" id="profileId">Telegram Mini App</p>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0">О приложении</div>
+      <p class="muted">GAPCUT AI — инструмент автоматической обработки видео и создания субтитров.</p>
+      <p class="muted" style="margin-top:10px">Версия интерфейса: 2.1.0</p>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0">Поддержка</div>
+      <p class="muted">Если возникла проблема, свяжись с поддержкой.</p>
+      <button class="primary-btn" onclick="openSupport()">Написать в поддержку</button>
+    </div>
+
+  </section>
 
 </div>
 
+<!-- NAVIGATION -->
 <nav class="nav">
-  <button class="active" data-page="home" onclick="go('home')"><span class="nav-icon">🏠</span>Главная</button>
-  <button data-page="invite" onclick="go('invite')"><span class="nav-icon">🎁</span>Пригласить</button>
-  <button data-page="montage" onclick="go('montage')"><span class="nav-icon">✂️</span>Монтаж</button>
-  <button data-page="results" onclick="go('results')"><span class="nav-icon">🎞️</span>Результаты</button>
-  <button data-page="profile" onclick="go('profile')"><span class="nav-icon">👤</span>Профиль</button>
+  <button class="active" data-page="home" onclick="showPage('home')">
+    <span>⌂</span>Главная
+  </button>
+  <button data-page="invite" onclick="showPage('invite')">
+    <span>♧</span>Пригласить
+  </button>
+  <button data-page="montage" onclick="showPage('montage')">
+    <span>✂</span>Монтаж
+  </button>
+  <button data-page="results" onclick="showPage('results')">
+    <span>▣</span>Результаты
+  </button>
+  <button data-page="profile" onclick="showPage('profile')">
+    <span>♙</span>Профиль
+  </button>
 </nav>
 
 <div class="toast" id="toast"></div>
 
 <script>
-const $ = id => document.getElementById(id);
+"use strict";
 
-let selectedTask = "Полный AI-монтаж";
-let selectedStyle = "Viral Reels";
-let selectedFormat = "9:16";
-let selectedFile = null;
-let currentDownloadUrl = null;
+/* ==============================
+   CONFIGURATION
+============================== */
 
 const API_URL = "https://gapcut-ai.onrender.com";
-const MAX_DURATION_SECONDS = 120;
+const SUPPORT_URL = "https://t.me/aikomron";
 
-if(window.Telegram?.WebApp){
-  Telegram.WebApp.ready();
-  Telegram.WebApp.expand();
+const MAX_FILE_SIZE = 300 * 1024 * 1024;
+const MAX_DURATION = 120;
+const REQUEST_TIMEOUT = 15 * 60 * 1000;
+const DATABASE_NAME = "gapcut_ai_db";
+const DATABASE_VERSION = 1;
+const STORE_NAME = "results";
+
+const tg = window.Telegram?.WebApp;
+
+if (tg) {
+  tg.ready();
+  tg.expand();
+
+  try {
+    tg.setHeaderColor("#090812");
+    tg.setBackgroundColor("#090812");
+  } catch (e) {}
 }
 
-function go(page){
-  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-  $(page).classList.add("active");
-  document.querySelectorAll(".nav button").forEach(b=>{
-    b.classList.toggle("active",b.dataset.page===page);
+/* ==============================
+   APP STATE
+============================== */
+
+let selectedFile = null;
+let selectedDuration = 0;
+let selectedStyle = "viral";
+let selectedFormat = "9:16";
+
+let currentResultUrl = null;
+let currentResultBlob = null;
+let currentRequest = null;
+let isProcessing = false;
+
+let databasePromise = null;
+
+/* ==============================
+   HELPERS
+============================== */
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return "Неизвестный размер";
+
+  if (bytes < 1024 * 1024) {
+    return (bytes / 1024).toFixed(1) + " KB";
+  }
+
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function formatDuration(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+
+  return mins + ":" + String(secs).padStart(2, "0");
+}
+
+function showToast(message) {
+  const toast = document.getElementById("toast");
+
+  toast.textContent = message;
+  toast.style.display = "block";
+
+  clearTimeout(showToast.timer);
+
+  showToast.timer = setTimeout(() => {
+    toast.style.display = "none";
+  }, 3000);
+}
+
+function showPage(name) {
+  document.querySelectorAll(".page").forEach(page => {
+    page.classList.remove("active");
   });
-  window.scrollTo({top:0,behavior:"smooth"});
-  if(page==="results") renderResults();
-  if(page==="invite") makeInviteLink();
-}
 
-function toast(message){
-  const el=$("toast");
-  el.textContent=message;
-  el.style.display="block";
-  clearTimeout(window.toastTimer);
-  window.toastTimer=setTimeout(()=>el.style.display="none",3000);
-}
-
-function setupGroup(id,callback){
-  $(id).querySelectorAll(".task").forEach(btn=>{
-    btn.addEventListener("click",()=>{
-      $(id).querySelectorAll(".task").forEach(x=>x.classList.remove("active"));
-      btn.classList.add("active");
-      callback(btn.dataset.value);
-    });
+  document.querySelectorAll(".nav button").forEach(button => {
+    button.classList.toggle(
+      "active",
+      button.dataset.page === name
+    );
   });
+
+  const target = document.getElementById("page-" + name);
+
+  if (target) {
+    target.classList.add("active");
+  }
+
+  if (name === "results") {
+    renderResults();
+  }
+
+  if (name === "profile") {
+    updateProfile();
+  }
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-setupGroup("tasks",v=>selectedTask=v);
-setupGroup("styles",v=>selectedStyle=v);
-setupGroup("formats",v=>selectedFormat=v);
+function setProgress(percent, title, note) {
+  const value = Math.max(0, Math.min(100, percent));
 
-function getVideoDuration(file){
-  return new Promise((resolve,reject)=>{
-    const video=document.createElement("video");
-    const url=URL.createObjectURL(file);
-    video.preload="metadata";
-    video.onloadedmetadata=()=>{
-      const duration=video.duration;
+  document.getElementById("progressFill").style.width = value + "%";
+  document.getElementById("progressPercent").textContent =
+    Math.round(value) + "%";
+
+  document.getElementById("progressTitle").textContent = title;
+  document.getElementById("progressNote").textContent = note;
+}
+
+/* ==============================
+   FILE SELECTION
+============================== */
+
+const videoInput = document.getElementById("videoInput");
+
+videoInput.addEventListener("change", async event => {
+  const file = event.target.files?.[0];
+
+  if (!file) return;
+
+  if (!file.type.startsWith("video/") &&
+      !/\.(mp4|mov|webm|mkv)$/i.test(file.name)) {
+    showToast("Выбери видеофайл.");
+    videoInput.value = "";
+    return;
+  }
+
+  if (file.size > MAX_FILE_SIZE) {
+    showToast("Размер видео превышает 300 MB.");
+    videoInput.value = "";
+    return;
+  }
+
+  if (file.size === 0) {
+    showToast("Файл пустой.");
+    videoInput.value = "";
+    return;
+  }
+
+  try {
+    const duration = await getVideoDuration(file);
+
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error("Не удалось определить длительность видео.");
+    }
+
+    if (duration > MAX_DURATION) {
+      showToast("Максимальная длительность — 2 минуты.");
+      videoInput.value = "";
+      return;
+    }
+
+    selectedFile = file;
+    selectedDuration = duration;
+
+    document.getElementById("fileInfo").style.display = "block";
+    document.getElementById("fileName").textContent = file.name;
+    document.getElementById("fileSize").textContent =
+      "Размер: " + formatBytes(file.size);
+    document.getElementById("fileDuration").textContent =
+      "Длительность: " + formatDuration(duration);
+
+    hidePreviousResult();
+
+    showToast("Видео успешно выбрано.");
+
+  } catch (error) {
+    showToast(error.message || "Не удалось открыть видео.");
+    videoInput.value = "";
+  }
+});
+
+function getVideoDuration(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+
+    video.preload = "metadata";
+    video.muted = true;
+
+    const cleanup = () => {
       URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      video.load();
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Не удалось прочитать видео. Попробуй другой файл."));
+    }, 20000);
+
+    video.onloadedmetadata = () => {
+      clearTimeout(timer);
+      const duration = video.duration;
+      cleanup();
       resolve(duration);
     };
-    video.onerror=()=>{
-      URL.revokeObjectURL(url);
-      reject(new Error("Не удалось прочитать видео"));
+
+    video.onerror = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(new Error("Не удалось прочитать этот видеофайл."));
     };
-    video.src=url;
+
+    video.src = url;
   });
 }
 
-$("videoInput").addEventListener("change",async e=>{
-  const file=e.target.files[0];
-  if(!file)return;
-
-  selectedFile=null;
-  $("fileInfo").textContent="Проверяем видео...";
-
-  if(!file.type.startsWith("video/")){
-    $("fileInfo").textContent="";
-    toast("Выбери видеофайл");
-    e.target.value="";
+function removeVideo() {
+  if (isProcessing) {
+    showToast("Дождись завершения обработки.");
     return;
   }
 
-  try{
-    const duration=await getVideoDuration(file);
+  selectedFile = null;
+  selectedDuration = 0;
+  videoInput.value = "";
 
-    if(duration>MAX_DURATION_SECONDS){
-      $("fileInfo").textContent="";
-      toast("Максимальная длительность видео — 2 минуты");
-      e.target.value="";
+  document.getElementById("fileInfo").style.display = "none";
+
+  showToast("Видео удалено.");
+}
+
+/* ==============================
+   OPTIONS
+============================== */
+
+function selectStyle(element) {
+  document.querySelectorAll("#styleOptions .option").forEach(option => {
+    option.classList.remove("selected");
+  });
+
+  element.classList.add("selected");
+  selectedStyle = element.dataset.value;
+}
+
+function selectFormat(element) {
+  document.querySelectorAll("#formatOptions .format").forEach(option => {
+    option.classList.remove("selected");
+  });
+
+  element.classList.add("selected");
+  selectedFormat = element.dataset.value;
+}
+
+/* ==============================
+   TELEGRAM AUTH
+============================== */
+
+function getTelegramInitData() {
+  if (!tg || !tg.initData) {
+    return "";
+  }
+
+  return tg.initData;
+}
+
+/* ==============================
+   DATABASE
+============================== */
+
+function openDatabase() {
+  if (databasePromise) return databasePromise;
+
+  databasePromise = new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB недоступен."));
       return;
     }
 
-    selectedFile=file;
-    $("fileInfo").textContent=
-      "✓ "+file.name+
-      " · "+(file.size/1024/1024).toFixed(1)+" MB"+
-      " · "+Math.floor(duration)+" сек.";
-  }catch(error){
-    $("fileInfo").textContent="";
-    toast("Не удалось прочитать видео");
-    e.target.value="";
-  }
-});
+    const request = indexedDB.open(
+      DATABASE_NAME,
+      DATABASE_VERSION
+    );
 
-function preparePreview(){
-  if(!selectedFile){
-    toast("Сначала загрузи видео");
-    return;
-  }
+    request.onupgradeneeded = event => {
+      const db = event.target.result;
 
-  $("summary").textContent=
-    selectedTask+" · "+selectedStyle+" · "+selectedFormat+
-    " · Максимум 2 минуты";
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, {
+          keyPath: "id",
+          autoIncrement: true
+        });
 
-  $("previewSection").classList.remove("hidden");
-  $("processing").classList.add("hidden");
-  $("previewSection").scrollIntoView({behavior:"smooth"});
+        store.createIndex("createdAt", "createdAt");
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+
+    request.onerror = () => {
+      databasePromise = null;
+      reject(request.error || new Error("Ошибка базы данных."));
+    };
+  });
+
+  return databasePromise;
 }
 
-function updatePreview(){
-  const text=$("subtitleText").value.trim();
-  $("previewTitle").textContent=text||"ТЕКСТ НЕ ДОБАВЛЕН";
-  toast("Текст обновлён");
-}
+async function saveResult(blob, filename) {
+  try {
+    const db = await openDatabase();
 
-async function confirmMontage(){
-  if(!selectedFile){
-    toast("Сначала загрузи видео");
-    return;
-  }
-
-  const tg=window.Telegram?.WebApp;
-  const initData=tg?.initData||"";
-
-  if(!initData){
-    toast("Открой приложение через Telegram-бота");
-    return;
-  }
-
-  if(!navigator.onLine){
-    toast("Нет подключения к интернету");
-    return;
-  }
-
-  const styleMap={
-    "Viral Reels":"viral",
-    "Cinematic":"cinema",
-    "Podcast":"podcast",
-    "AI Auto":"creator"
-  };
-
-  const form=new FormData();
-  form.append("file",selectedFile,selectedFile.name);
-  form.append("style",styleMap[selectedStyle]||"viral");
-  form.append("language","tg");
-  form.append("video_format",selectedFormat);
-  form.append("init_data",initData);
-
-  $("processing").classList.remove("hidden");
-  $("downloadResult").classList.add("hidden");
-  $("confirmButton").disabled=true;
-  $("confirmButton").textContent="⏳ Обработка...";
-  $("processingTitle").textContent="AI обрабатывает видео...";
-  $("processingMessage").textContent="Отправляем видео на сервер...";
-  $("progressText").textContent="0%";
-  $("uploadProgress").style.width="0%";
-  $("processing").scrollIntoView({behavior:"smooth"});
-
-  const xhr=new XMLHttpRequest();
-  xhr.open("POST",API_URL+"/api/process");
-  xhr.responseType="blob";
-  xhr.timeout=15*60*1000;
-
-  xhr.upload.onprogress=event=>{
-    if(event.lengthComputable){
-      const percent=Math.round(event.loaded/event.total*100);
-      $("uploadProgress").style.width=percent+"%";
-      $("progressText").textContent=percent+"%";
-      $("processingMessage").textContent=
-        percent>=100
-        ?"Видео загружено. AI распознаёт речь и создаёт субтитры..."
-        :"Загрузка видео на сервер...";
-    }
-  };
-
-  xhr.onload=async()=>{
-    $("confirmButton").disabled=false;
-    $("confirmButton").textContent="✅ Подтвердить обработку";
-
-    const contentType=xhr.getResponseHeader("content-type")||"";
-
-    if(xhr.status>=200&&xhr.status<300&&
-       (contentType.includes("video/")||contentType.includes("application/octet-stream"))){
-
-      $("processingTitle").textContent="🎉 Видео готово!";
-      $("processingMessage").textContent="Обработка завершена. Видео можно скачать.";
-      $("progressText").textContent="100%";
-      $("uploadProgress").style.width="100%";
-
-      const file=new File(
-        [xhr.response],
-        "GAPCUT_AI_"+Date.now()+".mp4",
-        {type:"video/mp4"}
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(
+        STORE_NAME,
+        "readwrite"
       );
 
-      await saveResult(file);
+      const store = transaction.objectStore(STORE_NAME);
 
-      if(currentDownloadUrl)URL.revokeObjectURL(currentDownloadUrl);
-      currentDownloadUrl=URL.createObjectURL(file);
+      store.add({
+        filename,
+        blob,
+        createdAt: Date.now(),
+        size: blob.size
+      });
 
-      $("downloadButton").onclick=()=>{
-        const a=document.createElement("a");
-        a.href=currentDownloadUrl;
-        a.download=file.name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+      transaction.oncomplete = () => resolve(true);
+
+      transaction.onerror = () => {
+        reject(transaction.error || new Error("Ошибка сохранения."));
       };
 
-      $("downloadResult").classList.remove("hidden");
-      toast("Видео успешно обработано!");
+      transaction.onabort = () => {
+        reject(transaction.error || new Error("Сохранение отменено."));
+      };
+    });
 
-    }else{
-      let message="Ошибка обработки видео. Попробуй ещё раз.";
-
-      try{
-        const errorText=await xhr.response.text();
-        const errorData=JSON.parse(errorText);
-        message=errorData.detail||message;
-      }catch(e){}
-
-      $("processingTitle").textContent="Не удалось обработать видео";
-      $("processingMessage").textContent=message;
-      toast(message);
-    }
-  };
-
-  xhr.onerror=()=>{
-    $("confirmButton").disabled=false;
-    $("confirmButton").textContent="✅ Подтвердить обработку";
-    $("processingTitle").textContent="Ошибка соединения";
-    $("processingMessage").textContent="Проверь интернет и попробуй снова.";
-    toast("Ошибка соединения с сервером");
-  };
-
-  xhr.ontimeout=()=>{
-    $("confirmButton").disabled=false;
-    $("confirmButton").textContent="✅ Подтвердить обработку";
-    $("processingTitle").textContent="Превышено время ожидания";
-    $("processingMessage").textContent="Попробуй ещё раз или выбери видео поменьше.";
-    toast("Время обработки истекло");
-  };
-
-  xhr.send(form);
-}
-
-/* IndexedDB: хранение результатов 7 дней */
-const DB_NAME="gapcut_ai_db";
-const STORE="results";
-let db;
-
-function openDB(){
-  return new Promise((resolve,reject)=>{
-    const request=indexedDB.open(DB_NAME,1);
-    request.onupgradeneeded=()=>{
-      request.result.createObjectStore(STORE,{keyPath:"id"});
-    };
-    request.onsuccess=()=>resolve(request.result);
-    request.onerror=()=>reject(request.error);
-  });
-}
-
-async function cleanExpired(){
-  try{
-    db=db||await openDB();
-    const tx=db.transaction(STORE,"readwrite");
-    const store=tx.objectStore(STORE);
-    const req=store.getAll();
-
-    req.onsuccess=()=>{
-      const now=Date.now();
-      req.result.forEach(item=>{
-        if(now-item.createdAt>=7*24*60*60*1000){
-          store.delete(item.id);
-        }
-      });
-    };
-  }catch(e){
-    console.log("Storage cleanup:",e);
+  } catch (error) {
+    console.warn("Не удалось сохранить результат:", error);
+    return false;
   }
 }
 
-async function saveResult(file){
-  try{
-    db=db||await openDB();
+async function getAllResults() {
+  try {
+    const db = await openDatabase();
 
-    const item={
-      id:Date.now().toString(),
-      name:file.name,
-      blob:file,
-      createdAt:Date.now(),
-      task:selectedTask,
-      style:selectedStyle,
-      format:selectedFormat
-    };
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(
+        STORE_NAME,
+        "readonly"
+      );
 
-    await new Promise((resolve,reject)=>{
-      const tx=db.transaction(STORE,"readwrite");
-      tx.objectStore(STORE).put(item);
-      tx.oncomplete=resolve;
-      tx.onerror=()=>reject(tx.error);
+      const request = transaction.objectStore(STORE_NAME).getAll();
+
+      request.onsuccess = () => {
+        const items = request.result || [];
+        items.sort((a, b) => b.createdAt - a.createdAt);
+        resolve(items);
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+
+  } catch (error) {
+    console.warn(error);
+    return [];
+  }
+}
+
+async function deleteResult(id) {
+  try {
+    const db = await openDatabase();
+
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(
+        STORE_NAME,
+        "readwrite"
+      );
+
+      transaction.objectStore(STORE_NAME).delete(id);
+
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
     });
 
     renderResults();
-  }catch(e){
-    console.log(e);
-    toast("Не удалось сохранить результат на устройстве");
+
+  } catch (error) {
+    showToast("Не удалось удалить результат.");
   }
 }
 
-async function renderResults(){
-  await cleanExpired();
+/* ==============================
+   RESULT DISPLAY
+============================== */
 
-  try{
-    db=db||await openDB();
+function hidePreviousResult() {
+  document.getElementById("resultBox").style.display = "none";
 
-    const items=await new Promise((resolve,reject)=>{
-      const req=db.transaction(STORE).objectStore(STORE).getAll();
-      req.onsuccess=()=>resolve(req.result);
-      req.onerror=()=>reject(req.error);
-    });
-
-    const list=$("resultsList");
-    list.innerHTML="";
-
-    if(!items.length){
-      list.innerHTML=
-        '<div class="empty"><div style="font-size:42px">🎞️</div>'+
-        '<b>Пока нет результатов</b>'+
-        '<p class="note">Готовые видео появятся здесь.</p>'+
-        '<button class="btn" onclick="go(\'montage\')">Создать проект</button></div>';
-      return;
-    }
-
-    items.sort((a,b)=>b.createdAt-a.createdAt);
-
-    items.forEach(item=>{
-      const days=Math.max(0,7-Math.floor((Date.now()-item.createdAt)/86400000));
-      const url=URL.createObjectURL(item.blob);
-
-      const div=document.createElement("div");
-      div.className="result-item";
-
-      div.innerHTML=`
-        <div class="result-thumb"><video muted playsinline></video></div>
-        <div class="result-info">
-          <b></b>
-          <small></small>
-          <small>Удаление через ${days} дн.</small>
-          <a class="badge" download style="display:inline-block;margin-top:7px;text-decoration:none" href="${url}">Скачать</a>
-        </div>
-        <button class="delete-btn">Удалить</button>`;
-
-      div.querySelector("video").src=url;
-      div.querySelector(".result-info b").textContent=item.name;
-      div.querySelector(".result-info small").textContent=
-        item.task+" · "+item.style+" · "+item.format;
-
-      div.querySelector(".delete-btn").onclick=()=>deleteResult(item.id);
-      list.appendChild(div);
-    });
-  }catch(e){
-    console.log("Results error:",e);
+  if (currentResultUrl) {
+    URL.revokeObjectURL(currentResultUrl);
+    currentResultUrl = null;
   }
+
+  currentResultBlob = null;
 }
 
-async function deleteResult(id){
-  db=db||await openDB();
-  const tx=db.transaction(STORE,"readwrite");
-  tx.objectStore(STORE).delete(id);
-  tx.oncomplete=()=>{
-    toast("Результат удалён");
-    renderResults();
+function showResult(blob, filename) {
+  hidePreviousResult();
+
+  currentResultBlob = blob;
+  currentResultUrl = URL.createObjectURL(blob);
+
+  const downloadBtn = document.getElementById("downloadBtn");
+
+  downloadBtn.onclick = () => {
+    downloadBlob(currentResultBlob, filename);
   };
+
+  document.getElementById("resultMessage").textContent =
+    "Обработка завершена. Размер файла: " + formatBytes(blob.size);
+
+  document.getElementById("resultBox").style.display = "block";
 }
 
-/* Профиль */
-function loadProfile(){
-  const name=localStorage.getItem("gapcut_name")||"Пользователь GAPCUT";
-  $("profileName").value=name;
-  $("profileHeading").textContent=name;
-
-  const photo=localStorage.getItem("gapcut_avatar");
-  if(photo)$("avatarView").innerHTML='<img src="'+photo+'" alt="Avatar">';
-}
-
-function saveProfile(){
-  const name=$("profileName").value.trim()||"Пользователь GAPCUT";
-  localStorage.setItem("gapcut_name",name);
-  $("profileHeading").textContent=name;
-  toast("Профиль сохранён");
-}
-
-$("avatarInput").addEventListener("change",e=>{
-  const file=e.target.files[0];
-  if(!file)return;
-
-  if(!file.type.startsWith("image/")){
-    toast("Выбери изображение");
+function downloadBlob(blob, filename) {
+  if (!blob) {
+    showToast("Файл недоступен.");
     return;
   }
 
-  const reader=new FileReader();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
 
-  reader.onload=()=>{
-    const img=new Image();
+  link.href = url;
+  link.download = filename || "gapcut-ai-video.mp4";
 
-    img.onload=()=>{
-      const canvas=document.createElement("canvas");
-      const size=250;
-      canvas.width=size;
-      canvas.height=size;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 
-      const ctx=canvas.getContext("2d");
-      const scale=Math.max(size/img.width,size/img.height);
-      const w=img.width*scale;
-      const h=img.height*scale;
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
 
-      ctx.drawImage(img,(size-w)/2,(size-h)/2,w,h);
+async function renderResults() {
+  const container = document.getElementById("resultsList");
 
-      const data=canvas.toDataURL("image/jpeg",.78);
-      localStorage.setItem("gapcut_avatar",data);
-      $("avatarView").innerHTML='<img src="'+data+'" alt="Avatar">';
-      toast("Фото профиля обновлено");
-    };
+  container.innerHTML = `
+    <div class="empty">Загрузка результатов...</div>
+  `;
 
-    img.src=reader.result;
+  const results = await getAllResults();
+
+  if (!results.length) {
+    container.innerHTML = `
+      <div class="card empty">
+        <div style="font-size:35px;margin-bottom:12px">🎞️</div>
+        Пока нет готовых видео.<br>
+        Обработай первое видео в разделе «Монтаж».
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = "";
+
+  results.forEach(item => {
+    const element = document.createElement("div");
+    element.className = "result-item";
+
+    const title = document.createElement("strong");
+    title.textContent = item.filename || "GAPCUT AI video";
+
+    const details = document.createElement("small");
+    details.textContent =
+      new Date(item.createdAt).toLocaleString("ru-RU") +
+      " · " + formatBytes(item.size || 0);
+
+    const download = document.createElement("button");
+    download.className = "primary-btn";
+    download.textContent = "⬇️ Скачать";
+    download.onclick = () => downloadBlob(
+      item.blob,
+      item.filename
+    );
+
+    const remove = document.createElement("button");
+    remove.className = "secondary-btn";
+    remove.textContent = "Удалить";
+    remove.onclick = () => deleteResult(item.id);
+
+    element.append(title, details, download, remove);
+    container.appendChild(element);
+  });
+}
+
+/* ==============================
+   API ERROR READING
+============================== */
+
+async function readApiError(xhr) {
+  try {
+    let text = "";
+
+    if (xhr.response instanceof Blob) {
+      text = await xhr.response.text();
+    } else if (typeof xhr.response === "string") {
+      text = xhr.response;
+    }
+
+    if (text) {
+      try {
+        const data = JSON.parse(text);
+
+        return (
+          data.detail ||
+          data.message ||
+          data.error ||
+          text
+        );
+      } catch (e) {
+        return text.slice(0, 500);
+      }
+    }
+
+  } catch (error) {
+    console.warn("Ошибка чтения ответа:", error);
+  }
+
+  if (xhr.status === 413) {
+    return "Сервер не принимает файл такого размера.";
+  }
+
+  if (xhr.status === 401 || xhr.status === 403) {
+    return "Ошибка авторизации Telegram. Закрой Mini App и открой его снова через бота.";
+  }
+
+  if (xhr.status === 404) {
+    return "API не нашёл нужный адрес.";
+  }
+
+  if (xhr.status >= 500) {
+    return "Ошибка сервера. Попробуй позже.";
+  }
+
+  return "Не удалось обработать видео. Код: " + xhr.status;
+}
+
+/* ==============================
+   START PROCESSING
+============================== */
+
+async function startMontage() {
+  if (isProcessing) return;
+
+  if (!selectedFile) {
+    showToast("Сначала выбери видео.");
+    return;
+  }
+
+  if (selectedFile.size > MAX_FILE_SIZE) {
+    showToast("Максимальный размер видео — 300 MB.");
+    return;
+  }
+
+  if (selectedDuration > MAX_DURATION) {
+    showToast("Максимальная длительность — 2 минуты.");
+    return;
+  }
+
+  const initData = getTelegramInitData();
+
+  if (!initData) {
+    showToast("Открой приложение через Telegram-бота.");
+    return;
+  }
+
+  if (!navigator.onLine) {
+    showToast("Нет подключения к интернету.");
+    return;
+  }
+
+  isProcessing = true;
+
+  const button = document.getElementById("processBtn");
+  const progressCard = document.getElementById("progressCard");
+
+  button.disabled = true;
+  button.textContent = "⏳ Обработка...";
+
+  document.getElementById("resultBox").style.display = "none";
+  progressCard.style.display = "block";
+
+  setProgress(
+    0,
+    "Подготовка видео",
+    "Подготавливаем файл к отправке на сервер."
+  );
+
+  const formData = new FormData();
+
+  formData.append("file", selectedFile, selectedFile.name);
+  formData.append("style", selectedStyle);
+  formData.append("language", "tg");
+  formData.append("video_format", selectedFormat);
+  formData.append("init_data", initData);
+
+  const xhr = new XMLHttpRequest();
+
+  currentRequest = xhr;
+
+  xhr.open("POST", API_URL + "/api/process", true);
+  xhr.responseType = "blob";
+  xhr.timeout = REQUEST_TIMEOUT;
+
+  xhr.upload.onprogress = event => {
+    if (event.lengthComputable) {
+      const percent = Math.round(
+        (event.loaded / event.total) * 100
+      );
+
+      setProgress(
+        percent,
+        "Загрузка видео: " + percent + "%",
+        "Отправлено " + formatBytes(event.loaded) +
+        " из " + formatBytes(event.total) +
+        ". После загрузки начнётся обработка на сервере."
+      );
+    }
   };
 
-  reader.readAsDataURL(file);
-});
+  xhr.upload.onload = () => {
+    setProgress(
+      100,
+      "Видео отправлено",
+      "Сервер обрабатывает видео. Это может занять некоторое время."
+    );
+  };
 
-/* Ссылка приглашения */
-function makeInviteLink(){
-  let code=localStorage.getItem("gapcut_invite_code");
+  xhr.onload = async () => {
+    try {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = await readApiError(xhr);
+        throw new Error(message);
+      }
 
-  if(!code){
-    code="GC"+Math.random().toString(36).slice(2,10).toUpperCase();
-    localStorage.setItem("gapcut_invite_code",code);
+      const contentType = (
+        xhr.getResponseHeader("Content-Type") || ""
+      ).toLowerCase();
+
+      const blob = xhr.response;
+
+      if (!(blob instanceof Blob) || blob.size === 0) {
+        throw new Error("Сервер вернул пустой файл.");
+      }
+
+      if (
+        contentType.includes("application/json") ||
+        contentType.includes("text/")
+      ) {
+        const message = await blob.text();
+        throw new Error(message || "Сервер вернул ошибку.");
+      }
+
+      if (
+        !contentType.includes("video/") &&
+        !contentType.includes("application/octet-stream")
+      ) {
+        throw new Error(
+          "Сервер вернул неизвестный формат файла: " +
+          (contentType || "не указан")
+        );
+      }
+
+      const resultBlob = new Blob(
+        [blob],
+        { type: "video/mp4" }
+      );
+
+      const filename =
+        "GAPCUT_AI_" + Date.now() + ".mp4";
+
+      setProgress(
+        100,
+        "Готово!",
+        "Видео успешно обработано."
+      );
+
+      showResult(resultBlob, filename);
+
+      const saved = await saveResult(
+        resultBlob,
+        filename
+      );
+
+      if (saved) {
+        document.getElementById("resultMessage").textContent =
+          "Видео обработано и сохранено в результатах. Размер: " +
+          formatBytes(resultBlob.size);
+      } else {
+        document.getElementById("resultMessage").textContent =
+          "Видео обработано. Сохранение в историю не удалось, но его можно скачать прямо сейчас.";
+      }
+
+      showToast("Видео успешно обработано!");
+
+    } catch (error) {
+      console.error(error);
+
+      showToast(
+        error.message || "Ошибка обработки видео."
+      );
+
+      setProgress(
+        0,
+        "Ошибка",
+        error.message || "Не удалось обработать видео."
+      );
+    } finally {
+      finishProcessing();
+    }
+  };
+
+  xhr.onerror = () => {
+    setProgress(
+      0,
+      "Ошибка соединения",
+      "Не удалось связаться с сервером. Проверь интернет или попробуй позже."
+    );
+
+    showToast("Ошибка соединения с сервером.");
+    finishProcessing();
+  };
+
+  xhr.ontimeout = () => {
+    setProgress(
+      0,
+      "Время ожидания истекло",
+      "Сервер не успел завершить обработку за отведённое время."
+    );
+
+    showToast("Превышено время ожидания.");
+    finishProcessing();
+  };
+
+  xhr.onabort = () => {
+    setProgress(
+      0,
+      "Запрос отменён",
+      "Обработка была прервана."
+    );
+
+    finishProcessing();
+  };
+
+  try {
+    xhr.send(formData);
+  } catch (error) {
+    console.error(error);
+    showToast("Не удалось отправить видео.");
+    finishProcessing();
   }
-
-  const base=location.href.split("?")[0].split("#")[0];
-  $("inviteLink").textContent=base+"?ref="+code;
 }
 
-async function copyInvite(){
-  const link=$("inviteLink").textContent;
+function finishProcessing() {
+  isProcessing = false;
+  currentRequest = null;
 
-  try{
-    await navigator.clipboard.writeText(link);
-    toast("Ссылка скопирована");
-  }catch(e){
-    toast("Скопируй ссылку вручную");
+  const button = document.getElementById("processBtn");
+
+  button.disabled = false;
+  button.textContent = "✨ Начать AI-монтаж";
+}
+
+/* ==============================
+   PROFILE
+============================== */
+
+function updateProfile() {
+  const user = tg?.initDataUnsafe?.user;
+
+  const name = user
+    ? [user.first_name, user.last_name].filter(Boolean).join(" ")
+    : "Пользователь GAPCUT";
+
+  document.getElementById("profileName").textContent =
+    name || "Пользователь GAPCUT";
+
+  document.getElementById("profileId").textContent =
+    user?.username
+      ? "@" + user.username
+      : "Telegram Mini App";
+
+  const avatar = document.getElementById("profileAvatar");
+
+  if (user?.photo_url) {
+    avatar.innerHTML = "";
+
+    const img = document.createElement("img");
+    img.src = user.photo_url;
+    img.alt = "Avatar";
+
+    avatar.appendChild(img);
+  } else {
+    avatar.textContent = "👤";
   }
 }
 
-async function shareInvite(){
-  const link=$("inviteLink").textContent;
+/* ==============================
+   INVITE
+============================== */
 
-  if(navigator.share){
-    try{
-      await navigator.share({title:"GAPCUT AI",text:"Попробуй GAPCUT AI!",url:link});
-    }catch(e){}
-  }else{
+function getInviteLink() {
+  const url = new URL(window.location.href);
+
+  return url.toString();
+}
+
+function copyInvite() {
+  const link = document.getElementById("inviteLink").value;
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(link)
+      .then(() => showToast("Ссылка скопирована."))
+      .catch(() => fallbackCopy(link));
+  } else {
+    fallbackCopy(link);
+  }
+}
+
+function fallbackCopy(text) {
+  const input = document.getElementById("inviteLink");
+
+  input.focus();
+  input.select();
+
+  try {
+    document.execCommand("copy");
+    showToast("Ссылка скопирована.");
+  } catch (error) {
+    showToast("Не удалось скопировать ссылку.");
+  }
+}
+
+function shareInvite() {
+  const link = getInviteLink();
+
+  const text = "Попробуй GAPCUT AI — AI-монтаж видео: " + link;
+
+  if (tg?.openTelegramLink) {
+    tg.openTelegramLink(
+      "https://t.me/share/url?url=" +
+      encodeURIComponent(link) +
+      "&text=" +
+      encodeURIComponent("Попробуй GAPCUT AI!")
+    );
+  } else if (navigator.share) {
+    navigator.share({
+      title: "GAPCUT AI",
+      text,
+      url: link
+    }).catch(() => {});
+  } else {
     copyInvite();
   }
 }
 
-/* Запуск */
-loadProfile();
-makeInviteLink();
-cleanExpired();
+/* ==============================
+   SUPPORT
+============================== */
+
+function openSupport() {
+  if (tg?.openTelegramLink) {
+    tg.openTelegramLink(SUPPORT_URL);
+  } else {
+    window.open(SUPPORT_URL, "_blank");
+  }
+}
+
+/* ==============================
+   INITIALIZATION
+============================== */
+
+document.getElementById("inviteLink").value = getInviteLink();
+
+updateProfile();
+
+renderResults();
+
+window.addEventListener("beforeunload", () => {
+  if (currentResultUrl) {
+    URL.revokeObjectURL(currentResultUrl);
+  }
+});
+
 </script>
+
 </body>
 </html>
