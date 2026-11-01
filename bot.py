@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 import os
@@ -9,10 +10,7 @@ from pathlib import Path
 import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import (
-    Message,
-    FSInputFile,
-)
+from aiogram.types import Message, FSInputFile
 from dotenv import load_dotenv
 
 
@@ -31,9 +29,7 @@ MAX_INPUT_SIZE = 19 * 1024 * 1024
 MAX_OUTPUT_SIZE = 49 * 1024 * 1024
 MAX_DURATION = 180
 
-GROQ_URL = (
-    "https://api.groq.com/openai/v1/audio/transcriptions"
-)
+GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is missing")
@@ -69,7 +65,6 @@ user_busy = set()
 # =====================================
 
 def run_command(command, timeout=300):
-
     result = subprocess.run(
         command,
         stdout=subprocess.PIPE,
@@ -79,14 +74,8 @@ def run_command(command, timeout=300):
     )
 
     if result.returncode != 0:
-
-        logger.error(
-            result.stderr[-4000:]
-        )
-
-        raise RuntimeError(
-            "FFmpeg command failed"
-        )
+        logger.error(result.stderr[-4000:])
+        raise RuntimeError("FFmpeg command failed")
 
     return result
 
@@ -96,7 +85,6 @@ def run_command(command, timeout=300):
 # =====================================
 
 def get_video_duration(video_path):
-
     result = run_command([
         "ffprobe",
         "-v", "error",
@@ -113,36 +101,24 @@ def get_video_duration(video_path):
 # =====================================
 
 async def download_video(message, destination):
-
     media = message.video
 
     if not media and message.document:
-
         if not (
             message.document.mime_type
             and message.document.mime_type.startswith("video/")
         ):
-            raise ValueError(
-                "Лутфан файли видео фиристед."
-            )
+            raise ValueError("Лутфан файли видео фиристед.")
 
         media = message.document
 
     if not media:
-
-        raise ValueError(
-            "Видео ёфт нашуд."
-        )
+        raise ValueError("Видео ёфт нашуд.")
 
     if media.file_size and media.file_size > MAX_INPUT_SIZE:
+        raise ValueError("Ҳаҷми видео бояд аз 19 MB зиёд набошад.")
 
-        raise ValueError(
-            "Ҳаҷми видео бояд аз 19 MB зиёд набошад."
-        )
-
-    file_info = await bot.get_file(
-        media.file_id
-    )
+    file_info = await bot.get_file(media.file_id)
 
     await bot.download_file(
         file_info.file_path,
@@ -155,7 +131,6 @@ async def download_video(message, destination):
 # =====================================
 
 def extract_audio(video_path, audio_path):
-
     run_command([
         "ffmpeg",
         "-y",
@@ -173,7 +148,6 @@ def extract_audio(video_path, audio_path):
 # =====================================
 
 async def transcribe_audio(audio_path):
-
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}"
     }
@@ -184,12 +158,8 @@ async def transcribe_audio(audio_path):
         "timestamp_granularities[]": "word"
     }
 
-    async with httpx.AsyncClient(
-        timeout=180
-    ) as client:
-
+    async with httpx.AsyncClient(timeout=180) as client:
         with open(audio_path, "rb") as audio:
-
             files = {
                 "file": (
                     "audio.wav",
@@ -206,17 +176,18 @@ async def transcribe_audio(audio_path):
             )
 
     if response.status_code != 200:
-
         logger.error(
             "Groq error: %s",
             response.text[:2000]
         )
+        raise RuntimeError("Groq transcription failed")
 
-        raise RuntimeError(
-            "Groq transcription failed"
-        )
+    result = response.json()
 
-    return response.json()
+    if not isinstance(result, dict):
+        raise RuntimeError("Groq response format is invalid")
+
+    return result
 
 
 # =====================================
@@ -224,11 +195,7 @@ async def transcribe_audio(audio_path):
 # =====================================
 
 def ass_time(seconds):
-
-    total = max(
-        0,
-        int(round(seconds * 100))
-    )
+    total = max(0, int(round(seconds * 100)))
 
     hours = total // 360000
     minutes = (total % 360000) // 6000
@@ -242,7 +209,6 @@ def ass_time(seconds):
 
 
 def clean_ass_text(text):
-
     text = str(text)
 
     text = text.replace("\\", "")
@@ -257,10 +223,7 @@ def clean_ass_text(text):
 # 10. CREATE SUBTITLES
 # =====================================
 
-def make_ass_subtitles(
-    transcription,
-    output_path
-):
+def make_ass_subtitles(transcription, output_path):
 
     header = """[Script Info]
 ScriptType: v4.00+
@@ -277,12 +240,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     events = []
-
     words = []
 
-    for segment in transcription.get("segments", []):
+    # Ensure the response is a dictionary
+    if not isinstance(transcription, dict):
+        raise RuntimeError("Ҷавоби Groq нодуруст аст.")
 
-        for word in segment.get("words", []):
+    # First: get word timestamps directly from Groq
+    raw_words = transcription.get("words") or []
+
+    # If top-level words are missing, try segment words
+    if not raw_words:
+        segments = transcription.get("segments") or []
+
+        if isinstance(segments, list):
+            for segment in segments:
+                if not isinstance(segment, dict):
+                    continue
+
+                segment_words = segment.get("words") or []
+
+                if isinstance(segment_words, list):
+                    raw_words.extend(segment_words)
+
+    # Prepare timed words
+    if isinstance(raw_words, list):
+        for word in raw_words:
+
+            if not isinstance(word, dict):
+                continue
 
             text = clean_ass_text(
                 word.get("word", "")
@@ -292,10 +278,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 continue
 
             try:
-
                 start = float(word["start"])
                 end = float(word["end"])
-
             except (KeyError, TypeError, ValueError):
                 continue
 
@@ -308,16 +292,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 "text": text
             })
 
-    # Word-by-word karaoke subtitles
-
+    # Create karaoke subtitles
     if words:
 
         groups = []
-
         current_group = []
 
         for word in words:
-
             current_group.append(word)
 
             punctuation = bool(
@@ -325,7 +306,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
 
             if len(current_group) >= 6 or punctuation:
-
                 groups.append(current_group)
                 current_group = []
 
@@ -343,11 +323,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
                 duration = max(
                     5,
-                    int(
-                        round(
-                            (word["end"] - word["start"]) * 100
-                        )
-                    )
+                    int(round(
+                        (word["end"] - word["start"]) * 100
+                    ))
                 )
 
                 subtitle_text += (
@@ -365,48 +343,72 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     else:
 
-        # Fallback if word timestamps are unavailable
+        # Fallback: use segment text if available
+        segments = transcription.get("segments") or []
 
-        for segment in transcription.get("segments", []):
+        if isinstance(segments, list):
+            for segment in segments:
+
+                if not isinstance(segment, dict):
+                    continue
+
+                text = clean_ass_text(
+                    segment.get("text", "")
+                )
+
+                if not text:
+                    continue
+
+                try:
+                    start = float(segment.get("start", 0))
+                    end = float(segment.get("end", start + 2))
+                except (TypeError, ValueError):
+                    continue
+
+                if end <= start:
+                    end = start + 1
+
+                events.append(
+                    "Dialogue: 0,"
+                    f"{ass_time(start)},"
+                    f"{ass_time(end)},"
+                    "Default,,0,0,0,,"
+                    f"{text}"
+                )
+
+        # Last fallback: use full transcription text
+        if not events:
 
             text = clean_ass_text(
-                segment.get("text", "")
+                transcription.get("text", "")
             )
 
-            if not text:
-                continue
+            if text:
 
-            start = float(
-                segment.get("start", 0)
-            )
+                try:
+                    duration = float(
+                        transcription.get("duration") or 5
+                    )
+                except (TypeError, ValueError):
+                    duration = 5
 
-            end = float(
-                segment.get("end", start + 1)
-            )
+                if duration <= 0:
+                    duration = 5
 
-            if end <= start:
-                end = start + 1
-
-            events.append(
-                "Dialogue: 0,"
-                f"{ass_time(start)},"
-                f"{ass_time(end)},"
-                "Default,,0,0,0,,"
-                f"{text}"
-            )
+                events.append(
+                    "Dialogue: 0,"
+                    "0:00:00.00,"
+                    f"{ass_time(duration)},"
+                    "Default,,0,0,0,,"
+                    f"{text}"
+                )
 
     if not events:
-
         raise RuntimeError(
-            "Субтитрҳо сохта нашуданд."
+            "Groq матни субтитрҳоро барнагардонд."
         )
 
-    with open(
-        output_path,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
+    with open(output_path, "w", encoding="utf-8") as file:
         file.write(
             header + "\n".join(events)
         )
@@ -416,11 +418,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 # 11. RENDER FINAL VIDEO
 # =====================================
 
-def render_video(
-    video_path,
-    subtitle_path,
-    output_path
-):
+def render_video(video_path, subtitle_path, output_path):
 
     subtitle_filter = (
         "ass="
@@ -491,11 +489,9 @@ async def video_handler(message: Message):
     user_id = message.from_user.id
 
     if user_id in user_busy:
-
         await message.answer(
             "⏳ Видеои қаблии шумо ҳоло коркард шуда истодааст."
         )
-
         return
 
     user_busy.add(user_id)
@@ -516,34 +512,29 @@ async def video_handler(message: Message):
             subtitle_path = folder / "subtitles.ass"
             output_path = folder / "gapcut_output.mp4"
 
-            # Download
-
+            # Download video
             await download_video(
                 message,
                 video_path
             )
 
             # Check duration
-
             duration = await asyncio.to_thread(
                 get_video_duration,
                 video_path
             )
 
             if duration <= 0:
-
                 raise ValueError(
                     "Давомнокии видео нодуруст аст."
                 )
 
             if duration > MAX_DURATION:
-
                 raise ValueError(
                     "Давомнокии видео бояд то 3 дақиқа бошад."
                 )
 
             # Extract audio
-
             await message.answer(
                 "🎧 Қадами 1/3: Гирифтани овоз..."
             )
@@ -555,7 +546,6 @@ async def video_handler(message: Message):
             )
 
             # Transcription
-
             await message.answer(
                 "🧠 Қадами 2/3: Шинохтани овоз ва сохтани субтитрҳо..."
             )
@@ -570,8 +560,7 @@ async def video_handler(message: Message):
                 subtitle_path
             )
 
-            # Render
-
+            # Render video
             await message.answer(
                 "🎞️ Қадами 3/3: Сохтани видеои ниҳоӣ..."
             )
@@ -584,7 +573,6 @@ async def video_handler(message: Message):
             )
 
             if not output_path.exists():
-
                 raise RuntimeError(
                     "Видеои ниҳоӣ сохта нашуд."
                 )
@@ -592,13 +580,11 @@ async def video_handler(message: Message):
             output_size = output_path.stat().st_size
 
             if output_size > MAX_OUTPUT_SIZE:
-
                 raise ValueError(
                     "Ҳаҷми видеои тайёр аз 49 MB зиёд шуд."
                 )
 
             # Send result
-
             await message.answer_video(
                 FSInputFile(output_path),
                 caption=(
@@ -627,7 +613,6 @@ async def video_handler(message: Message):
         )
 
     finally:
-
         user_busy.discard(user_id)
 
 
@@ -672,12 +657,10 @@ async def http_handler(reader, writer):
                 break
 
         if path in ("/", "/health"):
-
             status = "200 OK"
             body = b"GapCut AI is running!"
 
         else:
-
             status = "404 Not Found"
             body = b"Not found"
 
@@ -690,7 +673,6 @@ async def http_handler(reader, writer):
         ).encode("ascii") + body
 
         writer.write(response)
-
         await writer.drain()
 
     except Exception:
@@ -704,11 +686,8 @@ async def http_handler(reader, writer):
         writer.close()
 
         try:
-
             await writer.wait_closed()
-
         except Exception:
-
             pass
 
 
@@ -747,11 +726,9 @@ async def main():
 if __name__ == "__main__":
 
     try:
-
         asyncio.run(main())
 
     except KeyboardInterrupt:
-
         logger.info(
             "GapCut AI stopped"
         )
