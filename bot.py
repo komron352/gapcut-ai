@@ -45,11 +45,14 @@ MINI_APP_URL = "https://gapcut-ai-web.vercel.app"
 SUPPORT_URL = "https://t.me/aikomron"
 CHANNEL_URL = "https://t.me/gapcutai"
 
-MAX_INPUT_SIZE = 300 * 1024 * 1024
-MAX_OUTPUT_SIZE = 500 * 1024 * 1024
-MAX_DURATION = 120
+VERSION = "2.2.0"
 
-UPLOAD_CHUNK_SIZE = 1024 * 1024
+# Render Free: conservative starting limits
+MAX_INPUT_SIZE = 100 * 1024 * 1024
+MAX_OUTPUT_SIZE = 150 * 1024 * 1024
+MAX_DURATION = 60
+
+UPLOAD_CHUNK_SIZE = 256 * 1024
 GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -57,6 +60,18 @@ GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 ALLOWED_EXTENSIONS = {
     ".mp4", ".mov", ".m4v", ".webm", ".mkv"
 }
+
+ALLOWED_STYLES = {
+    "viral", "classic", "cinema",
+    "podcast", "karaoke", "creator"
+}
+
+ALLOWED_FORMATS = {
+    "9:16", "16:9", "1:1", "original"
+}
+
+# Only one video job at a time in this process.
+PROCESS_LOCK = asyncio.Lock()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -81,7 +96,7 @@ dp = Dispatcher()
 
 app = FastAPI(
     title="GAPCUT AI API",
-    version="2.1.0",
+    version=VERSION,
 )
 
 app.add_middleware(
@@ -152,7 +167,7 @@ def validate_telegram_init_data(init_data: str):
 
 
 # =========================================================
-# KEYBOARDS
+# KEYBOARD
 # =========================================================
 
 def main_keyboard():
@@ -183,33 +198,73 @@ def main_keyboard():
 # =========================================================
 
 def run_command(command, timeout=600):
-    result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=timeout,
-    )
+    """
+    Avoid keeping large FFmpeg stdout/stderr in RAM.
+    stderr is written to a temporary file.
+    """
 
-    if result.returncode != 0:
-        error_text = result.stderr[-3000:] or "Ошибка выполнения команды."
-        logger.error("Command failed: %s", error_text)
-        raise RuntimeError(error_text)
+    with tempfile.TemporaryFile(mode="w+b") as error_file:
+        try:
+            result = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=error_file,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                "Время обработки видео истекло. "
+                "Попробуйте более короткое видео."
+            )
 
-    return result.stdout
+        if result.returncode != 0:
+            error_file.seek(0, os.SEEK_END)
+            size = error_file.tell()
+            error_file.seek(max(0, size - 3000))
+            error_text = error_file.read().decode(
+                "utf-8",
+                errors="replace",
+            )
+
+            logger.error("Command failed: %s", error_text[-3000:])
+
+            raise RuntimeError(
+                "Ошибка FFmpeg. Проверьте видео и попробуйте другой файл."
+            )
+
+
+def ffmpeg_limits():
+    return [
+        "-threads", "1",
+        "-filter_threads", "1",
+        "-filter_complex_threads", "1",
+    ]
 
 
 def get_duration(file_path):
-    output = run_command([
-        "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        str(file_path),
-    ])
+    with tempfile.TemporaryFile(mode="w+b") as error_file:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(file_path),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=error_file,
+            timeout=30,
+            check=False,
+        )
+
+    if result.returncode != 0:
+        raise RuntimeError("Не удалось прочитать видеофайл.")
 
     try:
-        return float(output.strip())
+        return float(result.stdout.decode().strip())
     except (ValueError, TypeError):
         raise RuntimeError("Не удалось определить длительность видео.")
 
@@ -242,57 +297,57 @@ def ass_time(seconds):
 STYLES = {
     "viral": {
         "font": "Arial",
-        "size": 58,
-        "primary": "&H00FFFFFF",
-        "outline": "&H00000000",
-        "bold": 1,
-        "outline_width": 4,
-        "margin_v": 100,
-    },
-    "classic": {
-        "font": "Arial",
-        "size": 42,
-        "primary": "&H00FFFFFF",
-        "outline": "&H00000000",
-        "bold": 0,
-        "outline_width": 2,
-        "margin_v": 65,
-    },
-    "cinema": {
-        "font": "Georgia",
-        "size": 42,
-        "primary": "&H00FFFFFF",
-        "outline": "&H00000000",
-        "bold": 0,
-        "outline_width": 2,
-        "margin_v": 80,
-    },
-    "podcast": {
-        "font": "Arial",
-        "size": 48,
-        "primary": "&H00FFFFFF",
-        "outline": "&H00101010",
-        "bold": 1,
-        "outline_width": 3,
-        "margin_v": 75,
-    },
-    "karaoke": {
-        "font": "Arial",
-        "size": 56,
-        "primary": "&H0000FFFF",
-        "outline": "&H00000000",
-        "bold": 1,
-        "outline_width": 4,
-        "margin_v": 100,
-    },
-    "creator": {
-        "font": "Arial",
-        "size": 48,
+        "size": 52,
         "primary": "&H00FFFFFF",
         "outline": "&H00000000",
         "bold": 1,
         "outline_width": 3,
         "margin_v": 85,
+    },
+    "classic": {
+        "font": "Arial",
+        "size": 38,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "bold": 0,
+        "outline_width": 2,
+        "margin_v": 60,
+    },
+    "cinema": {
+        "font": "Georgia",
+        "size": 38,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "bold": 0,
+        "outline_width": 2,
+        "margin_v": 70,
+    },
+    "podcast": {
+        "font": "Arial",
+        "size": 44,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00101010",
+        "bold": 1,
+        "outline_width": 3,
+        "margin_v": 70,
+    },
+    "karaoke": {
+        "font": "Arial",
+        "size": 48,
+        "primary": "&H0000FFFF",
+        "outline": "&H00000000",
+        "bold": 1,
+        "outline_width": 3,
+        "margin_v": 85,
+    },
+    "creator": {
+        "font": "Arial",
+        "size": 44,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "bold": 1,
+        "outline_width": 3,
+        "margin_v": 75,
     },
 }
 
@@ -306,8 +361,7 @@ async def transcribe_audio(audio_path):
 
     if audio_size > GROQ_MAX_AUDIO_SIZE:
         raise RuntimeError(
-            "Аудиофайл превышает лимит отправки в Groq. "
-            "Попробуйте видео с более коротким или сжатым аудио."
+            "Аудиофайл превышает установленный лимит Groq."
         )
 
     headers = {
@@ -320,7 +374,12 @@ async def transcribe_audio(audio_path):
         "timestamp_granularities[]": "word",
     }
 
-    timeout = httpx.Timeout(300.0, connect=30.0)
+    timeout = httpx.Timeout(
+        180.0,
+        connect=20.0,
+        write=60.0,
+        read=180.0,
+    )
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         with open(audio_path, "rb") as audio_file:
@@ -341,11 +400,11 @@ async def transcribe_audio(audio_path):
         logger.error(
             "Groq API error %s: %s",
             response.status_code,
-            response.text[:2000],
+            response.text[:1500],
         )
 
         raise RuntimeError(
-            "Ошибка распознавания аудио. Проверьте Groq API и попробуйте позже."
+            "Ошибка распознавания аудио. Попробуйте позже."
         )
 
     result = response.json()
@@ -389,12 +448,12 @@ Title: GAPCUT AI
 ScriptType: v4.00+
 WrapStyle: 2
 ScaledBorderAndShadow: yes
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: 720
+PlayResY: 1280
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style["font"]},{style["size"]},{style["primary"]},&H000000FF,{style["outline"]},&H80000000,{style["bold"]},0,0,0,100,100,0,0,1,{style["outline_width"]},1,2,65,65,{style["margin_v"]},1
+Style: Default,{style["font"]},{style["size"]},{style["primary"]},&H000000FF,{style["outline"]},&H80000000,{style["bold"]},0,0,0,100,100,0,0,1,{style["outline_width"]},1,2,45,45,{style["margin_v"]},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -458,20 +517,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 def get_video_filter(video_format):
     if video_format == "9:16":
         return (
-            "scale=1080:1920:force_original_aspect_ratio=increase,"
-            "crop=1080:1920"
+            "scale=720:1280:force_original_aspect_ratio=increase,"
+            "crop=720:1280"
         )
 
     if video_format == "16:9":
         return (
-            "scale=1920:1080:force_original_aspect_ratio=increase,"
-            "crop=1920:1080"
+            "scale=1280:720:force_original_aspect_ratio=increase,"
+            "crop=1280:720"
         )
 
     if video_format == "1:1":
         return (
-            "scale=1080:1080:force_original_aspect_ratio=increase,"
-            "crop=1080:1080"
+            "scale=720:720:force_original_aspect_ratio=increase,"
+            "crop=720:720"
         )
 
     if video_format == "original":
@@ -516,16 +575,19 @@ async def process_video(input_path, output_path, style_name, video_format):
         [
             "ffmpeg",
             "-y",
+            *ffmpeg_limits(),
             "-i", str(input_path),
             "-vn",
             "-ac", "1",
             "-ar", "16000",
-            "-b:a", "64k",
+            "-b:a", "48k",
+            "-t", str(MAX_DURATION),
             str(audio_path),
         ],
+        180,
     )
 
-    logger.info("Sending audio to Groq Whisper")
+    logger.info("Sending audio to Groq")
 
     words = await transcribe_audio(audio_path)
 
@@ -550,18 +612,23 @@ async def process_video(input_path, output_path, style_name, video_format):
         [
             "ffmpeg",
             "-y",
+            *ffmpeg_limits(),
             "-i", str(input_path),
+            "-t", str(MAX_DURATION),
             "-vf", filters,
             "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "23",
+            "-preset", "ultrafast",
+            "-crf", "27",
+            "-threads", "1",
             "-c:a", "aac",
-            "-b:a", "128k",
-            "-movflags", "+faststart",
+            "-b:a", "96k",
+            "-ac", "2",
             "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "-fs", str(MAX_OUTPUT_SIZE),
             str(output_path),
         ],
-        1200,
+        900,
     )
 
     output_file = Path(output_path)
@@ -569,9 +636,10 @@ async def process_video(input_path, output_path, style_name, video_format):
     if not output_file.exists() or output_file.stat().st_size == 0:
         raise RuntimeError("Не удалось создать готовое видео.")
 
-    if output_file.stat().st_size > MAX_OUTPUT_SIZE:
+    if output_file.stat().st_size >= MAX_OUTPUT_SIZE:
         raise RuntimeError(
-            "Размер готового видео превышает допустимый лимит."
+            "Готовое видео достигло лимита размера. "
+            "Попробуйте видео с меньшим разрешением."
         )
 
     logger.info(
@@ -590,13 +658,13 @@ async def process_video(input_path, output_path, style_name, video_format):
 async def start_handler(message: Message):
     text = (
         "🎬 <b>GAPCUT AI</b>\n\n"
-        "Автоматический монтаж видео с помощью искусственного интеллекта.\n\n"
-        "✨ Автоматические субтитры\n"
-        "🎨 Различные стили субтитров\n"
+        "Автоматические субтитры для ваших видео.\n\n"
+        "✨ Распознавание речи\n"
+        "🎨 Стили субтитров\n"
         "📱 Форматы Reels, TikTok и YouTube\n\n"
-        "📦 Максимальный размер: 300 MB\n"
-        "⏱ Максимальная длительность: 2 минуты\n\n"
-        "Чтобы начать, нажмите кнопку «Монтаж»."
+        "📦 Максимальный размер: 100 MB\n"
+        "⏱ Максимальная длительность: 60 секунд\n\n"
+        "Нажмите «Монтаж», чтобы начать."
     )
 
     await message.answer(
@@ -610,14 +678,14 @@ async def start_handler(message: Message):
 async def help_handler(message: Message):
     text = (
         "ℹ️ <b>GAPCUT AI — Помощь</b>\n\n"
-        "1. Нажмите кнопку «Монтаж».\n"
+        "1. Нажмите «Монтаж».\n"
         "2. Выберите видео.\n"
-        "3. Выберите стиль субтитров и формат видео.\n"
+        "3. Выберите стиль и формат.\n"
         "4. Запустите обработку.\n\n"
-        "📦 Максимальный размер: 300 MB\n"
-        "⏱ Максимальная длительность: 2 минуты\n\n"
+        "📦 Максимальный размер: 100 MB\n"
+        "⏱ Максимальная длительность: 60 секунд\n\n"
         f"💬 Поддержка: {SUPPORT_URL}\n"
-        f"📢 Наш канал: {CHANNEL_URL}"
+        f"📢 Канал: {CHANNEL_URL}"
     )
 
     await message.answer(
@@ -644,7 +712,7 @@ async def video_handler(message: Message):
 
     if media.file_size and media.file_size > MAX_INPUT_SIZE:
         await message.answer(
-            "Размер видео не должен превышать 300 MB."
+            "Размер видео не должен превышать 100 MB."
         )
         return
 
@@ -657,7 +725,7 @@ async def video_handler(message: Message):
 
 
 # =========================================================
-# API HEALTH
+# HEALTH
 # =========================================================
 
 @app.get("/")
@@ -665,9 +733,11 @@ async def home():
     return {
         "status": "ok",
         "service": "GAPCUT AI",
-        "version": "2.1.0",
-        "max_input_mb": 300,
-        "max_duration_seconds": 120,
+        "version": VERSION,
+        "max_input_mb": 100,
+        "max_output_mb": 150,
+        "max_duration_seconds": 60,
+        "processing_concurrency": 1,
     }
 
 
@@ -676,6 +746,7 @@ async def health():
     return {
         "status": "healthy",
         "service": "GAPCUT AI",
+        "version": VERSION,
     }
 
 
@@ -696,17 +767,14 @@ async def api_process(
     if not user:
         raise HTTPException(
             status_code=401,
-            detail=(
-                "Ошибка авторизации Telegram. "
-                "Откройте Mini App через бота."
-            ),
+            detail="Откройте Mini App через Telegram-бота.",
         )
 
     style = style.lower().strip()
     language = language.lower().strip()
     video_format = video_format.strip()
 
-    if style not in STYLES:
+    if style not in ALLOWED_STYLES:
         raise HTTPException(
             status_code=400,
             detail="Неверный стиль субтитров.",
@@ -718,7 +786,7 @@ async def api_process(
             detail="Неверно выбран язык.",
         )
 
-    if video_format not in ("9:16", "16:9", "1:1", "original"):
+    if video_format not in ALLOWED_FORMATS:
         raise HTTPException(
             status_code=400,
             detail="Неверный формат видео.",
@@ -733,12 +801,24 @@ async def api_process(
             detail="Поддерживаются MP4, MOV, M4V, WEBM и MKV.",
         )
 
-    temp_dir = Path(tempfile.mkdtemp(prefix="gapcut_"))
+    # Reject a second job before writing its upload to disk.
+    if PROCESS_LOCK.locked():
+        raise HTTPException(
+            status_code=429,
+            detail="Сервер сейчас обрабатывает другое видео. Попробуйте позже.",
+            headers={"Retry-After": "30"},
+        )
 
-    input_path = temp_dir / f"input{extension}"
-    output_path = temp_dir / "gapcut_result.mp4"
+    await PROCESS_LOCK.acquire()
+
+    temp_dir = None
 
     try:
+        temp_dir = Path(tempfile.mkdtemp(prefix="gapcut_"))
+
+        input_path = temp_dir / f"input{extension}"
+        output_path = temp_dir / "gapcut_result.mp4"
+
         total_size = 0
 
         logger.info(
@@ -758,7 +838,7 @@ async def api_process(
                 if total_size > MAX_INPUT_SIZE:
                     raise HTTPException(
                         status_code=413,
-                        detail="Размер видео не должен превышать 300 MB.",
+                        detail="Размер видео не должен превышать 100 MB.",
                     )
 
                 output_file.write(chunk)
@@ -769,10 +849,7 @@ async def api_process(
                 detail="Видеофайл пуст.",
             )
 
-        logger.info(
-            "Upload completed: %s bytes",
-            total_size,
-        )
+        logger.info("Upload completed: %s bytes", total_size)
 
         await process_video(
             input_path,
@@ -781,7 +858,8 @@ async def api_process(
             video_format,
         )
 
-        return FileResponse(
+        # FileResponse sends the file before deleting its temporary folder.
+        response = FileResponse(
             path=str(output_path),
             media_type="video/mp4",
             filename="GAPCUT_AI.mp4",
@@ -792,14 +870,18 @@ async def api_process(
             ),
         )
 
+        return response
+
     except HTTPException:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
     except Exception as error:
         logger.exception("Video processing failed")
 
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
         message = str(error)
 
@@ -816,6 +898,7 @@ async def api_process(
 
     finally:
         await file.close()
+        PROCESS_LOCK.release()
 
 
 # =========================================================
@@ -828,12 +911,17 @@ async def main():
         host="0.0.0.0",
         port=PORT,
         log_level="info",
-        timeout_keep_alive=30,
+        timeout_keep_alive=15,
+        limit_concurrency=10,
     )
 
     server = uvicorn.Server(config)
 
-    logger.info("GAPCUT AI 2.1.0 starting on port %s", PORT)
+    logger.info(
+        "GAPCUT AI %s starting on port %s",
+        VERSION,
+        PORT,
+    )
 
     try:
         await asyncio.gather(
