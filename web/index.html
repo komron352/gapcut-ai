@@ -1,907 +1,745 @@
 
 <!DOCTYPE html>
-<html lang="tg">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<meta name="theme-color" content="#080812">
-<title>GAPCUT AI — Creative Studio</title>
-
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#090b13">
+<title>GAPCUT AI</title>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-
-:root {
-  --bg:#080812;
-  --panel:#121222;
-  --purple:#9b65ff;
-  --blue:#36cfff;
-  --white:#f7f4ff;
-  --muted:#9291aa;
+:root{
+  --bg:#090b13;
+  --panel:#151a27;
+  --panel2:#1c2232;
+  --purple:#9b79ff;
+  --purple2:#6745ce;
+  --text:#f5f3ff;
+  --muted:#9299ad;
+  --green:#54d9a0;
+  --line:rgba(255,255,255,.09);
 }
-
-* {box-sizing:border-box}
-
-body {
-  margin:0;
+*{box-sizing:border-box}
+body{
+  margin:0;color:var(--text);
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   background:
-    radial-gradient(ellipse at 50% -10%,#422078 0%,transparent 45%),
-    radial-gradient(ellipse at 100% 45%,#111d45 0%,transparent 35%),
+    radial-gradient(ellipse at 15% 0%,#302052 0%,transparent 35%),
+    radial-gradient(ellipse at 100% 65%,#202344 0%,transparent 32%),
     var(--bg);
-  color:var(--white);
-  font-family:Inter,Arial,sans-serif;
   min-height:100vh;
-  overflow-x:hidden;
 }
-
-body:before {
-  content:"";
-  position:fixed;
-  inset:0;
-  pointer-events:none;
-  opacity:.16;
-  background-image:
-    linear-gradient(#ffffff08 1px,transparent 1px),
-    linear-gradient(90deg,#ffffff08 1px,transparent 1px);
-  background-size:34px 34px;
-}
-
-button {font-family:inherit;cursor:pointer}
-
-.app {
-  max-width:520px;
+button,input,textarea{font:inherit}
+button{cursor:pointer;color:inherit}
+.app{
+  width:min(100%,650px);
   margin:auto;
-  padding:22px 17px 45px;
-  position:relative;
+  min-height:100vh;
+  padding:16px 15px 105px;
 }
-
-.top {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:9px 2px 19px;
 }
-
-.brand {
-  font-size:24px;
-  font-weight:900;
-  letter-spacing:-1.4px;
+.brand{display:flex;align-items:center;gap:12px}
+.logo{
+  width:47px;height:47px;border-radius:16px;
+  display:grid;place-items:center;
+  font-size:24px;font-weight:900;
+  background:linear-gradient(145deg,#c4a9ff,#6541c4 65%,#35205e);
+  box-shadow:inset 0 2px 3px #ffffff80,
+             0 8px 25px #895fff55;
 }
-
-.brand span {
-  color:#b78cff;
-  text-shadow:0 0 20px #9b65ff;
+.brand h2{font-size:17px;margin:0;letter-spacing:1px}
+.brand small{font-size:9px;letter-spacing:2px;color:var(--muted)}
+.online{
+  font-size:11px;color:var(--green);
+  background:#143529;padding:8px 11px;border-radius:30px;
+  border:1px solid #286c50;
 }
-
-.pro {
-  border:1px solid #9b65ff66;
-  background:#9b65ff19;
-  border-radius:30px;
-  padding:9px 13px;
-  color:#d9c4ff;
-  font-size:11px;
-  font-weight:800;
-  letter-spacing:1px;
+.page{display:none;animation:appear .25s ease}
+.page.active{display:block}
+@keyframes appear{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
 }
-
-.welcome {margin-top:33px}
-
-.eyebrow {
-  color:#bd9aff;
-  font-size:10px;
-  font-weight:800;
-  letter-spacing:3px;
+h1{font-size:28px;margin:8px 0}
+h2{font-size:20px}
+p{line-height:1.6}
+.muted{color:var(--muted)}
+.card{
+  padding:17px;border-radius:21px;margin:14px 0;
+  background:linear-gradient(145deg,#202638e8,#121722f5);
+  border:1px solid var(--line);
+  box-shadow:0 12px 35px #0004,inset 0 1px 0 #ffffff08;
 }
-
-h1 {
-  font-size:35px;
-  line-height:1.12;
-  letter-spacing:-1.8px;
-  margin:10px 0;
+.hero{
+  position:relative;overflow:hidden;
+  padding:24px 20px;border-radius:25px;
+  background:linear-gradient(135deg,#39275f,#1c1b37 55%,#151a29);
+  border:1px solid #9b79ff40;
+  box-shadow:0 15px 45px #6d48b633,inset 0 1px 0 #ffffff20;
 }
-
-h1 span {
-  background:linear-gradient(90deg,#bd9aff,#55d5ff);
-  -webkit-background-clip:text;
-  color:transparent;
+.hero:after{
+  content:"✦";position:absolute;right:18px;top:12px;
+  font-size:100px;color:#ffffff0b;
 }
-
-.subtitle {
-  color:var(--muted);
-  font-size:13px;
-  line-height:1.6;
+.hero h1{font-size:29px;line-height:1.2;max-width:270px}
+.hero p{font-size:13px;color:#d0c7e9;max-width:290px}
+.section-title{
+  font-size:14px;font-weight:750;margin:22px 0 12px;
 }
-
-.hero {
-  margin-top:25px;
-  position:relative;
-  overflow:hidden;
-  border:1px solid #a879ff55;
-  border-radius:27px;
-  background:linear-gradient(135deg,#251747,#101a36 65%,#101022);
-  padding:23px 19px 20px;
-  min-height:205px;
-  box-shadow:0 18px 55px #0008,0 0 35px #8e50ff20,inset 0 1px #ffffff20;
+.btn{
+  border:0;width:100%;padding:15px;border-radius:15px;
+  background:linear-gradient(110deg,#a88aff,#6944d0);
+  font-weight:750;color:white;
+  box-shadow:0 8px 25px #8058e64a,inset 0 1px 0 #ffffff55;
 }
-
-.hero:before {
-  content:"";
-  position:absolute;
-  width:190px;
-  height:190px;
-  right:-40px;
-  top:-60px;
-  border-radius:50%;
-  background:#9b65ff35;
-  filter:blur(35px);
+.btn:active{transform:scale(.98)}
+.btn.secondary{
+  background:#262b3d;border:1px solid var(--line);
+  box-shadow:none;margin-top:9px;
 }
-
-.hero-content {
-  position:relative;
-  z-index:2;
+.grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:11px;
 }
-
-.hero-label {
-  font-size:10px;
-  color:#cbb5ff;
-  letter-spacing:2px;
-  font-weight:800;
+.feature{
+  padding:15px;border-radius:18px;
+  background:linear-gradient(145deg,#202638,#141925);
+  border:1px solid var(--line);
 }
-
-.hero h2 {
-  font-size:23px;
-  line-height:1.2;
-  margin:12px 0 7px;
-  max-width:240px;
+.icon3d{
+  width:48px;height:48px;border-radius:15px;
+  display:grid;place-items:center;font-size:25px;
+  margin-bottom:12px;
+  background:linear-gradient(145deg,#9c7bff,#49308b);
+  box-shadow:inset 0 2px 4px #ffffff66,
+             0 7px 16px #0007;
 }
-
-.hero p {
-  font-size:11px;
-  color:#c4bfd8;
-  max-width:220px;
-  line-height:1.6;
+.feature b{font-size:13px}
+.feature small{display:block;color:var(--muted);margin-top:5px;font-size:11px}
+.nav{
+  position:fixed;z-index:20;bottom:0;left:50%;
+  transform:translateX(-50%);
+  width:min(100%,650px);
+  padding:10px 8px calc(10px + env(safe-area-inset-bottom));
+  display:grid;grid-template-columns:repeat(5,1fr);
+  background:#101522f2;backdrop-filter:blur(22px);
+  border-top:1px solid #ffffff15;
 }
-
-.orb {
-  position:absolute;
-  right:20px;
-  top:37px;
-  width:115px;
-  height:115px;
-  border-radius:50%;
-  background:radial-gradient(circle at 32% 25%,#fff 0%,#c7a5ff 8%,#8b4bff 28%,#32156b 62%,#100d25 75%);
-  box-shadow:inset -13px -15px 25px #090617,0 0 25px #a56aff88,0 0 65px #8446ff55;
-  animation:float 4s ease-in-out infinite;
+.nav button{
+  border:0;background:none;color:#7f879b;
+  display:flex;flex-direction:column;align-items:center;
+  gap:5px;font-size:10px;padding:5px 0;
 }
-
-.orb:before,.orb:after {
-  content:"";
-  position:absolute;
-  border:1px solid #c9aaff99;
-  width:150px;
-  height:47px;
-  left:-18px;
-  top:32px;
-  border-radius:50%;
-  transform:rotate(-32deg);
-}
-
-.orb:after {
-  transform:rotate(58deg);
-  border-color:#58dfff88;
-}
-
-@keyframes float {
-  50% {transform:translateY(-9px) rotate(7deg)}
-}
-
-.section-head {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin:29px 1px 13px;
-  gap:8px;
-}
-
-.section-head h3 {
-  font-size:16px;
-  margin:0;
-  font-weight:800;
-}
-
-.section-head span {
-  font-size:10px;
-  color:#a88bdc;
-  white-space:nowrap;
-}
-
-.upload {
-  display:block;
-  padding:23px 15px;
-  text-align:center;
-  border-radius:22px;
-  border:1px dashed #9d78ff99;
-  background:linear-gradient(145deg,#1b1730,#101322);
-  box-shadow:inset 0 1px #ffffff0b,0 12px 30px #0005;
-  cursor:pointer;
-  position:relative;
-  overflow:hidden;
-}
-
-.upload:active {transform:scale(.985)}
-
-.upload-icon {
-  width:62px;
-  height:62px;
-  margin:0 auto 13px;
-  border-radius:20px;
-  display:grid;
-  place-items:center;
-  font-size:28px;
-  background:linear-gradient(145deg,#9c67ff,#4721a4);
-  box-shadow:0 8px 24px #864bff66,inset 0 2px #ffffff55;
-}
-
-.upload strong {font-size:14px}
-
-.upload p {
-  font-size:11px;
-  color:var(--muted);
-  margin:8px 0 0;
-}
-
-.upload input {display:none}
-
-#fileInfo {
-  font-size:11px;
-  color:#c7aaff;
-  margin-top:12px;
-  overflow-wrap:anywhere;
-}
-
-.styles {
-  display:grid;
-  grid-template-columns:repeat(2,1fr);
-  gap:11px;
-}
-
-.style {
-  border:1px solid #ffffff12;
-  border-radius:19px;
-  padding:0;
-  background:linear-gradient(145deg,#1c1b30,#10111f);
-  color:white;
-  text-align:left;
-  overflow:hidden;
-  box-shadow:0 9px 20px #0005,inset 0 1px #ffffff0b;
-  transition:.2s;
-}
-
-.style.active {
-  border:1px solid #b48aff;
-  box-shadow:0 0 0 1px #9b65ff44,0 0 24px #9b65ff35;
+.nav .nav-icon{font-size:21px;filter:drop-shadow(0 3px 4px #000)}
+.nav button.active{color:#c1aaff}
+.nav button.active .nav-icon{
+  filter:drop-shadow(0 0 8px #9b79ff);
   transform:translateY(-2px);
 }
-
-.style-art {
-  height:91px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  position:relative;
-  overflow:hidden;
-  background:radial-gradient(circle at 50% 60%,#7b40dc77,transparent 65%),#17152a;
+.upload{
+  padding:28px 14px;text-align:center;
+  border:1px dashed #8d70d7;border-radius:17px;
+  background:#1b1930;
 }
-
-.style-art:before {
-  content:"";
-  width:70px;
-  height:70px;
-  border-radius:20px;
-  background:linear-gradient(145deg,#b78aff,#4924a0);
-  transform:rotate(-12deg) perspective(100px) rotateY(-15deg);
-  box-shadow:10px 12px 25px #0008,inset 0 2px #ffffff77;
+.upload .big{font-size:39px;filter:drop-shadow(0 5px 8px #000)}
+.upload b{display:block;margin:10px 0}
+.upload small{color:var(--muted)}
+input[type=file]{display:none}
+.file-info{color:var(--green);font-size:12px;margin-top:12px}
+.task-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.task{
+  background:#1b2030;border:1px solid var(--line);
+  border-radius:15px;padding:13px;text-align:left;
 }
-
-.style-art span {
-  position:absolute;
-  font-size:27px;
-  filter:drop-shadow(0 4px 8px #000);
+.task span{display:block;font-size:23px;margin-bottom:7px}
+.task b{font-size:12px;display:block}
+.task small{display:block;color:var(--muted);font-size:10px;margin-top:5px}
+.task.active{border-color:var(--purple);background:#30244b}
+.textarea{
+  width:100%;min-height:100px;padding:13px;
+  background:#0c1019;border:1px solid var(--line);
+  border-radius:13px;color:white;resize:vertical;
 }
-
-.style-info {padding:12px}
-
-.style-info strong {font-size:12px}
-
-.style-info p {
-  font-size:10px;
-  color:var(--muted);
-  margin:5px 0 0;
+.preview{
+  padding:23px 12px;border-radius:14px;
+  background:#080a10;text-align:center;
+  border:1px solid #39334e;
 }
-
-.language {
-  display:flex;
-  gap:9px;
+.preview h2{font-size:19px;line-height:1.5;margin:0}
+.preview small{color:#b9a3ff}
+.row{display:flex;align-items:center;gap:12px}
+.between{justify-content:space-between}
+.badge{
+  color:#c9b6ff;background:#392b58;
+  border-radius:20px;padding:6px 10px;font-size:10px;
 }
-
-.lang {
-  flex:1;
-  padding:14px 5px;
-  border:1px solid #ffffff17;
-  background:#171728;
-  border-radius:14px;
-  color:#ccc;
+.plan{
+  padding:11px 0;border-bottom:1px solid var(--line);
   font-size:12px;
 }
-
-.lang.active {
-  border-color:#a77aff;
-  background:#30204c;
-  color:white;
+.plan:last-child{border:0}
+.time{color:#b99cff;font-weight:800;margin-right:10px}
+.avatar{
+  width:90px;height:90px;border-radius:50%;
+  display:grid;place-items:center;overflow:hidden;
+  background:linear-gradient(145deg,#a88aff,#4c328c);
+  border:3px solid #b99aff;
+  box-shadow:0 8px 25px #855de655;
+  font-size:35px;
 }
-
-.options {
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:10px;
+.avatar img{width:100%;height:100%;object-fit:cover}
+.profile-center{text-align:center;display:flex;align-items:center;flex-direction:column;gap:12px}
+.field{
+  width:100%;padding:13px;border-radius:12px;
+  background:#0d111b;border:1px solid var(--line);
+  color:white;outline:none;
 }
-
-.option {
-  border:1px solid #ffffff15;
-  border-radius:14px;
-  padding:13px;
-  background:#171728;
-  color:#fff;
-  text-align:center;
-  font-size:12px;
+.invite-link{
+  background:#0d111b;border:1px solid var(--line);
+  padding:13px;border-radius:12px;
+  color:#c4adff;word-break:break-all;font-size:12px;
 }
-
-.option.active {
-  border-color:#a77aff;
-  background:#30204c;
+.result-item{
+  display:flex;gap:12px;align-items:center;
+  padding:12px 0;border-bottom:1px solid var(--line);
 }
-
-.main-btn {
-  width:100%;
-  margin-top:24px;
-  padding:18px;
-  border:0;
-  border-radius:17px;
-  color:white;
-  font-size:14px;
-  font-weight:900;
-  letter-spacing:1px;
-  background:linear-gradient(100deg,#7138d5,#a45dff,#397de9);
-  box-shadow:0 9px 30px #8046ef66,inset 0 1px #ffffff70;
+.result-thumb{
+  width:64px;height:64px;border-radius:13px;
+  background:linear-gradient(145deg,#47346f,#171c2b);
+  display:grid;place-items:center;font-size:25px;
+  flex-shrink:0;overflow:hidden;
 }
-
-.main-btn:active {transform:scale(.98)}
-
-.main-btn:disabled {
-  opacity:.55;
-  cursor:wait;
-  transform:none;
+.result-thumb video{width:100%;height:100%;object-fit:cover}
+.result-info{flex:1;min-width:0}
+.result-info b{font-size:12px;display:block;overflow-wrap:anywhere}
+.result-info small{font-size:10px;color:var(--muted);display:block;margin-top:5px}
+.delete-btn{
+  border:0;background:#38202b;color:#ff9aab;
+  border-radius:10px;padding:9px;font-size:12px;
 }
-
-.status {
-  font-size:10px;
-  color:#85839b;
-  text-align:center;
-  margin-top:13px;
+.empty{text-align:center;padding:35px 10px;color:var(--muted)}
+.hidden{display:none!important}
+.note{font-size:11px;color:var(--muted);line-height:1.6}
+.toast{
+  position:fixed;z-index:50;bottom:95px;left:50%;
+  transform:translateX(-50%);
+  background:#272b3a;padding:12px 18px;border-radius:12px;
+  box-shadow:0 8px 25px #0008;font-size:12px;
+  display:none;white-space:nowrap;
 }
-
-.bottom {
-  display:flex;
-  justify-content:space-around;
-  margin-top:29px;
-  border-top:1px solid #ffffff12;
-  padding-top:18px;
-  color:#88869f;
-  font-size:10px;
-}
-
-.bottom span {
-  display:block;
-  text-align:center;
-}
-
-.bottom b {
-  display:block;
-  font-size:18px;
-  margin-bottom:5px;
-}
-
-#progressBox {
-  display:none;
-  margin-top:18px;
-  padding:16px;
-  border:1px solid #9b65ff55;
-  border-radius:17px;
-  background:#171328;
-}
-
-#progressText {
-  color:#d2baff;
-  text-align:center;
-  font-size:12px;
-  line-height:1.7;
-}
-
-.loader {
-  width:30px;
-  height:30px;
-  margin:0 auto 12px;
-  border:3px solid #ffffff20;
-  border-top-color:#b78aff;
-  border-radius:50%;
-  animation:spin .8s linear infinite;
-}
-
-@keyframes spin {
-  to {transform:rotate(360deg)}
-}
-
-#resultBox {
-  display:none;
-  margin-top:20px;
-  padding:16px;
-  border:1px solid #9b65ff66;
-  border-radius:20px;
-  background:#171328;
-}
-
-#resultBox strong {
-  font-size:14px;
-}
-
-#resultVideo {
-  width:100%;
-  border-radius:14px;
-  margin-top:12px;
-  background:#000;
-}
-
-.result-link {
-  display:block;
-  text-align:center;
-  margin-top:12px;
-  padding:14px;
-  border-radius:13px;
-  color:white;
-  text-decoration:none;
-  font-weight:800;
-  font-size:13px;
-  background:linear-gradient(100deg,#7138d5,#397de9);
-}
-
-#errorText {
-  color:#ff9caa;
-  font-size:12px;
-  line-height:1.6;
-  text-align:center;
-  margin-top:12px;
-}
-
-@media(max-width:360px) {
-  .app {padding-left:13px;padding-right:13px}
-  h1 {font-size:30px}
-  .pro {font-size:9px;padding:8px}
-  .section-head h3 {font-size:14px}
+@media(min-width:500px){
+  .app{padding-left:22px;padding-right:22px}
+  h1{font-size:33px}
 }
 </style>
 </head>
 
 <body>
-<main class="app">
+<div class="app">
 
-<header class="top">
-  <div class="brand">GAPCUT <span>AI</span></div>
-  <div class="pro">✦ PRO STUDIO</div>
+<header>
+  <div class="brand">
+    <div class="logo">G</div>
+    <div>
+      <h2>GAPCUT AI</h2>
+      <small>AI VIDEO STUDIO</small>
+    </div>
+  </div>
+  <div class="online">● AI Online</div>
 </header>
 
-<section class="welcome">
-  <div class="eyebrow">NEXT GENERATION VIDEO EDITOR</div>
-  <h1>Видеои худро<br><span>ба санъат табдил деҳ.</span></h1>
-  <p class="subtitle">
-    AI монтаж мекунад. Ту танҳо видео ва услубро интихоб кун.
-  </p>
-</section>
+<!-- ГЛАВНАЯ -->
+<section class="page active" id="home">
+  <div class="hero">
+    <span class="badge">NEXT GENERATION AI</span>
+    <h1>Твой видео-монтажёр на базе AI ✨</h1>
+    <p>Загрузи видео. AI проанализирует его, подготовит текст и создаст план профессионального монтажа.</p>
+    <button class="btn" onclick="go('montage')">🎬 Начать монтаж</button>
+  </div>
 
-<section class="hero">
-  <div class="orb"></div>
-  <div class="hero-content">
-    <div class="hero-label">✦ POWERED BY ARTIFICIAL INTELLIGENCE</div>
-    <h2>Ту эҷод кун.<br>AI монтаж мекунад.</h2>
-    <p>Субтитр, эффектҳо ва монтажи автоматӣ дар як ҷо.</p>
+  <div class="section-title">Возможности GAPCUT AI</div>
+  <div class="grid">
+    <div class="feature">
+      <div class="icon3d">🎬</div>
+      <b>AI-монтаж</b>
+      <small>Автоматическая обработка видео</small>
+    </div>
+    <div class="feature">
+      <div class="icon3d">💬</div>
+      <b>Субтитры</b>
+      <small>Распознавание и оформление текста</small>
+    </div>
+    <div class="feature">
+      <div class="icon3d">🌍</div>
+      <b>Перевод</b>
+      <small>Субтитры на другие языки</small>
+    </div>
+    <div class="feature">
+      <div class="icon3d">🎙️</div>
+      <b>Чистый звук</b>
+      <small>Удаление шума и пауз</small>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row between">
+      <b>🚀 Готов создать свой ролик?</b>
+      <span class="badge">AI STUDIO</span>
+    </div>
+    <p class="muted" style="font-size:12px">Тебе не нужно разбираться в сложном монтаже. AI поможет пройти все этапы.</p>
+    <button class="btn" onclick="go('montage')">Создать проект →</button>
   </div>
 </section>
 
-<div class="section-head">
-  <h3>01 / Видеои худро бор кун</h3>
-  <span>UPLOAD MEDIA</span>
+<!-- ПРИГЛАСИТЬ -->
+<section class="page" id="invite">
+  <h1>Пригласить друзей</h1>
+  <p class="muted">Поделись GAPCUT AI с друзьями и приглашай их пользоваться сервисом.</p>
+
+  <div class="card">
+    <div class="profile-center">
+      <div class="icon3d" style="width:70px;height:70px;font-size:36px">🎁</div>
+      <h2 style="margin:0">Приглашай друзей!</h2>
+      <p class="muted" style="font-size:12px">Отправь свою персональную ссылку друзьям.</p>
+    </div>
+    <div class="section-title">Твоя ссылка приглашения</div>
+    <div class="invite-link" id="inviteLink">Ссылка появится после настройки</div>
+    <button class="btn" style="margin-top:12px" onclick="copyInvite()">📋 Скопировать ссылку</button>
+    <button class="btn secondary" onclick="shareInvite()">↗ Поделиться</button>
+  </div>
+
+  <div class="card">
+    <b>Как это работает?</b>
+    <div class="plan">1. Скопируй свою ссылку.</div>
+    <div class="plan">2. Отправь её друзьям.</div>
+    <div class="plan">3. Друзья переходят по ссылке.</div>
+    <p class="note">Подсчёт приглашённых пользователей и реферальные бонусы появятся после подключения Telegram-бота и базы данных.</p>
+  </div>
+</section>
+
+<!-- МОНТАЖ -->
+<section class="page" id="montage">
+  <h1>Новый монтаж 🎬</h1>
+  <p class="muted">Настрой проект, а AI подготовит план обработки.</p>
+
+  <div class="card">
+    <div class="section-title">01 · Загрузить видео</div>
+    <label class="upload" for="videoInput">
+      <div class="big">☁️</div>
+      <b>Нажми, чтобы выбрать видео</b>
+      <small>MP4 · MOV · Выбери файл на устройстве</small>
+    </label>
+    <input id="videoInput" type="file" accept="video/*">
+    <div id="fileInfo" class="file-info"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">02 · Что нужно сделать?</div>
+    <div class="task-grid" id="tasks">
+      <button class="task active" data-value="Полный AI-монтаж"><span>🎬</span><b>Полный монтаж</b><small>Готовый ролик</small></button>
+      <button class="task" data-value="Субтитры"><span>💬</span><b>Субтитры</b><small>Распознавание речи</small></button>
+      <button class="task" data-value="Перевод субтитров"><span>🌍</span><b>Перевод</b><small>Другие языки</small></button>
+      <button class="task" data-value="Очистка звука"><span>🎙️</span><b>Очистка звука</b><small>Чистый голос</small></button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">03 · Стиль монтажа</div>
+    <div class="task-grid" id="styles">
+      <button class="task active" data-value="Viral Reels"><span>🔥</span><b>Viral Reels</b><small>Динамичный</small></button>
+      <button class="task" data-value="Cinematic"><span>🎥</span><b>Cinematic</b><small>Киношный</small></button>
+      <button class="task" data-value="Podcast"><span>🎙️</span><b>Podcast</b><small>Интервью</small></button>
+      <button class="task" data-value="AI Auto"><span>✨</span><b>AI Auto</b><small>AI выбирает сам</small></button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">04 · Формат видео</div>
+    <div class="task-grid" id="formats">
+      <button class="task active" data-value="9:16"><span>📱</span><b>9:16</b><small>Reels / TikTok</small></button>
+      <button class="task" data-value="16:9"><span>🖥️</span><b>16:9</b><small>YouTube</small></button>
+      <button class="task" data-value="1:1"><span>⬜</span><b>1:1</b><small>Instagram</small></button>
+    </div>
+  </div>
+
+  <button class="btn" onclick="preparePreview()">✨ Подготовить монтаж</button>
+
+  <div id="previewSection" class="hidden">
+    <div class="section-title">05 · Предварительный просмотр</div>
+    <div class="card">
+      <div class="row between">
+        <b>📝 Пример субтитров</b>
+        <span class="badge">PREVIEW</span>
+      </div>
+      <div class="preview">
+        <h2 id="previewTitle">ТВОЯ ИСТОРИЯ НАЧИНАЕТСЯ ЗДЕСЬ...</h2>
+        <small>AI SUBTITLE PREVIEW</small>
+      </div>
+      <p class="note">В демо показан пример. После подключения распознавания речи здесь появится настоящий текст из видео.</p>
+      <textarea class="textarea" id="subtitleText">Твоя история начинается здесь...
+Каждый момент имеет значение.
+Создай что-то особенное!</textarea>
+      <button class="btn secondary" onclick="updatePreview()">Обновить текст</button>
+    </div>
+
+    <div class="card">
+      <b>🎞 План AI-монтажа</b>
+      <div class="plan"><span class="time">00:00</span>🔥 Сильное начало (Hook)</div>
+      <div class="plan"><span class="time">00:03</span>✂️ Удаление пауз</div>
+      <div class="plan"><span class="time">00:06</span>💬 Анимированные субтитры</div>
+      <div class="plan"><span class="time">00:12</span>✨ Переходы и эффекты</div>
+      <div class="plan"><span class="time">Финал</span>🎬 Готовый ролик</div>
+    </div>
+
+    <div class="card">
+      <b>⚙️ Настройки проекта</b>
+      <p class="muted" id="summary" style="font-size:12px"></p>
+    </div>
+
+    <button class="btn" onclick="confirmMontage()">✅ Подтвердить монтаж</button>
+    <button class="btn secondary" onclick="document.getElementById('previewSection').classList.add('hidden')">Изменить настройки</button>
+  </div>
+
+  <div id="processing" class="card hidden">
+    <div style="font-size:32px">🤖</div>
+    <h3>Проект подготовлен</h3>
+    <p class="note">Это демонстрационный режим. Реальный монтаж начнётся после подключения API обработки видео.</p>
+    <span class="badge">Ожидание подключения AI API</span>
+  </div>
+</section>
+
+<!-- НАТИҶАҲО -->
+<section class="page" id="results">
+  <h1>Мои результаты</h1>
+  <p class="muted">Здесь будут храниться твои готовые видео.</p>
+  <div class="card">
+    <div class="row between">
+      <b>🎬 История проектов</b>
+      <span class="badge">7 дней хранения</span>
+    </div>
+    <div id="resultsList">
+      <div class="empty">
+        <div style="font-size:42px">🎞️</div>
+        <b>Пока нет результатов</b>
+        <p class="note">После монтажа готовые видео появятся здесь.</p>
+        <button class="btn" onclick="go('montage')">Создать первый проект</button>
+      </div>
+    </div>
+  </div>
+  <p class="note">Видео и данные результатов должны автоматически удаляться по истечении 7 дней. В этой версии используется хранилище браузера; окончательное серверное хранение будет подключено отдельно.</p>
+</section>
+
+<!-- ПРОФИЛЬ -->
+<section class="page" id="profile">
+  <h1>Мой профиль</h1>
+  <div class="card">
+    <div class="profile-center">
+      <div class="avatar" id="avatarView">👤</div>
+      <label class="badge" for="avatarInput" style="cursor:pointer">📷 Изменить фото</label>
+      <input type="file" id="avatarInput" accept="image/*">
+      <h2 id="profileHeading" style="margin:4px 0">Пользователь GAPCUT</h2>
+      <span class="badge">GAPCUT AI MEMBER</span>
+    </div>
+    <div class="section-title">Имя пользователя</div>
+    <input class="field" id="profileName" placeholder="Введите своё имя">
+    <button class="btn" style="margin-top:12px" onclick="saveProfile()">Сохранить профиль</button>
+  </div>
+
+  <div class="card">
+    <b>📦 Хранение результатов</b>
+    <p class="muted" style="font-size:12px">Готовые видео доступны в течение 7 дней. По истечении срока они удаляются автоматически.</p>
+    <div class="row between">
+      <span class="note">Срок хранения</span>
+      <b>7 дней</b>
+    </div>
+  </div>
+  <div class="card">
+    <b>О приложении</b>
+    <p class="note">GAPCUT AI — интеллектуальный помощник для автоматического монтажа видео.</p>
+    <span class="badge">Version 1.0 UI</span>
+  </div>
+</section>
+
 </div>
 
-<label class="upload">
-  <input type="file" id="video" accept="video/mp4,video/quicktime,video/*">
-  <div class="upload-icon">↑</div>
-  <strong>Интихоби видео</strong>
-  <p>Барои бор кардан инҷоро зер кун</p>
-  <div id="fileInfo">MP4 · MOV · Видеои худро интихоб кун</div>
-</label>
-
-<div class="section-head">
-  <h3>02 / Услуби монтаж</h3>
-  <span>CHOOSE YOUR STYLE</span>
-</div>
-
-<div class="styles">
-  <button type="button" class="style active" data-style="Viral">
-    <div class="style-art"><span>🔥</span></div>
-    <div class="style-info"><strong>VIRAL</strong><p>Субтитри динамикӣ</p></div>
+<!-- НИЖНЕЕ МЕНЮ -->
+<nav class="nav">
+  <button class="active" data-page="home" onclick="go('home')">
+    <span class="nav-icon">🏠</span>Главная
   </button>
-
-  <button type="button" class="style" data-style="Classic">
-    <div class="style-art"><span>🎬</span></div>
-    <div class="style-info"><strong>CLASSIC</strong><p>Тарҳи тоза ва зебо</p></div>
+  <button data-page="invite" onclick="go('invite')">
+    <span class="nav-icon">🎁</span>Пригласить
   </button>
-
-  <button type="button" class="style" data-style="Cinema">
-    <div class="style-art"><span>🎥</span></div>
-    <div class="style-info"><strong>CINEMA</strong><p>Услуби кинематографӣ</p></div>
+  <button data-page="montage" onclick="go('montage')">
+    <span class="nav-icon">✂️</span>Монтаж
   </button>
-
-  <button type="button" class="style" data-style="Podcast">
-    <div class="style-art"><span>🎙️</span></div>
-    <div class="style-info"><strong>PODCAST</strong><p>Барои суҳбат ва подкаст</p></div>
+  <button data-page="results" onclick="go('results')">
+    <span class="nav-icon">🎞️</span>Результаты
   </button>
-
-  <button type="button" class="style" data-style="Karaoke">
-    <div class="style-art"><span>🎤</span></div>
-    <div class="style-info"><strong>KARAOKE</strong><p>Калимаҳо бо аниматсия</p></div>
+  <button data-page="profile" onclick="go('profile')">
+    <span class="nav-icon">👤</span>Профиль
   </button>
+</nav>
 
-  <button type="button" class="style" data-style="Creator">
-    <div class="style-art"><span>⚡</span></div>
-    <div class="style-info"><strong>CREATOR</strong><p>Барои Reels ва TikTok</p></div>
-  </button>
-</div>
-
-<div class="section-head">
-  <h3>03 / Забони субтитр</h3>
-  <span>LANGUAGE</span>
-</div>
-
-<div class="language">
-  <button type="button" class="lang active" data-lang="tg">🇹🇯 Тоҷикӣ</button>
-  <button type="button" class="lang" data-lang="ru">🇷🇺 Русский</button>
-  <button type="button" class="lang" data-lang="both">Ҳар ду</button>
-</div>
-
-<div class="section-head">
-  <h3>04 / Формати видео</h3>
-  <span>VIDEO FORMAT</span>
-</div>
-
-<div class="options">
-  <button type="button" class="option active" data-format="9:16">▯ 9:16 Reels</button>
-  <button type="button" class="option" data-format="16:9">▭ 16:9 YouTube</button>
-  <button type="button" class="option" data-format="1:1">□ 1:1 Square</button>
-  <button type="button" class="option" data-format="original">Original</button>
-</div>
-
-<button type="button" class="main-btn" id="start">
-  ✦ START AI AUTO EDIT
-</button>
-
-<div id="progressBox">
-  <div class="loader" id="loader"></div>
-  <div id="progressText">Видео омода мешавад...</div>
-</div>
-
-<div id="errorText"></div>
-
-<div id="resultBox">
-  <strong>✅ Видеои шумо омода шуд!</strong>
-  <video id="resultVideo" controls playsinline></video>
-  <a id="downloadVideo" class="result-link" download="gapcut_ai_video.mp4">
-    ⬇️ Скачать готовое видео
-  </a>
-</div>
-
-<p class="status">
-  GAPCUT AI · YOUR PERSONAL AI VIDEO STUDIO
-</p>
-
-<footer class="bottom">
-  <span><b>✦</b>AI STUDIO</span>
-  <span><b>◈</b>SMART EDIT</span>
-  <span><b>◉</b>CREATOR</span>
-</footer>
-
-</main>
+<div class="toast" id="toast"></div>
 
 <script>
-"use strict";
+const $ = id => document.getElementById(id);
 
-/* ==================================
-   TELEGRAM MINI APP
-================================== */
+let selectedTask="Полный AI-монтаж";
+let selectedStyle="Viral Reels";
+let selectedFormat="9:16";
+let selectedFile=null;
 
-const tg = window.Telegram?.WebApp;
-
-if (tg) {
-  tg.ready();
-  tg.expand();
+function go(page){
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  $(page).classList.add("active");
+  document.querySelectorAll(".nav button").forEach(b=>{
+    b.classList.toggle("active",b.dataset.page===page);
+  });
+  window.scrollTo({top:0,behavior:"smooth"});
+  if(page==="results") renderResults();
+  if(page==="invite") makeInviteLink();
 }
 
-/* ==================================
-   SERVER SETTINGS
-================================== */
-
-const API_URL = "https://gapcut-ai.onrender.com/api/process";
-
-/* ==================================
-   SELECTED OPTIONS
-================================== */
-
-let selectedStyle = "Viral";
-let selectedLanguage = "tg";
-let selectedFormat = "9:16";
-let resultUrl = null;
-
-/* ==================================
-   ELEMENTS
-================================== */
-
-const videoInput = document.getElementById("video");
-const startButton = document.getElementById("start");
-
-const fileInfo = document.getElementById("fileInfo");
-const progressBox = document.getElementById("progressBox");
-const progressText = document.getElementById("progressText");
-const loader = document.getElementById("loader");
-
-const errorText = document.getElementById("errorText");
-const resultBox = document.getElementById("resultBox");
-const resultVideo = document.getElementById("resultVideo");
-const downloadVideo = document.getElementById("downloadVideo");
-
-/* ==================================
-   NOTIFICATIONS
-================================== */
-
-function notify(message) {
-  if (tg && typeof tg.showAlert === "function") {
-    tg.showAlert(message);
-  } else {
-    alert(message);
-  }
+function toast(message){
+  const el=$("toast");
+  el.textContent=message;
+  el.style.display="block";
+  clearTimeout(window.toastTimer);
+  window.toastTimer=setTimeout(()=>el.style.display="none",2400);
 }
 
-/* ==================================
-   STYLE SELECTION
-================================== */
-
-document.querySelectorAll(".style").forEach(button => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".style").forEach(item => {
-      item.classList.remove("active");
+function setupGroup(id,callback){
+  $(id).querySelectorAll(".task").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      $(id).querySelectorAll(".task").forEach(x=>x.classList.remove("active"));
+      btn.classList.add("active");
+      callback(btn.dataset.value);
     });
-
-    button.classList.add("active");
-    selectedStyle = button.dataset.style;
   });
+}
+setupGroup("tasks",v=>selectedTask=v);
+setupGroup("styles",v=>selectedStyle=v);
+setupGroup("formats",v=>selectedFormat=v);
+
+$("videoInput").addEventListener("change",e=>{
+  selectedFile=e.target.files[0];
+  if(!selectedFile)return;
+  $("fileInfo").textContent="✓ "+selectedFile.name+
+    " · "+(selectedFile.size/1024/1024).toFixed(1)+" MB";
 });
 
-/* ==================================
-   LANGUAGE SELECTION
-================================== */
+function preparePreview(){
+  if(!selectedFile){
+    toast("Сначала загрузи видео");
+    return;
+  }
+  $("summary").textContent=
+    selectedTask+" · "+selectedStyle+" · "+selectedFormat;
+  $("previewSection").classList.remove("hidden");
+  $("processing").classList.add("hidden");
+  $("previewSection").scrollIntoView({behavior:"smooth"});
+}
 
-document.querySelectorAll(".lang").forEach(button => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".lang").forEach(item => {
-      item.classList.remove("active");
-    });
+function updatePreview(){
+  const text=$("subtitleText").value.trim();
+  $("previewTitle").textContent=text||"ТЕКСТ НЕ ДОБАВЛЕН";
+  toast("Текст обновлён");
+}
 
-    button.classList.add("active");
-    selectedLanguage = button.dataset.lang;
+function confirmMontage(){
+  $("processing").classList.remove("hidden");
+  $("processing").scrollIntoView({behavior:"smooth"});
+  toast("Демо: нужен AI API для реального монтажа");
+}
+
+// IndexedDB барои нигоҳ доштани файлҳои натиҷа
+const DB_NAME="gapcut_ai_db";
+const STORE="results";
+let db;
+
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const request=indexedDB.open(DB_NAME,1);
+    request.onupgradeneeded=()=>{
+      request.result.createObjectStore(STORE,{keyPath:"id"});
+    };
+    request.onsuccess=()=>resolve(request.result);
+    request.onerror=()=>reject(request.error);
   });
-});
+}
 
-/* ==================================
-   VIDEO FORMAT SELECTION
-================================== */
-
-document.querySelectorAll(".option").forEach(button => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".option").forEach(item => {
-      item.classList.remove("active");
-    });
-
-    button.classList.add("active");
-    selectedFormat = button.dataset.format;
-  });
-});
-
-/* ==================================
-   FILE SELECTION
-================================== */
-
-videoInput.addEventListener("change", event => {
-  const file = event.target.files[0];
-
-  errorText.textContent = "";
-  resultBox.style.display = "none";
-  progressBox.style.display = "none";
-
-  if (resultUrl) {
-    URL.revokeObjectURL(resultUrl);
-    resultUrl = null;
-  }
-
-  if (!file) {
-    fileInfo.textContent = "MP4 · MOV · Видеои худро интихоб кун";
-    return;
-  }
-
-  const sizeMB = (file.size / 1024 / 1024).toFixed(1);
-
-  fileInfo.textContent =
-    "✓ " + file.name + " · " + sizeMB + " MB";
-});
-
-/* ==================================
-   START VIDEO PROCESSING
-================================== */
-
-startButton.addEventListener("click", async () => {
-
-  const file = videoInput.files[0];
-
-  errorText.textContent = "";
-
-  if (!file) {
-    notify("Аввал видеоро интихоб кун!");
-    return;
-  }
-
-  if (!file.type.startsWith("video/")) {
-    notify("Лутфан файли видео интихоб кун.");
-    return;
-  }
-
-  if (file.size > 19 * 1024 * 1024) {
-    notify("Ҳаҷми видео бояд аз 19 MB зиёд набошад.");
-    return;
-  }
-
-  if (!tg || !tg.initData) {
-    notify("Mini App-ро аз дохили Telegram кушоед.");
-    return;
-  }
-
-  if (startButton.disabled) {
-    return;
-  }
-
-  startButton.disabled = true;
-  startButton.textContent = "⏳ AI PROCESSING...";
-
-  progressBox.style.display = "block";
-  loader.style.display = "block";
-  resultBox.style.display = "none";
-
-  progressText.textContent =
-    "📤 Видео ба сервер фиристода мешавад...";
-
-  if (resultUrl) {
-    URL.revokeObjectURL(resultUrl);
-    resultUrl = null;
-  }
-
-  try {
-
-    const formData = new FormData();
-
-    formData.append("file", file, file.name);
-    formData.append("style", selectedStyle);
-    formData.append("language", selectedLanguage);
-    formData.append("video_format", selectedFormat);
-    formData.append("init_data", tg.initData);
-
-    progressText.textContent =
-      "🧠 AI овозро мешиносад ва субтитр месозад...";
-
-    const response = await fetch(API_URL, {
-      method: "POST",
-      body: formData
-    });
-
-    if (!response.ok) {
-
-      let message = "Ҳангоми коркарди видео хатогӣ шуд.";
-
-      try {
-        const data = await response.json();
-
-        if (data.detail) {
-          message = data.detail;
+async function cleanExpired(){
+  try{
+    db= db || await openDB();
+    const tx=db.transaction(STORE,"readwrite");
+    const store=tx.objectStore(STORE);
+    const req=store.getAll();
+    req.onsuccess=()=>{
+      const now=Date.now();
+      req.result.forEach(item=>{
+        if(now-item.createdAt>=7*24*60*60*1000){
+          store.delete(item.id);
         }
-      } catch (_) {}
+      });
+    };
+  }catch(e){console.log("Storage cleanup:",e)}
+}
 
-      throw new Error(message);
-    }
-
-    const contentType =
-      response.headers.get("content-type") || "";
-
-    if (!contentType.includes("video/")) {
-      throw new Error("Сервер файли видеоиро барнагардонд.");
-    }
-
-    progressText.textContent =
-      "✨ Видео сохта шуд. Натиҷа бор карда мешавад...";
-
-    const blob = await response.blob();
-
-    if (!blob.size) {
-      throw new Error("Файли натиҷа холӣ аст.");
-    }
-
-    if (blob.size > 49 * 1024 * 1024) {
-      throw new Error("Ҳаҷми видеои тайёр аз 49 MB зиёд аст.");
-    }
-
-    resultUrl = URL.createObjectURL(blob);
-
-    resultVideo.src = resultUrl;
-    downloadVideo.href = resultUrl;
-
-    resultBox.style.display = "block";
-    loader.style.display = "none";
-
-    progressText.textContent =
-      "✅ Монтаж бомуваффақият анҷом ёфт!";
-
-    resultBox.scrollIntoView({
-      behavior: "smooth",
-      block: "center"
+async function saveResult(file){
+  try{
+    db=db||await openDB();
+    const item={
+      id:Date.now().toString(),
+      name:file.name,
+      blob:file,
+      createdAt:Date.now(),
+      task:selectedTask,
+      style:selectedStyle,
+      format:selectedFormat
+    };
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(STORE,"readwrite");
+      tx.objectStore(STORE).put(item);
+      tx.oncomplete=resolve;
+      tx.onerror=()=>reject(tx.error);
     });
-
-    notify("Видео омода шуд!");
-
-  } catch (error) {
-
-    console.error("GAPCUT AI ERROR:", error);
-
-    loader.style.display = "none";
-
-    progressText.textContent =
-      "❌ Коркарди видео ноком шуд.";
-
-    errorText.textContent =
-      error.message || "Хатои номаълум. Баъдтар кӯшиш кунед.";
-
-    notify(errorText.textContent);
-
-  } finally {
-
-    startButton.disabled = false;
-    startButton.textContent = "✦ START AI AUTO EDIT";
-
+    renderResults();
+  }catch(e){
+    toast("Не удалось сохранить файл. Возможно, недостаточно памяти.");
   }
+}
+
+async function renderResults(){
+  await cleanExpired();
+  try{
+    db=db||await openDB();
+    const items=await new Promise((resolve,reject)=>{
+      const req=db.transaction(STORE).objectStore(STORE).getAll();
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>reject(req.error);
+    });
+    const list=$("resultsList");
+    list.innerHTML="";
+    if(!items.length){
+      list.innerHTML='<div class="empty"><div style="font-size:42px">🎞️</div><b>Пока нет результатов</b><p class="note">Готовые видео появятся здесь.</p><button class="btn" onclick="go(\'montage\')">Создать проект</button></div>';
+      return;
+    }
+    items.sort((a,b)=>b.createdAt-a.createdAt);
+    items.forEach(item=>{
+      const days=Math.max(0,7-Math.floor((Date.now()-item.createdAt)/86400000));
+      const url=URL.createObjectURL(item.blob);
+      const div=document.createElement("div");
+      div.className="result-item";
+      div.innerHTML=`
+        <div class="result-thumb"><video muted playsinline></video></div>
+        <div class="result-info">
+          <b></b>
+          <small></small>
+          <small>Удаление через ${days} дн.</small>
+          <a class="badge" download style="display:inline-block;margin-top:7px;text-decoration:none" href="${url}">Скачать</a>
+        </div>
+        <button class="delete-btn">Удалить</button>`;
+      div.querySelector("video").src=url;
+      div.querySelector(".result-info b").textContent=item.name;
+      div.querySelector(".result-info small").textContent=
+        item.task+" · "+item.style+" · "+item.format;
+      div.querySelector(".delete-btn").onclick=()=>deleteResult(item.id);
+      list.appendChild(div);
+    });
+  }catch(e){console.log(e)}
+}
+
+async function deleteResult(id){
+  db=db||await openDB();
+  const tx=db.transaction(STORE,"readwrite");
+  tx.objectStore(STORE).delete(id);
+  tx.oncomplete=()=>{
+    toast("Результат удалён");
+    renderResults();
+  };
+}
+
+// Профил
+function loadProfile(){
+  const name=localStorage.getItem("gapcut_name")||"Пользователь GAPCUT";
+  $("profileName").value=name;
+  $("profileHeading").textContent=name;
+  const photo=localStorage.getItem("gapcut_avatar");
+  if(photo)$("avatarView").innerHTML='<img src="'+photo+'" alt="Avatar">';
+}
+
+function saveProfile(){
+  const name=$("profileName").value.trim()||"Пользователь GAPCUT";
+  localStorage.setItem("gapcut_name",name);
+  $("profileHeading").textContent=name;
+  toast("Профиль сохранён");
+}
+
+$("avatarInput").addEventListener("change",e=>{
+  const file=e.target.files[0];
+  if(!file)return;
+  if(!file.type.startsWith("image/")){
+    toast("Выбери изображение");
+    return;
+  }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const canvas=document.createElement("canvas");
+      const size=250;
+      canvas.width=size;canvas.height=size;
+      const ctx=canvas.getContext("2d");
+      const scale=Math.max(size/img.width,size/img.height);
+      const w=img.width*scale,h=img.height*scale;
+      ctx.drawImage(img,(size-w)/2,(size-h)/2,w,h);
+      const data=canvas.toDataURL("image/jpeg",.78);
+      localStorage.setItem("gapcut_avatar",data);
+      $("avatarView").innerHTML='<img src="'+data+'" alt="Avatar">';
+      toast("Фото профиля обновлено");
+    };
+    img.src=reader.result;
+  };
+  reader.readAsDataURL(file);
 });
 
-/* ==================================
-   CLEANUP VIDEO PREVIEW
-================================== */
-
-window.addEventListener("beforeunload", () => {
-  if (resultUrl) {
-    URL.revokeObjectURL(resultUrl);
+// Ссылкаи даъват
+function makeInviteLink(){
+  let code=localStorage.getItem("gapcut_invite_code");
+  if(!code){
+    code="GC"+Math.random().toString(36).slice(2,10).toUpperCase();
+    localStorage.setItem("gapcut_invite_code",code);
   }
-});
+  const base=location.href.split("?")[0].split("#")[0];
+  $("inviteLink").textContent=base+"?ref="+code;
+}
+
+async function copyInvite(){
+  const link=$("inviteLink").textContent;
+  try{
+    await navigator.clipboard.writeText(link);
+    toast("Ссылка скопирована");
+  }catch(e){
+    toast("Скопируй ссылку вручную");
+  }
+}
+
+async function shareInvite(){
+  const link=$("inviteLink").textContent;
+  if(navigator.share){
+    try{await navigator.share({title:"GAPCUT AI",text:"Попробуй GAPCUT AI!",url:link})}
+    catch(e){}
+  }else copyInvite();
+}
+
+// Оғози барнома
+loadProfile();
+makeInviteLink();
+cleanExpired();
 </script>
-
 </body>
 </html>
