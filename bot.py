@@ -1,627 +1,358 @@
-
 import asyncio
-import json
 import logging
 import os
 import re
 import shutil
+import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import httpx
-from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message,
-    FSInputFile,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    FSInputFile,
 )
+from dotenv import load_dotenv
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-MAX_VIDEO_SIZE = 19 * 1024 * 1024
+MAX_INPUT_SIZE = 19 * 1024 * 1024
 MAX_OUTPUT_SIZE = 49 * 1024 * 1024
 MAX_DURATION = 180
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN гузошта нашудааст.")
-
-if not GROQ_API_KEY:
-    raise RuntimeError("GROQ_API_KEY гузошта нашудааст.")
+GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s | %(levelname)s | %(message)s"
 )
-
 logger = logging.getLogger("gapcut")
+
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is missing")
+
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY is missing")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-job_lock = asyncio.Lock()
-
-keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🎬 Монтаж кардани видео")],
-        [KeyboardButton(text="ℹ️ Дастур / Инструкция")],
-    ],
-    resize_keyboard=True
-)
+user_busy = set()
 
 
-async def run_command(command):
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+def run_command(command, timeout=300):
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout
     )
 
-    stdout, stderr = await process.communicate()
+    if result.returncode != 0:
+        logger.error(result.stderr[-4000:])
+        raise RuntimeError("FFmpeg processing failed")
 
-    if process.returncode != 0:
-        error = stderr.decode(
-            "utf-8",
-            errors="ignore"
-        )
-
-        raise RuntimeError(error[-2500:])
-
-    return (
-        stdout.decode("utf-8", errors="ignore"),
-        stderr.decode("utf-8", errors="ignore")
-    )
+    return result
 
 
-async def get_video_info(video_path):
-    stdout, _ = await run_command([
+def get_video_duration(path):
+    result = run_command([
         "ffprobe",
         "-v", "error",
-        "-show_entries",
-        "format=duration:stream=codec_type",
-        "-of", "json",
-        str(video_path)
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(path)
     ])
 
-    data = json.loads(stdout)
+    return float(result.stdout.strip())
 
-    duration = float(data["format"]["duration"])
 
-    has_audio = any(
-        stream.get("codec_type") == "audio"
-        for stream in data.get("streams", [])
+async def download_telegram_file(message, destination):
+    media = message.video or message.document
+
+    if not media:
+        raise ValueError("Файл видео ёфт нашуд")
+
+    if media.file_size and media.file_size > MAX_INPUT_SIZE:
+        raise ValueError("Ҳаҷми видео бояд аз 19 MB зиёд набошад.")
+
+    file_info = await bot.get_file(media.file_id)
+
+    await bot.download_file(
+        file_info.file_path,
+        destination=destination
     )
-
-    has_video = any(
-        stream.get("codec_type") == "video"
-        for stream in data.get("streams", [])
-    )
-
-    if not has_video:
-        raise RuntimeError("Видеотрек ёфт нашуд.")
-
-    return duration, has_audio
 
 
 async def transcribe_audio(audio_path):
-    url = (
-        "https://api.groq.com/openai/v1/"
-        "audio/transcriptions"
-    )
-
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}"
     }
 
-    data = [
-        ("model", "whisper-large-v3-turbo"),
-        ("response_format", "verbose_json"),
-        ("timestamp_granularities[]", "word"),
-        ("temperature", "0"),
-    ]
+    data = {
+        "model": "whisper-large-v3-turbo",
+        "response_format": "verbose_json"
+    }
 
-    with open(audio_path, "rb") as audio_file:
+    with open(audio_path, "rb") as audio:
         files = {
             "file": (
-                audio_path.name,
-                audio_file,
-                "audio/mpeg"
+                "audio.wav",
+                audio,
+                "audio/wav"
             )
         }
 
-        async with httpx.AsyncClient(
-            timeout=180
-        ) as client:
-
+        async with httpx.AsyncClient(timeout=180) as client:
             response = await client.post(
-                url,
+                GROQ_URL,
                 headers=headers,
                 data=data,
                 files=files
             )
 
     if response.status_code != 200:
-        raise RuntimeError(
-            f"Groq API error {response.status_code}: "
-            f"{response.text[:1000]}"
+        logger.error(response.text[:2000])
+        raise RuntimeError("Хатогӣ ҳангоми шинохтани овоз")
+
+    return response.json()
+
+
+def detect_silences(video_path):
+    command = [
+        "ffmpeg",
+        "-i", str(video_path),
+        "-af", "silencedetect=noise=-35dB:d=0.7",
+        "-f", "null",
+        "-"
+    ]
+
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+
+    silence_starts = []
+    silence_ranges = []
+    current_start = None
+
+    for line in result.stderr.splitlines():
+        start_match = re.search(
+            r"silence_start:\s*([0-9.]+)", line
+        )
+        end_match = re.search(
+            r"silence_end:\s*([0-9.]+)", line
         )
 
-    result = response.json()
+        if start_match:
+            current_start = float(start_match.group(1))
 
-    words = result.get("words", [])
+        if end_match and current_start is not None:
+            end = float(end_match.group(1))
+            silence_ranges.append((current_start, end))
+            current_start = None
+
+    return silence_ranges
+
+
+def make_ass_subtitles(transcription, output_path):
+    words = []
+
+    for segment in transcription.get("segments", []):
+        for word in segment.get("words", []):
+            text = word.get("word", "").strip()
+
+            if not text:
+                continue
+
+            words.append({
+                "start": float(word["start"]),
+                "end": float(word["end"]),
+                "text": text
+            })
 
     if not words:
         raise RuntimeError(
-            "Groq матнро баргардонд, аммо вақти "
-            "калимаҳо дастрас нест."
+            "Матни субтитрҳо аз аудио гирифта нашуд"
         )
 
-    return words
-
-
-async def detect_silences(video_path, duration):
-    _, stderr = await run_command([
-        "ffmpeg",
-        "-hide_banner",
-        "-i", str(video_path),
-        "-af",
-        "silencedetect=noise=-38dB:d=0.65",
-        "-f", "null",
-        "-"
-    ])
-
-    starts = re.findall(
-        r"silence_start:\s*([0-9.]+)",
-        stderr
-    )
-
-    ends = re.findall(
-        r"silence_end:\s*([0-9.]+)",
-        stderr
-    )
-
-    silences = []
-
-    for index, start_value in enumerate(starts):
-        start = float(start_value)
-
-        if index < len(ends):
-            end = float(ends[index])
-        else:
-            end = duration
-
-        start = max(0.0, start - 0.12)
-        end = min(duration, end + 0.12)
-
-        if end > start:
-            silences.append((start, end))
-
-    return silences
-
-
-def make_keep_segments(duration, silences):
-    segments = []
-    cursor = 0.0
-
-    for start, end in silences:
-        if start > cursor + 0.25:
-            segments.append((cursor, start))
-
-        cursor = max(cursor, end)
-
-    if duration > cursor + 0.25:
-        segments.append((cursor, duration))
-
-    if not segments:
-        return [(0.0, duration)]
-
-    return segments
-
-
-def compressed_time(original_time, silences):
-    removed = 0.0
-
-    for start, end in silences:
-        if original_time >= end:
-            removed += end - start
-
-        elif original_time > start:
-            return None
-
-    return max(0.0, original_time - removed)
-
-
-def ass_time(seconds):
-    seconds = max(0.0, seconds)
-
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = seconds % 60
-
-    return (
-        f"{hours}:"
-        f"{minutes:02}:"
-        f"{secs:05.2f}"
-    )
-
-
-def clean_ass_text(value):
-    value = str(value)
-
-    return (
-        value.replace("\\", "\\\\")
-        .replace("{", "\\{")
-        .replace("}", "\\}")
-        .replace("\n", " ")
-    )
-
-
-def create_ass(words, silences, output_path):
     header = """[Script Info]
 ScriptType: v4.00+
-PlayResX: 720
-PlayResY: 1280
-WrapStyle: 2
+PlayResX: 1080
+PlayResY: 1920
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,DejaVu Sans,54,&H00FFFFFF,&H0000D5FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,4,1,2,45,45,85,1
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,58,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,1,4,1,2,70,70,250,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-    prepared = []
+    def ass_time(seconds):
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours}:{minutes:02d}:{secs:05.2f}"
 
-    for item in words:
-        try:
-            start = float(item["start"])
-            end = float(item["end"])
-            word = clean_ass_text(
-                item["word"].strip()
-            )
+    events = []
 
-        except (KeyError, TypeError, ValueError):
-            continue
+    for word in words:
+        start = word["start"]
+        end = max(word["end"], start + 0.12)
 
-        new_start = compressed_time(
-            start,
-            silences
+        safe_text = (
+            word["text"]
+            .replace("\\", "")
+            .replace("{", "")
+            .replace("}", "")
         )
 
-        new_end = compressed_time(
-            end,
-            silences
+        event = (
+            f"Dialogue: 0,{ass_time(start)},"
+            f"{ass_time(end)},Default,,0,0,0,,"
+            f"{{\\c&H00FFFF&}}{safe_text}"
         )
 
-        if new_start is None or new_end is None:
-            continue
+        events.append(event)
 
-        if not word or new_end <= new_start:
-            continue
+    with open(output_path, "w", encoding="utf-8") as file:
+        file.write(header + "\n".join(events))
 
-        prepared.append(
-            (new_start, new_end, word)
-        )
 
-    lines = []
-
-    for index in range(0, len(prepared), 6):
-        group = prepared[index:index + 6]
-
-        if not group:
-            continue
-
-        start = group[0][0]
-        end = group[-1][1]
-
-        karaoke = []
-
-        for word_start, word_end, word in group:
-            duration_cs = max(
-                1,
-                int((word_end - word_start) * 100)
-            )
-
-            karaoke.append(
-                f"{{\\k{duration_cs}}}{word}"
-            )
-
-        subtitle_text = " ".join(karaoke)
-
-        lines.append(
-            f"Dialogue: 0,"
-            f"{ass_time(start)},"
-            f"{ass_time(end)},"
-            f"Default,,0,0,0,,"
-            f"{subtitle_text}"
-        )
-
-    output_path.write_text(
-        header + "\n".join(lines) + "\n",
-        encoding="utf-8"
+def render_video(video_path, subtitle_path, output_path):
+    subtitle_filter = (
+        "ass=" + str(subtitle_path).replace("\\", "/")
     )
 
-
-async def render_video(
-    video_path,
-    output_path,
-    ass_path,
-    segments
-):
-    filters = []
-
-    count = len(segments)
-
-    video_labels = "".join(
-        f"[vsrc{i}]" for i in range(count)
-    )
-
-    audio_labels = "".join(
-        f"[asrc{i}]" for i in range(count)
-    )
-
-    filters.append(
-        f"[0:v]split={count}{video_labels}"
-    )
-
-    filters.append(
-        f"[0:a]asplit={count}{audio_labels}"
-    )
-
-    for index, (start, end) in enumerate(segments):
-        filters.append(
-            f"[vsrc{index}]"
-            f"trim=start={start:.3f}:end={end:.3f},"
-            f"setpts=PTS-STARTPTS[v{index}]"
-        )
-
-        filters.append(
-            f"[asrc{index}]"
-            f"atrim=start={start:.3f}:end={end:.3f},"
-            f"asetpts=PTS-STARTPTS[a{index}]"
-        )
-
-    concat_inputs = "".join(
-        f"[v{i}][a{i}]"
-        for i in range(count)
-    )
-
-    filters.append(
-        f"{concat_inputs}"
-        f"concat=n={count}:v=1:a=1[v][a]"
-    )
-
-    filters.append(
-        f"[v]"
-        f"scale=720:-2:"
-        f"force_original_aspect_ratio=decrease,"
-        f"pad=720:ceil(ih/2)*2:"
-        f"(ow-iw)/2:(oh-ih)/2,"
-        f"ass={ass_path}[vout]"
-    )
-
-    await run_command([
+    run_command([
         "ffmpeg",
         "-y",
-        "-hide_banner",
         "-i", str(video_path),
-        "-filter_complex",
-        ";".join(filters),
-        "-map", "[vout]",
-        "-map", "[a]",
+        "-vf", subtitle_filter,
         "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "27",
-        "-pix_fmt", "yuv420p",
+        "-preset", "ultrafast",
+        "-crf", "28",
         "-c:a", "aac",
-        "-b:a", "96k",
+        "-b:a", "128k",
         "-movflags", "+faststart",
         str(output_path)
-    ])
+    ], timeout=600)
 
 
-@dp.message(CommandStart())
-async def start_handler(message: Message):
-    await message.answer(
-        "Салом! 👋 Ба GapCut AI хуш омадӣ.\n\n"
-        "Видео фирист — бот хомӯшиҳои дарозро "
-        "кӯтоҳ мекунад, суханро мешиносад ва "
-        "субтитрҳои калима ба калима месозад.\n\n"
-        "Привет! Отправь видео, и я автоматически "
-        "смонтирую его.",
-        reply_markup=keyboard
-    )
+async def process_video(message: Message):
+    user_id = message.from_user.id
 
-
-@dp.message(
-    F.text.in_({"ℹ️ Дастур / Инструкция"})
-)
-async def help_handler(message: Message):
-    await message.answer(
-        "🎬 Дастур:\n"
-        "1. Видео фирист.\n"
-        "2. То анҷоми кор интизор шав.\n"
-        "3. Видеои тайёрро гир.\n\n"
-        "Маҳдудиятҳо:\n"
-        "• Ҳаҷм: то 19 MB\n"
-        "• Давомнокӣ: то 3 дақиқа\n\n"
-        "Инструкция:\n"
-        "Отправь видео до 19 MB и длительностью "
-        "до 3 минут."
-    )
-
-
-@dp.message(F.video | F.document)
-async def video_handler(message: Message):
-    video = message.video
-
-    if message.document:
-        if not (
-            message.document.mime_type or ""
-        ).startswith("video/"):
-
-            await message.answer(
-                "Лутфан файли видеоӣ фирист."
-            )
-            return
-
-        video = message.document
-
-    if not video:
-        await message.answer("Видео ёфт нашуд.")
-        return
-
-    if video.file_size and video.file_size > MAX_VIDEO_SIZE:
+    if user_id in user_busy:
         await message.answer(
-            "Ҳаҷми видео бояд аз 19 MB зиёд набошад."
+            "⏳ Видеои қаблии шумо ҳоло коркард шуда истодааст."
         )
         return
 
-    if job_lock.locked():
+    user_busy.add(user_id)
+
+    try:
         await message.answer(
-            "Ҳоло як видео коркард шуда истодааст. "
-            "Каме интизор шав."
-        )
-        return
-
-    async with job_lock:
-        work_dir = Path(
-            tempfile.mkdtemp(prefix="gapcut_")
+            "🎬 Видео қабул шуд!\n"
+            "⏳ Лутфан интизор шавед..."
         )
 
-        try:
-            await message.answer(
-                "📥 Видео қабул шуд. Коркард оғоз шуд..."
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+
+            video_path = folder / "input.mp4"
+            audio_path = folder / "audio.wav"
+            subtitle_path = folder / "subtitles.ass"
+            output_path = folder / "gapcut_output.mp4"
+
+            await download_telegram_file(
+                message,
+                video_path
             )
 
-            input_path = work_dir / "input_video.mp4"
-            audio_path = work_dir / "audio.mp3"
-            ass_path = work_dir / "subtitles.ass"
-            output_path = work_dir / "gapcut_output.mp4"
-
-            telegram_file = await bot.get_file(
-                video.file_id
-            )
-
-            await bot.download_file(
-                telegram_file.file_path,
-                destination=input_path
-            )
-
-            duration, has_audio = await get_video_info(
-                input_path
-            )
+            duration = get_video_duration(video_path)
 
             if duration > MAX_DURATION:
-                await message.answer(
-                    "Давомнокии видео бояд то 3 дақиқа бошад."
+                raise ValueError(
+                    "⛔ Давомнокии видео бояд то 3 дақиқа бошад."
                 )
-                return
 
-            if not has_audio:
-                await message.answer(
-                    "Дар видео садо ёфт нашуд."
-                )
-                return
+            if duration <= 0:
+                raise ValueError("Давомнокии видео нодуруст аст.")
 
             await message.answer(
-                "🎧 Садо ва суханро таҳлил мекунам..."
+                "🎧 Қадами 1/3: Шинохтани овоз..."
             )
 
-            await run_command([
+            run_command([
                 "ffmpeg",
                 "-y",
-                "-i", str(input_path),
+                "-i", str(video_path),
                 "-vn",
                 "-ac", "1",
                 "-ar", "16000",
-                "-b:a", "64k",
+                "-c:a", "pcm_s16le",
                 str(audio_path)
             ])
 
-            if audio_path.stat().st_size > 24 * 1024 * 1024:
-                await message.answer(
-                    "Файли садо хеле калон шуд. "
-                    "Лутфан видеои кӯтоҳтар фирист."
-                )
-                return
-
-            words = await transcribe_audio(
+            transcription = await transcribe_audio(
                 audio_path
             )
 
             await message.answer(
-                "✂️ Хомӯшиҳои дарозро кӯтоҳ мекунам..."
+                "✂️ Қадами 2/3: Омода кардани субтитрҳо..."
             )
 
-            silences = await detect_silences(
-                input_path,
-                duration
-            )
-
-            segments = make_keep_segments(
-                duration,
-                silences
-            )
-
-            create_ass(
-                words,
-                silences,
-                ass_path
+            make_ass_subtitles(
+                transcription,
+                subtitle_path
             )
 
             await message.answer(
-                "🎬 Субтитрҳоро мегузорам ва видео месозам..."
+                "🎞️ Қадами 3/3: Сохтани видеои ниҳоӣ..."
             )
 
-            await render_video(
-                input_path,
-                output_path,
-                ass_path,
-                segments
+            render_video(
+                video_path,
+                subtitle_path,
+                output_path
             )
 
             if output_path.stat().st_size > MAX_OUTPUT_SIZE:
-                await message.answer(
-                    "Ҳаҷми видеои тайёр аз 49 MB зиёд шуд. "
-                    "Видеои кӯтоҳтар ё сабуктар фирист."
+                raise ValueError(
+                    "Ҳаҷми видеои тайёр аз 49 MB зиёд шуд."
                 )
-                return
 
             await message.answer_video(
                 FSInputFile(output_path),
-                caption="✅ GapCut AI — видеои тайёр!"
+                caption=(
+                    "✅ GapCut AI — видео омода шуд!\n\n"
+                    "🎬 Субтитрҳои автоматӣ илова шуданд."
+                ),
+                supports_streaming=True
             )
 
-        except Exception:
-            logger.exception(
-                "Video processing failed"
-            )
+    except ValueError as error:
+        await message.answer(f"⚠️ {error}")
 
-            await message.answer(
-                "❌ Ҳангоми коркарди видео хато рӯй дод.\n"
-                "Бори дигар кӯшиш кун. Агар такрор шавад, "
-                "ба администратор хабар деҳ."
-            )
+    except Exception:
+        logger.exception("Video processing error")
+        await message.answer(
+            "❌ Ҳангоми коркарди видео хатогӣ шуд.\n"
+            "Лутфан видеои дигарро санҷед."
+        )
 
-        finally:
-            shutil.rmtree(
-                work_dir,
-                ignore_errors=True
-            )
-
-
-async def main():
-    logger.info("GapCut AI is starting...")
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    finally:
+        user_busy.discard(user_id)
