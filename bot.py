@@ -5,45 +5,46 @@ import hmac
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
 import time
-
 from pathlib import Path
 from urllib.parse import parse_qsl
 
 import httpx
 import uvicorn
+from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import Command, CommandStart
 from aiogram.types import (
-    Message,
     FSInputFile,
-    InlineKeyboardMarkup,
     InlineKeyboardButton,
-    WebAppInfo
+    InlineKeyboardMarkup,
+    Message,
+    WebAppInfo,
 )
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 
-# =====================================
-# 1. SETTINGS
-# =====================================
+# =========================================================
+# CONFIG
+# =========================================================
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 PORT = int(os.getenv("PORT", "10000"))
+
+MINI_APP_URL = "https://gapcut-ai-web.vercel.app"
+SUPPORT_URL = "https://t.me/gapcutai"
+CHANNEL_URL = "https://t.me/aikomron"
 
 MAX_INPUT_SIZE = 19 * 1024 * 1024
 MAX_OUTPUT_SIZE = 49 * 1024 * 1024
@@ -51,878 +52,613 @@ MAX_DURATION = 180
 
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
-MINI_APP_URL = "https://gapcut-ai-web.vercel.app"
-
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is missing")
-
-if not GROQ_API_KEY:
-    raise RuntimeError("GROQ_API_KEY is missing")
-
-
-# =====================================
-# 2. LOGGING
-# =====================================
-
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
+logger = logging.getLogger("gapcut-ai")
 
-logger = logging.getLogger("GapCutAI")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN дар Environment Variables нест.")
+
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY дар Environment Variables нест.")
 
 
-# =====================================
-# 3. TELEGRAM BOT
-# =====================================
+# =========================================================
+# BOT + API
+# =========================================================
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-user_busy = set()
-
-
-# =====================================
-# 4. FASTAPI
-# =====================================
-
-app = FastAPI(
-    title="GAPCUT AI API",
-    version="1.0.0"
-)
+app = FastAPI(title="GAPCUT AI API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://gapcut-ai-web.vercel.app"
+        "https://gapcut-ai-web.vercel.app",
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"]
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
-@app.get("/")
-async def home():
-    return {
-        "name": "GAPCUT AI",
-        "status": "running",
-        "version": "1.0.0"
-    }
-
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok",
-        "service": "GAPCUT AI"
-    }
-
-
-# =====================================
-# 5. TELEGRAM MINI APP AUTH
-# =====================================
+# =========================================================
+# TELEGRAM MINI APP AUTH
+# =========================================================
 
 def validate_telegram_init_data(init_data: str):
-
     if not init_data:
         return None
 
     try:
-        values = dict(parse_qsl(
-            init_data,
-            keep_blank_values=True
-        ))
-
-        received_hash = values.pop("hash", None)
+        parsed = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = parsed.pop("hash", None)
 
         if not received_hash:
             return None
 
-        auth_date = int(values.get("auth_date", "0"))
-
-        if auth_date <= 0:
-            return None
-
-        if time.time() - auth_date > 86400:
-            return None
-
         data_check_string = "\n".join(
             f"{key}={value}"
-            for key, value in sorted(values.items())
+            for key, value in sorted(parsed.items())
         )
 
         secret_key = hmac.new(
             b"WebAppData",
             BOT_TOKEN.encode(),
-            hashlib.sha256
+            hashlib.sha256,
         ).digest()
 
         calculated_hash = hmac.new(
             secret_key,
             data_check_string.encode(),
-            hashlib.sha256
+            hashlib.sha256,
         ).hexdigest()
 
-        if not hmac.compare_digest(
-            calculated_hash,
-            received_hash
-        ):
+        if not hmac.compare_digest(calculated_hash, received_hash):
             return None
 
-        user_data = json.loads(values.get("user", "{}"))
+        auth_date = int(parsed.get("auth_date", "0"))
 
-        return user_data
+        # Қабули маълумоти кӯҳна манъ аст.
+        if time.time() - auth_date > 86400:
+            return None
+
+        user_data = json.loads(parsed.get("user", "{}"))
+        return user_data if user_data.get("id") else None
 
     except Exception:
-        logger.warning("Telegram authentication failed")
+        logger.exception("Telegram initData validation error")
         return None
 
 
-# =====================================
-# 6. FFMPEG COMMAND
-# =====================================
+# =========================================================
+# KEYBOARDS
+# =========================================================
 
-def run_command(command, timeout=300):
+def main_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎬 Монтаж",
+                    web_app=WebAppInfo(url=MINI_APP_URL),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💬 Поддержка",
+                    url=SUPPORT_URL,
+                ),
+                InlineKeyboardButton(
+                    text="📢 Наш канал",
+                    url=CHANNEL_URL,
+                ),
+            ],
+        ]
+    )
 
+
+# =========================================================
+# VIDEO / FFMPEG HELPERS
+# =========================================================
+
+def run_command(command, timeout=600):
     result = subprocess.run(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout
+        timeout=timeout,
     )
 
     if result.returncode != 0:
-        logger.error(result.stderr[-4000:])
-        raise RuntimeError("FFmpeg command failed")
+        raise RuntimeError(
+            result.stderr[-3000:] or "FFmpeg command failed"
+        )
 
-    return result
+    return result.stdout
 
 
-# =====================================
-# 7. VIDEO DURATION
-# =====================================
-
-def get_video_duration(video_path):
-
-    result = run_command([
+def get_duration(file_path):
+    output = run_command([
         "ffprobe",
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
-        str(video_path)
+        str(file_path),
     ])
 
-    return float(result.stdout.strip())
+    return float(output.strip())
 
 
-# =====================================
-# 8. EXTRACT AUDIO
-# =====================================
-
-def extract_audio(video_path, audio_path):
-
-    run_command([
-        "ffmpeg",
-        "-y",
-        "-i", str(video_path),
-        "-vn",
-        "-ac", "1",
-        "-ar", "16000",
-        "-c:a", "pcm_s16le",
-        str(audio_path)
-    ], timeout=300)
+def escape_ass_text(text):
+    text = str(text or "")
+    text = text.replace("\\", r"\\")
+    text = text.replace("{", r"\{")
+    text = text.replace("}", r"\}")
+    text = text.replace("\n", r"\N")
+    return text
 
 
-# =====================================
-# 9. GROQ WHISPER
-# =====================================
+def ass_time(seconds):
+    seconds = max(0.0, float(seconds))
+    total_cs = int(round(seconds * 100))
+    hours = total_cs // 360000
+    minutes = (total_cs // 6000) % 60
+    secs = (total_cs // 100) % 60
+    centiseconds = total_cs % 100
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centiseconds:02d}"
+
+
+# =========================================================
+# SUBTITLE STYLES
+# =========================================================
+
+STYLES = {
+    "viral": {
+        "font": "Arial",
+        "size": 58,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "bold": 1,
+        "outline_width": 4,
+        "margin_v": 100,
+    },
+    "classic": {
+        "font": "Arial",
+        "size": 42,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "bold": 0,
+        "outline_width": 2,
+        "margin_v": 65,
+    },
+    "cinema": {
+        "font": "Georgia",
+        "size": 42,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "bold": 0,
+        "outline_width": 2,
+        "margin_v": 80,
+    },
+    "podcast": {
+        "font": "Arial",
+        "size": 48,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00101010",
+        "bold": 1,
+        "outline_width": 3,
+        "margin_v": 75,
+    },
+    "karaoke": {
+        "font": "Arial",
+        "size": 56,
+        "primary": "&H0000FFFF",
+        "outline": "&H00000000",
+        "bold": 1,
+        "outline_width": 4,
+        "margin_v": 100,
+    },
+    "creator": {
+        "font": "Arial",
+        "size": 48,
+        "primary": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "bold": 1,
+        "outline_width": 3,
+        "margin_v": 85,
+    },
+}
+
+
+# =========================================================
+# GROQ WHISPER TRANSCRIPTION
+# =========================================================
 
 async def transcribe_audio(audio_path):
-
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}"
+        "Authorization": f"Bearer {GROQ_API_KEY}",
     }
 
     data = {
         "model": "whisper-large-v3-turbo",
         "response_format": "verbose_json",
-        "timestamp_granularities[]": "word"
+        "timestamp_granularities[]": "word",
     }
 
-    async with httpx.AsyncClient(timeout=180) as client:
-
-        with open(audio_path, "rb") as audio:
-
-            files = {
-                "file": (
-                    "audio.wav",
-                    audio,
-                    "audio/wav"
-                )
-            }
-
+    async with httpx.AsyncClient(timeout=300) as client:
+        with open(audio_path, "rb") as audio_file:
             response = await client.post(
                 GROQ_URL,
                 headers=headers,
                 data=data,
-                files=files
+                files={
+                    "file": (
+                        Path(audio_path).name,
+                        audio_file,
+                        "audio/mpeg",
+                    )
+                },
             )
 
     if response.status_code != 200:
-
-        logger.error(
-            "Groq error: %s",
-            response.text[:2000]
-        )
-
-        raise RuntimeError("Groq transcription failed")
+        logger.error("Groq error: %s", response.text[:2000])
+        raise RuntimeError("Хатогӣ ҳангоми шинохтани овоз. Баъдтар кӯшиш кунед.")
 
     result = response.json()
 
-    if not isinstance(result, dict):
-        raise RuntimeError("Groq response format is invalid")
+    segments = result.get("segments") or []
+    words = result.get("words") or []
 
-    return result
+    # Агар word timestamps набошад, аз segment timestamps истифода мебарем.
+    if not words and segments:
+        for segment in segments:
+            segments_words = str(segment.get("text", "")).split()
+            if not segments_words:
+                continue
 
+            start = float(segment.get("start", 0))
+            end = float(segment.get("end", start + 1))
+            step = max((end - start) / len(segments_words), 0.05)
 
-# =====================================
-# 10. SUBTITLE HELPERS
-# =====================================
+            for index, word in enumerate(segments_words):
+                words.append({
+                    "word": word,
+                    "start": start + index * step,
+                    "end": start + (index + 1) * step,
+                })
 
-def ass_time(seconds):
+    if not words:
+        raise RuntimeError("Матни овоз муайян карда нашуд.")
 
-    total = max(0, int(round(seconds * 100)))
-
-    hours = total // 360000
-    minutes = (total % 360000) // 6000
-    seconds_part = (total % 6000) / 100
-
-    return (
-        f"{hours}:"
-        f"{minutes:02d}:"
-        f"{seconds_part:05.2f}"
-    )
-
-
-def clean_ass_text(text):
-
-    text = str(text)
-    text = text.replace("\\", "")
-    text = text.replace("{", "")
-    text = text.replace("}", "")
-    text = text.replace("\n", " ")
-
-    return text.strip()
+    return words
 
 
-# =====================================
-# 11. SUBTITLE STYLES
-# =====================================
+# =========================================================
+# ASS SUBTITLE FILE
+# =========================================================
 
-STYLE_SETTINGS = {
-
-    "Viral": {
-        "font": "Arial",
-        "size": 64,
-        "primary": "&H0000FFFF",
-        "outline": 5,
-        "bold": -1
-    },
-
-    "Classic": {
-        "font": "Arial",
-        "size": 52,
-        "primary": "&H00FFFFFF",
-        "outline": 3,
-        "bold": 0
-    },
-
-    "Cinema": {
-        "font": "Arial",
-        "size": 48,
-        "primary": "&H00FFFFFF",
-        "outline": 2,
-        "bold": 0
-    },
-
-    "Podcast": {
-        "font": "Arial",
-        "size": 56,
-        "primary": "&H00FFFFFF",
-        "outline": 4,
-        "bold": -1
-    },
-
-    "Karaoke": {
-        "font": "Arial",
-        "size": 62,
-        "primary": "&H0000FFFF",
-        "outline": 4,
-        "bold": -1
-    },
-
-    "Creator": {
-        "font": "Arial",
-        "size": 58,
-        "primary": "&H00FFFFFF",
-        "outline": 4,
-        "bold": -1
-    }
-}
-
-
-# =====================================
-# 12. CREATE ASS SUBTITLES
-# =====================================
-
-def make_ass_subtitles(
-    transcription,
-    output_path,
-    style="Viral"
-):
-
-    settings = STYLE_SETTINGS.get(
-        style,
-        STYLE_SETTINGS["Viral"]
-    )
+def create_ass_file(words, output_path, style_name):
+    style = STYLES.get(style_name, STYLES["viral"])
 
     header = f"""[Script Info]
+Title: GAPCUT AI
 ScriptType: v4.00+
+WrapStyle: 2
+ScaledBorderAndShadow: yes
 PlayResX: 1080
 PlayResY: 1920
-ScaledBorderAndShadow: yes
 
 [V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{settings["font"]},{settings["size"]},{settings["primary"]},&H0000FFFF,&H00000000,&H80000000,{settings["bold"]},0,1,{settings["outline"]},1,2,70,70,250,1
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{style["font"]},{style["size"]},{style["primary"]},&H000000FF,{style["outline"]},&H80000000,{style["bold"]},0,0,0,100,100,0,0,1,{style["outline_width"]},1,2,65,65,{style["margin_v"]},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     events = []
-    words = []
 
-    if not isinstance(transcription, dict):
-        raise RuntimeError("Ҷавоби Groq нодуруст аст.")
+    # Субтитрҳо гурӯҳ-гурӯҳ, то ки хондан осон бошад.
+    group = []
 
-    raw_words = transcription.get("words") or []
+    for item in words:
+        word = str(item.get("word", "")).strip()
+        if not word:
+            continue
 
-    if not raw_words:
+        start = float(item.get("start", 0))
+        end = float(item.get("end", start + 0.3))
 
-        segments = transcription.get("segments") or []
+        group.append({
+            "word": word,
+            "start": start,
+            "end": max(end, start + 0.05),
+        })
 
-        if isinstance(segments, list):
+        if len(group) >= 5 or word.endswith((".", "!", "?", "؟", "।")):
+            events.append(group)
+            group = []
 
-            for segment in segments:
+    if group:
+        events.append(group)
 
-                if not isinstance(segment, dict):
-                    continue
+    for group in events:
+        start = group[0]["start"]
+        end = group[-1]["end"]
 
-                segment_words = segment.get("words") or []
-
-                if isinstance(segment_words, list):
-                    raw_words.extend(segment_words)
-
-    if isinstance(raw_words, list):
-
-        for word in raw_words:
-
-            if not isinstance(word, dict):
-                continue
-
-            text = clean_ass_text(
-                word.get("word", "")
+        parts = []
+        for item in group:
+            duration_cs = max(
+                1,
+                int(round((item["end"] - item["start"]) * 100)),
+            )
+            parts.append(
+                f"{{\\k{duration_cs}}}{escape_ass_text(item['word'])}"
             )
 
-            if not text:
-                continue
+        text = " ".join(parts)
 
-            try:
-                start = float(word["start"])
-                end = float(word["end"])
-            except (KeyError, TypeError, ValueError):
-                continue
-
-            if end <= start:
-                end = start + 0.1
-
-            words.append({
-                "start": start,
-                "end": end,
-                "text": text
-            })
-
-    if words:
-
-        groups = []
-        current_group = []
-
-        for word in words:
-
-            current_group.append(word)
-
-            punctuation = bool(
-                re.search(r"[.!?؟…]$", word["text"])
-            )
-
-            if len(current_group) >= 6 or punctuation:
-                groups.append(current_group)
-                current_group = []
-
-        if current_group:
-            groups.append(current_group)
-
-        for group in groups:
-
-            start = group[0]["start"]
-            end = group[-1]["end"]
-
-            subtitle_text = ""
-
-            for word in group:
-
-                duration = max(
-                    5,
-                    int(round(
-                        (word["end"] - word["start"]) * 100
-                    ))
-                )
-
-                subtitle_text += (
-                    f"{{\\k{duration}}}"
-                    f"{word['text']} "
-                )
-
-            events.append(
-                "Dialogue: 0,"
-                f"{ass_time(start)},"
-                f"{ass_time(end)},"
-                "Default,,0,0,0,,"
-                f"{subtitle_text.strip()}"
-            )
-
-    else:
-
-        segments = transcription.get("segments") or []
-
-        if isinstance(segments, list):
-
-            for segment in segments:
-
-                if not isinstance(segment, dict):
-                    continue
-
-                text = clean_ass_text(
-                    segment.get("text", "")
-                )
-
-                if not text:
-                    continue
-
-                try:
-                    start = float(segment.get("start", 0))
-                    end = float(segment.get("end", start + 2))
-                except (TypeError, ValueError):
-                    continue
-
-                if end <= start:
-                    end = start + 1
-
-                events.append(
-                    "Dialogue: 0,"
-                    f"{ass_time(start)},"
-                    f"{ass_time(end)},"
-                    "Default,,0,0,0,,"
-                    f"{text}"
-                )
-
-        if not events:
-
-            text = clean_ass_text(
-                transcription.get("text", "")
-            )
-
-            if text:
-
-                try:
-                    duration = float(
-                        transcription.get("duration") or 5
-                    )
-                except (TypeError, ValueError):
-                    duration = 5
-
-                if duration <= 0:
-                    duration = 5
-
-                events.append(
-                    "Dialogue: 0,"
-                    "0:00:00.00,"
-                    f"{ass_time(duration)},"
-                    "Default,,0,0,0,,"
-                    f"{text}"
-                )
-
-    if not events:
-        raise RuntimeError(
-            "Groq матни субтитрҳоро барнагардонд."
+        events_line = (
+            f"Dialogue: 0,{ass_time(start)},{ass_time(end)},"
+            f"Default,,0,0,0,,{text}"
         )
 
-    with open(output_path, "w", encoding="utf-8") as file:
-        file.write(
-            header + "\n".join(events)
+        header += events_line + "\n"
+
+    Path(output_path).write_text(header, encoding="utf-8")
+
+
+# =========================================================
+# VIDEO FORMAT FILTERS
+# =========================================================
+
+def get_video_filter(video_format):
+    if video_format == "9:16":
+        return (
+            "scale=1080:1920:force_original_aspect_ratio=increase,"
+            "crop=1080:1920"
         )
 
+    if video_format == "16:9":
+        return (
+            "scale=1920:1080:force_original_aspect_ratio=increase,"
+            "crop=1920:1080"
+        )
 
-# =====================================
-# 13. VIDEO FORMAT
-# =====================================
-
-FORMAT_FILTERS = {
-
-    "9:16": (
-        "scale=1080:1920:"
-        "force_original_aspect_ratio=increase,"
-        "crop=1080:1920"
-    ),
-
-    "16:9": (
-        "scale=1920:1080:"
-        "force_original_aspect_ratio=increase,"
-        "crop=1920:1080"
-    ),
-
-    "1:1": (
-        "scale=1080:1080:"
-        "force_original_aspect_ratio=increase,"
-        "crop=1080:1080"
-    ),
-
-    "original": "null"
-}
-
-
-# =====================================
-# 14. RENDER VIDEO
-# =====================================
-
-def render_video(
-    video_path,
-    subtitle_path,
-    output_path,
-    video_format="9:16"
-):
-
-    format_filter = FORMAT_FILTERS.get(
-        video_format,
-        FORMAT_FILTERS["9:16"]
-    )
-
-    subtitle_filter = (
-        "ass="
-        + str(subtitle_path).replace("\\", "/")
-    )
+    if video_format == "1:1":
+        return (
+            "scale=1080:1080:force_original_aspect_ratio=increase,"
+            "crop=1080:1080"
+        )
 
     if video_format == "original":
-        video_filter = subtitle_filter
-    else:
-        video_filter = format_filter + "," + subtitle_filter
+        return "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 
-    run_command([
-        "ffmpeg",
-        "-y",
-        "-i", str(video_path),
-        "-vf", video_filter,
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "28",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        str(output_path)
-    ], timeout=600)
+    raise ValueError("Формати видео нодуруст аст.")
 
 
-# =====================================
-# 15. COMPLETE PROCESSING PIPELINE
-# =====================================
-
-async def process_video(
-    video_path,
-    output_path,
-    style="Viral",
-    video_format="9:16"
-):
-
-    folder = Path(video_path).parent
-
-    audio_path = folder / "audio.wav"
-    subtitle_path = folder / "subtitles.ass"
-
-    duration = await asyncio.to_thread(
-        get_video_duration,
-        video_path
+def escape_filter_path(path):
+    path = str(Path(path).resolve())
+    return (
+        path.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+        .replace(",", "\\,")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
     )
 
-    if duration <= 0:
-        raise ValueError("Давомнокии видео нодуруст аст.")
 
-    if duration > MAX_DURATION:
-        raise ValueError(
-            "Видео бояд то 3 дақиқа бошад."
+# =========================================================
+# VIDEO PROCESSING
+# =========================================================
+
+async def process_video(input_path, output_path, style_name, video_format):
+    duration = await asyncio.to_thread(get_duration, input_path)
+
+    if duration <= 0 or duration > MAX_DURATION:
+        raise RuntimeError(
+            f"Видео бояд аз {MAX_DURATION} сония зиёд набошад."
         )
 
-    await asyncio.to_thread(
-        extract_audio,
-        video_path,
-        audio_path
-    )
-
-    transcription = await transcribe_audio(audio_path)
+    work_dir = Path(output_path).parent
+    audio_path = work_dir / "audio.mp3"
+    ass_path = work_dir / "subtitles.ass"
 
     await asyncio.to_thread(
-        make_ass_subtitles,
-        transcription,
-        subtitle_path,
-        style
+        run_command,
+        [
+            "ffmpeg",
+            "-y",
+            "-i", str(input_path),
+            "-vn",
+            "-ac", "1",
+            "-ar", "16000",
+            "-b:a", "64k",
+            str(audio_path),
+        ],
     )
+
+    words = await transcribe_audio(audio_path)
 
     await asyncio.to_thread(
-        render_video,
-        video_path,
-        subtitle_path,
-        output_path,
-        video_format
+        create_ass_file,
+        words,
+        ass_path,
+        style_name,
     )
 
-    if not output_path.exists():
-        raise RuntimeError("Видеои ниҳоӣ сохта нашуд.")
+    video_filter = get_video_filter(video_format)
+    subtitle_path = escape_filter_path(ass_path)
 
-    if output_path.stat().st_size > MAX_OUTPUT_SIZE:
-        raise ValueError(
-            "Ҳаҷми видеои тайёр аз 49 MB зиёд шуд."
-        )
+    filters = f"{video_filter},subtitles='{subtitle_path}'"
+
+    await asyncio.to_thread(
+        run_command,
+        [
+            "ffmpeg",
+            "-y",
+            "-i", str(input_path),
+            "-vf", filters,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            "-pix_fmt", "yuv420p",
+            str(output_path),
+        ],
+        900,
+    )
+
+    if not Path(output_path).exists():
+        raise RuntimeError("Видеои тайёр сохта нашуд.")
+
+    if Path(output_path).stat().st_size > MAX_OUTPUT_SIZE:
+        raise RuntimeError("Ҳаҷми видеои тайёр аз ҳад зиёд аст.")
 
     return output_path
 
 
-# =====================================
-# 16. TELEGRAM START
-# =====================================
+# =========================================================
+# TELEGRAM COMMANDS
+# =========================================================
 
 @dp.message(CommandStart())
 async def start_handler(message: Message):
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🎬 Монтаж",
-                    web_app=WebAppInfo(
-                        url=MINI_APP_URL
-                    )
-                )
-            ]
-        ]
+    text = (
+        "🎬 <b>GAPCUT AI</b>\n\n"
+        "Монтажи видео бо зеҳни сунъӣ.\n"
+        "Видео фиристед ё Mini App-ро кушоед.\n\n"
+        "✨ Субтитрҳои автоматӣ\n"
+        "🎨 Услубҳои гуногуни субтитр\n"
+        "📱 Форматҳои Reels, TikTok ва YouTube\n\n"
+        "Барои оғоз тугмаи «Монтаж»-ро пахш кунед."
     )
 
     await message.answer(
-        "🎬 Хуш омадед ба GapCut AI!\n\n"
-        "Ман видеои шуморо автоматӣ таҳрир мекунам.\n\n"
-        "✅ Шинохтани овоз\n"
-        "✅ Сохтани субтитрҳо\n"
-        "✅ Субтитрҳои калима ба калима\n"
-        "✅ Сохтани видеои тайёр\n\n"
-        "📤 Видеоро фиристед.\n\n"
-        "⏱ Максимум: 3 дақиқа\n"
-        "📦 Максимум: 19 MB",
-        reply_markup=keyboard
+        text,
+        reply_markup=main_keyboard(),
+        parse_mode="HTML",
     )
 
-
-# =====================================
-# 17. TELEGRAM HELP
-# =====================================
 
 @dp.message(Command("help"))
 async def help_handler(message: Message):
+    text = (
+        "ℹ️ <b>GAPCUT AI — Ёрӣ</b>\n\n"
+        "1. Тугмаи «Монтаж»-ро пахш кунед.\n"
+        "2. Видеоро интихоб кунед.\n"
+        "3. Услуб ва форматро интихоб кунед.\n"
+        "4. Коркардро оғоз кунед.\n\n"
+        f"💬 Дастгирӣ: {SUPPORT_URL}\n"
+        f"📢 Канал: {CHANNEL_URL}"
+    )
 
     await message.answer(
-        "📖 Дастури GapCut AI\n\n"
-        "1. Тугмаи 🎬 Монтаж-ро пахш кунед.\n"
-        "2. Видеоро интихоб кунед.\n"
-        "3. Услуб ва формати субтитрро интихоб кунед.\n"
-        "4. Монтажро оғоз кунед.\n\n"
-        "Формат: видео\n"
-        "Давомнокӣ: то 3 дақиқа\n"
-        "Ҳаҷм: то 19 MB"
+        text,
+        reply_markup=main_keyboard(),
+        parse_mode="HTML",
     )
 
 
-# =====================================
-# 18. TELEGRAM VIDEO HANDLER
-# =====================================
+# =========================================================
+# DIRECT VIDEO RECEIVING IN TELEGRAM
+# =========================================================
 
 @dp.message(F.video | F.document)
 async def video_handler(message: Message):
+    media = message.video or message.document
 
-    user_id = message.from_user.id
+    if message.document:
+        mime = message.document.mime_type or ""
+        if not mime.startswith("video/"):
+            await message.answer("Лутфан файли видео фиристед.")
+            return
 
-    if user_id in user_busy:
-
-        await message.answer(
-            "⏳ Видеои қаблии шумо ҳоло коркард шуда истодааст."
-        )
-
+    if media.file_size and media.file_size > MAX_INPUT_SIZE:
+        await message.answer("Ҳаҷми видео бояд аз 19 MB зиёд набошад.")
         return
 
-    user_busy.add(user_id)
-
-    try:
-
-        await message.answer(
-            "🎬 Видео қабул шуд!\n"
-            "Лутфан интизор шавед..."
-        )
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-
-            folder = Path(temp_dir)
-
-            video_path = folder / "input.mp4"
-            output_path = folder / "gapcut_output.mp4"
-
-            media = message.video
-
-            if not media and message.document:
-
-                if not (
-                    message.document.mime_type
-                    and message.document.mime_type.startswith("video/")
-                ):
-                    raise ValueError(
-                        "Лутфан файли видео фиристед."
-                    )
-
-                media = message.document
-
-            if not media:
-                raise ValueError("Видео ёфт нашуд.")
-
-            if media.file_size and media.file_size > MAX_INPUT_SIZE:
-                raise ValueError(
-                    "Ҳаҷми видео бояд аз 19 MB зиёд набошад."
-                )
-
-            file_info = await bot.get_file(media.file_id)
-
-            await bot.download_file(
-                file_info.file_path,
-                destination=video_path
-            )
-
-            await message.answer(
-                "🧠 AI овозро мешиносад ва субтитр месозад..."
-            )
-
-            await process_video(
-                video_path,
-                output_path,
-                style="Viral",
-                video_format="9:16"
-            )
-
-            await message.answer_video(
-                FSInputFile(output_path),
-                caption=(
-                    "✅ GapCut AI — видео омода шуд!\n\n"
-                    "🎬 Субтитрҳо илова шуданд.\n"
-                    "✨ Ташаккур барои истифода!"
-                ),
-                supports_streaming=True
-            )
-
-    except ValueError as error:
-
-        await message.answer(f"⚠️ {error}")
-
-    except Exception:
-
-        logger.exception("Telegram video processing error")
-
-        await message.answer(
-            "❌ Ҳангоми коркарди видео хатогӣ шуд.\n\n"
-            "Лутфан баъдтар дубора кӯшиш кунед."
-        )
-
-    finally:
-        user_busy.discard(user_id)
+    status = await message.answer(
+        "⏳ Видео қабул шуд. Коркардро аз Mini App оғоз кунед.",
+        reply_markup=main_keyboard(),
+    )
 
 
-# =====================================
-# 19. MINI APP VIDEO API
-# =====================================
+# =========================================================
+# API HEALTH CHECK
+# =========================================================
+
+@app.get("/")
+async def home():
+    return {
+        "status": "ok",
+        "service": "GAPCUT AI",
+        "version": "2.0.0",
+    }
+
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
+# =========================================================
+# MINI APP VIDEO PROCESSING API
+# =========================================================
 
 @app.post("/api/process")
 async def api_process(
     file: UploadFile = File(...),
-    style: str = Form("Viral"),
+    style: str = Form("viral"),
     language: str = Form("tg"),
     video_format: str = Form("9:16"),
-    init_data: str = Form(...)
+    init_data: str = Form(...),
 ):
+    user = validate_telegram_init_data(init_data)
 
-    telegram_user = validate_telegram_init_data(init_data)
-
-    if not telegram_user:
+    if not user:
         raise HTTPException(
             status_code=401,
-            detail="Telegram authentication failed. Open the Mini App inside Telegram."
+            detail="Telegram authorization failed. Open Mini App from the bot.",
         )
 
-    if style not in STYLE_SETTINGS:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid video style."
-        )
+    style = style.lower().strip()
+    if style not in STYLES:
+        raise HTTPException(status_code=400, detail="Invalid subtitle style.")
 
     if language not in ("tg", "ru", "both"):
+        raise HTTPException(status_code=400, detail="Invalid language.")
+
+    if video_format not in ("9:16", "16:9", "1:1", "original"):
+        raise HTTPException(status_code=400, detail="Invalid video format.")
+
+    filename = (file.filename or "video.mp4").lower()
+    allowed_extensions = (".mp4", ".mov", ".m4v", ".webm", ".mkv")
+
+    if not filename.endswith(allowed_extensions):
         raise HTTPException(
             status_code=400,
-            detail="Invalid subtitle language."
+            detail="Поддерживаются MP4, MOV, M4V, WEBM и MKV.",
         )
 
-    if video_format not in FORMAT_FILTERS:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid video format."
-        )
-
-    if not file.content_type or not file.content_type.startswith("video/"):
-        raise HTTPException(
-            status_code=400,
-            detail="Please upload a video file."
-        )
-
-    temp_dir = tempfile.mkdtemp(prefix="gapcut_")
-
-    folder = Path(temp_dir)
-
-    video_path = folder / "input_video"
-    output_path = folder / "gapcut_output.mp4"
+    temp_dir = Path(tempfile.mkdtemp(prefix="gapcut_"))
+    input_path = temp_dir / "input_video"
+    output_path = temp_dir / "gapcut_result.mp4"
 
     try:
-
         total_size = 0
 
-        with open(video_path, "wb") as destination:
-
+        with input_path.open("wb") as output_file:
             while True:
-
                 chunk = await file.read(1024 * 1024)
-
                 if not chunk:
                     break
 
@@ -931,101 +667,72 @@ async def api_process(
                 if total_size > MAX_INPUT_SIZE:
                     raise HTTPException(
                         status_code=413,
-                        detail="Video must be smaller than 19 MB."
+                        detail="Видео аз 19 MB зиёд аст.",
                     )
 
-                destination.write(chunk)
+                output_file.write(chunk)
 
         if total_size == 0:
             raise HTTPException(
                 status_code=400,
-                detail="The uploaded video is empty."
+                detail="Файли видео холӣ аст.",
             )
 
-        logger.info(
-            "Mini App video received from Telegram user %s",
-            telegram_user.get("id")
-        )
-
         await process_video(
-            video_path,
+            input_path,
             output_path,
-            style=style,
-            video_format=video_format
+            style,
+            video_format,
         )
 
         return FileResponse(
             path=str(output_path),
             media_type="video/mp4",
-            filename="gapcut_ai_video.mp4",
-            background=BackgroundTask(
-                shutil.rmtree,
-                temp_dir,
-                ignore_errors=True
-            )
+            filename="GAPCUT_AI.mp4",
+            background=BackgroundTask(shutil.rmtree, temp_dir, ignore_errors=True),
         )
 
     except HTTPException:
-
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
-    except ValueError as error:
-
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error)
-        )
-
-    except Exception:
-
-        logger.exception("Mini App processing error")
-
+    except Exception as error:
+        logger.exception("Video processing failed: %s", error)
         shutil.rmtree(temp_dir, ignore_errors=True)
 
         raise HTTPException(
             status_code=500,
-            detail="Video processing failed. Please try again."
+            detail=str(error)[:500],
         )
 
     finally:
         await file.close()
 
 
-# =====================================
-# 20. MAIN SERVER
-# =====================================
+# =========================================================
+# START SERVER + TELEGRAM BOT
+# =========================================================
 
 async def main():
-
     config = uvicorn.Config(
         app,
         host="0.0.0.0",
         port=PORT,
-        log_level="info"
+        log_level="info",
     )
 
     server = uvicorn.Server(config)
 
-    logger.info("GAPCUT AI API started on port %s", PORT)
-    logger.info("GAPCUT AI Telegram bot started")
-
-    await asyncio.gather(
-        server.serve(),
-        dp.start_polling(bot)
-    )
-
-
-# =====================================
-# 21. RUN
-# =====================================
-
-if __name__ == "__main__":
+    logger.info("GAPCUT AI starting on port %s", PORT)
 
     try:
-        asyncio.run(main())
+        await asyncio.gather(
+            server.serve(),
+            dp.start_polling(bot),
+        )
+    finally:
+        await bot.session.close()
 
-    except KeyboardInterrupt:
-        logger.info("GAPCUT AI stopped")
+
+if __name__ == "__main__":
+    asyncio.run(main())
