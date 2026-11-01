@@ -356,3 +356,87 @@ async def process_video(message: Message):
 
     finally:
         user_busy.discard(user_id)
+        async def http_handler(reader, writer):
+    try:
+        request_line = await asyncio.wait_for(
+            reader.readline(),
+            timeout=10
+        )
+
+        if not request_line:
+            return
+
+        parts = request_line.decode(
+            "latin-1"
+        ).strip().split()
+
+        path = (
+            parts[1].split("?")[0]
+            if len(parts) >= 2
+            else "/"
+        )
+
+        while True:
+            line = await asyncio.wait_for(
+                reader.readline(),
+                timeout=10
+            )
+
+            if line in (b"\r\n", b"\n", b""):
+                break
+
+        if path in ("/", "/health"):
+            status = "200 OK"
+            body = b"GapCut AI is running!"
+        else:
+            status = "404 Not Found"
+            body = b"Not found"
+
+        response = (
+            f"HTTP/1.1 {status}\r\n"
+            "Content-Type: text/plain; charset=utf-8\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("ascii") + body
+
+        writer.write(response)
+        await writer.drain()
+
+    except Exception:
+        logger.debug("HTTP connection closed")
+
+    finally:
+        writer.close()
+
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def main():
+    port = int(os.getenv("PORT", "10000"))
+
+    server = await asyncio.start_server(
+        http_handler,
+        "0.0.0.0",
+        port
+    )
+
+    logger.info(
+        f"GapCut AI HTTP server started on port {port}"
+    )
+
+    async with server:
+        await asyncio.gather(
+            server.serve_forever(),
+            dp.start_polling(bot)
+        )
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("GapCut AI stopped")
