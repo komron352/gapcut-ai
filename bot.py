@@ -19,7 +19,13 @@ import uvicorn
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, FSInputFile
+from aiogram.types import (
+    Message,
+    FSInputFile,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    WebAppInfo
+)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -44,6 +50,8 @@ MAX_OUTPUT_SIZE = 49 * 1024 * 1024
 MAX_DURATION = 180
 
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+
+MINI_APP_URL = "https://gapcut-ai-web.vercel.app"
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is missing")
@@ -116,6 +124,7 @@ async def health():
 # =====================================
 
 def validate_telegram_init_data(init_data: str):
+
     if not init_data:
         return None
 
@@ -706,6 +715,19 @@ async def process_video(
 @dp.message(CommandStart())
 async def start_handler(message: Message):
 
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎬 Монтаж",
+                    web_app=WebAppInfo(
+                        url=MINI_APP_URL
+                    )
+                )
+            ]
+        ]
+    )
+
     await message.answer(
         "🎬 Хуш омадед ба GapCut AI!\n\n"
         "Ман видеои шуморо автоматӣ таҳрир мекунам.\n\n"
@@ -715,7 +737,8 @@ async def start_handler(message: Message):
         "✅ Сохтани видеои тайёр\n\n"
         "📤 Видеоро фиристед.\n\n"
         "⏱ Максимум: 3 дақиқа\n"
-        "📦 Максимум: 19 MB"
+        "📦 Максимум: 19 MB",
+        reply_markup=keyboard
     )
 
 
@@ -728,10 +751,10 @@ async def help_handler(message: Message):
 
     await message.answer(
         "📖 Дастури GapCut AI\n\n"
-        "1. Видеоро фиристед.\n"
-        "2. Бот овозро мешиносад.\n"
-        "3. Субтитрҳо сохта мешаванд.\n"
-        "4. Видеои тайёр бармегардад.\n\n"
+        "1. Тугмаи 🎬 Монтаж-ро пахш кунед.\n"
+        "2. Видеоро интихоб кунед.\n"
+        "3. Услуб ва формати субтитрро интихоб кунед.\n"
+        "4. Монтажро оғоз кунед.\n\n"
         "Формат: видео\n"
         "Давомнокӣ: то 3 дақиқа\n"
         "Ҳаҷм: то 19 MB"
@@ -851,7 +874,6 @@ async def api_process(
     init_data: str = Form(...)
 ):
 
-    # Verify Telegram Mini App identity
     telegram_user = validate_telegram_init_data(init_data)
 
     if not telegram_user:
@@ -860,7 +882,6 @@ async def api_process(
             detail="Telegram authentication failed. Open the Mini App inside Telegram."
         )
 
-    # Check selected options
     if style not in STYLE_SETTINGS:
         raise HTTPException(
             status_code=400,
@@ -879,7 +900,6 @@ async def api_process(
             detail="Invalid video format."
         )
 
-    # Check uploaded file type
     if not file.content_type or not file.content_type.startswith("video/"):
         raise HTTPException(
             status_code=400,
