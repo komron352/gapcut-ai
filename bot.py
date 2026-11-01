@@ -43,8 +43,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 PORT = int(os.getenv("PORT", "10000"))
 
 MINI_APP_URL = "https://gapcut-ai-web.vercel.app"
-SUPPORT_URL = "https://t.me/gapcutai"
-CHANNEL_URL = "https://t.me/aikomron"
+SUPPORT_URL = "https://t.me/aikomron"
+CHANNEL_URL = "https://t.me/gapcutai"
 
 MAX_INPUT_SIZE = 19 * 1024 * 1024
 MAX_OUTPUT_SIZE = 49 * 1024 * 1024
@@ -59,10 +59,10 @@ logging.basicConfig(
 logger = logging.getLogger("gapcut-ai")
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN дар Environment Variables нест.")
+    raise RuntimeError("Переменная BOT_TOKEN не указана в Environment Variables.")
 
 if not GROQ_API_KEY:
-    raise RuntimeError("GROQ_API_KEY дар Environment Variables нест.")
+    raise RuntimeError("Переменная GROQ_API_KEY не указана в Environment Variables.")
 
 
 # =========================================================
@@ -122,7 +122,6 @@ def validate_telegram_init_data(init_data: str):
 
         auth_date = int(parsed.get("auth_date", "0"))
 
-        # Қабули маълумоти кӯҳна манъ аст.
         if time.time() - auth_date > 86400:
             return None
 
@@ -176,7 +175,7 @@ def run_command(command, timeout=600):
 
     if result.returncode != 0:
         raise RuntimeError(
-            result.stderr[-3000:] or "FFmpeg command failed"
+            result.stderr[-3000:] or "Ошибка выполнения FFmpeg."
         )
 
     return result.stdout
@@ -307,14 +306,13 @@ async def transcribe_audio(audio_path):
 
     if response.status_code != 200:
         logger.error("Groq error: %s", response.text[:2000])
-        raise RuntimeError("Хатогӣ ҳангоми шинохтани овоз. Баъдтар кӯшиш кунед.")
+        raise RuntimeError("Ошибка распознавания аудио. Попробуйте позже.")
 
     result = response.json()
 
     segments = result.get("segments") or []
     words = result.get("words") or []
 
-    # Агар word timestamps набошад, аз segment timestamps истифода мебарем.
     if not words and segments:
         for segment in segments:
             segments_words = str(segment.get("text", "")).split()
@@ -333,7 +331,7 @@ async def transcribe_audio(audio_path):
                 })
 
     if not words:
-        raise RuntimeError("Матни овоз муайян карда нашуд.")
+        raise RuntimeError("Не удалось распознать речь в аудио.")
 
     return words
 
@@ -362,8 +360,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     events = []
-
-    # Субтитрҳо гурӯҳ-гурӯҳ, то ки хондан осон бошад.
     group = []
 
     for item in words:
@@ -439,7 +435,7 @@ def get_video_filter(video_format):
     if video_format == "original":
         return "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 
-    raise ValueError("Формати видео нодуруст аст.")
+    raise ValueError("Неверный формат видео.")
 
 
 def escape_filter_path(path):
@@ -463,7 +459,7 @@ async def process_video(input_path, output_path, style_name, video_format):
 
     if duration <= 0 or duration > MAX_DURATION:
         raise RuntimeError(
-            f"Видео бояд аз {MAX_DURATION} сония зиёд набошад."
+            f"Длительность видео не должна превышать {MAX_DURATION} секунд."
         )
 
     work_dir = Path(output_path).parent
@@ -518,10 +514,10 @@ async def process_video(input_path, output_path, style_name, video_format):
     )
 
     if not Path(output_path).exists():
-        raise RuntimeError("Видеои тайёр сохта нашуд.")
+        raise RuntimeError("Не удалось создать готовое видео.")
 
     if Path(output_path).stat().st_size > MAX_OUTPUT_SIZE:
-        raise RuntimeError("Ҳаҷми видеои тайёр аз ҳад зиёд аст.")
+        raise RuntimeError("Размер готового видео слишком большой.")
 
     return output_path
 
@@ -534,12 +530,12 @@ async def process_video(input_path, output_path, style_name, video_format):
 async def start_handler(message: Message):
     text = (
         "🎬 <b>GAPCUT AI</b>\n\n"
-        "Монтажи видео бо зеҳни сунъӣ.\n"
-        "Видео фиристед ё Mini App-ро кушоед.\n\n"
-        "✨ Субтитрҳои автоматӣ\n"
-        "🎨 Услубҳои гуногуни субтитр\n"
-        "📱 Форматҳои Reels, TikTok ва YouTube\n\n"
-        "Барои оғоз тугмаи «Монтаж»-ро пахш кунед."
+        "Автоматический монтаж видео с помощью искусственного интеллекта.\n"
+        "Отправьте видео или откройте Mini App.\n\n"
+        "✨ Автоматические субтитры\n"
+        "🎨 Различные стили субтитров\n"
+        "📱 Форматы Reels, TikTok и YouTube\n\n"
+        "Чтобы начать, нажмите кнопку «Монтаж»."
     )
 
     await message.answer(
@@ -552,13 +548,13 @@ async def start_handler(message: Message):
 @dp.message(Command("help"))
 async def help_handler(message: Message):
     text = (
-        "ℹ️ <b>GAPCUT AI — Ёрӣ</b>\n\n"
-        "1. Тугмаи «Монтаж»-ро пахш кунед.\n"
-        "2. Видеоро интихоб кунед.\n"
-        "3. Услуб ва форматро интихоб кунед.\n"
-        "4. Коркардро оғоз кунед.\n\n"
-        f"💬 Дастгирӣ: {SUPPORT_URL}\n"
-        f"📢 Канал: {CHANNEL_URL}"
+        "ℹ️ <b>GAPCUT AI — Помощь</b>\n\n"
+        "1. Нажмите кнопку «Монтаж».\n"
+        "2. Выберите видео.\n"
+        "3. Выберите стиль субтитров и формат видео.\n"
+        "4. Запустите обработку.\n\n"
+        f"💬 Поддержка: {SUPPORT_URL}\n"
+        f"📢 Наш канал: {CHANNEL_URL}"
     )
 
     await message.answer(
@@ -579,15 +575,15 @@ async def video_handler(message: Message):
     if message.document:
         mime = message.document.mime_type or ""
         if not mime.startswith("video/"):
-            await message.answer("Лутфан файли видео фиристед.")
+            await message.answer("Пожалуйста, отправьте видеофайл.")
             return
 
     if media.file_size and media.file_size > MAX_INPUT_SIZE:
-        await message.answer("Ҳаҷми видео бояд аз 19 MB зиёд набошад.")
+        await message.answer("Размер видео не должен превышать 19 МБ.")
         return
 
-    status = await message.answer(
-        "⏳ Видео қабул шуд. Коркардро аз Mini App оғоз кунед.",
+    await message.answer(
+        "⏳ Видео получено. Откройте Mini App, чтобы начать обработку.",
         reply_markup=main_keyboard(),
     )
 
@@ -627,18 +623,18 @@ async def api_process(
     if not user:
         raise HTTPException(
             status_code=401,
-            detail="Telegram authorization failed. Open Mini App from the bot.",
+            detail="Ошибка авторизации Telegram. Откройте Mini App через бота.",
         )
 
     style = style.lower().strip()
     if style not in STYLES:
-        raise HTTPException(status_code=400, detail="Invalid subtitle style.")
+        raise HTTPException(status_code=400, detail="Неверный стиль субтитров.")
 
     if language not in ("tg", "ru", "both"):
-        raise HTTPException(status_code=400, detail="Invalid language.")
+        raise HTTPException(status_code=400, detail="Неверно выбран язык.")
 
     if video_format not in ("9:16", "16:9", "1:1", "original"):
-        raise HTTPException(status_code=400, detail="Invalid video format.")
+        raise HTTPException(status_code=400, detail="Неверный формат видео.")
 
     filename = (file.filename or "video.mp4").lower()
     allowed_extensions = (".mp4", ".mov", ".m4v", ".webm", ".mkv")
@@ -646,7 +642,7 @@ async def api_process(
     if not filename.endswith(allowed_extensions):
         raise HTTPException(
             status_code=400,
-            detail="Поддерживаются MP4, MOV, M4V, WEBM и MKV.",
+            detail="Поддерживаются форматы MP4, MOV, M4V, WEBM и MKV.",
         )
 
     temp_dir = Path(tempfile.mkdtemp(prefix="gapcut_"))
@@ -667,7 +663,7 @@ async def api_process(
                 if total_size > MAX_INPUT_SIZE:
                     raise HTTPException(
                         status_code=413,
-                        detail="Видео аз 19 MB зиёд аст.",
+                        detail="Размер видео не должен превышать 19 МБ.",
                     )
 
                 output_file.write(chunk)
@@ -675,7 +671,7 @@ async def api_process(
         if total_size == 0:
             raise HTTPException(
                 status_code=400,
-                detail="Файли видео холӣ аст.",
+                detail="Видеофайл пуст.",
             )
 
         await process_video(
