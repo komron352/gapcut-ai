@@ -1,1720 +1,876 @@
 
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#090812">
-  <title>GAPCUT AI — Умный видеомонтаж</title>
-
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
-  <style>
-    :root {
-      --bg: #090812;
-      --panel: #151323;
-      --panel2: #1c1930;
-      --purple: #8b5cf6;
-      --pink: #d946ef;
-      --text: #ffffff;
-      --muted: #9994ad;
-      --border: rgba(255,255,255,.09);
-      --green: #35d49a;
-      --red: #ff647c;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    body {
-      background:
-        radial-gradient(circle at 15% 0%, rgba(117,65,220,.19), transparent 35%),
-        radial-gradient(circle at 100% 30%, rgba(200,55,210,.10), transparent 30%),
-        var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      min-height: 100vh;
-      padding-bottom: 95px;
-    }
-
-    button, input, textarea {
-      font: inherit;
-    }
-
-    button {
-      cursor: pointer;
-      border: 0;
-    }
-
-    .app {
-      width: 100%;
-      max-width: 600px;
-      margin: auto;
-      padding: 18px 16px;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 25px;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 11px;
-    }
-
-    .logo {
-      width: 43px;
-      height: 43px;
-      border-radius: 15px;
-      background: linear-gradient(135deg, #8b5cf6, #d946ef);
-      display: grid;
-      place-items: center;
-      font-size: 23px;
-      font-weight: 900;
-      box-shadow: 0 5px 25px rgba(139,92,246,.35);
-    }
-
-    .brand-name {
-      font-size: 18px;
-      font-weight: 850;
-      letter-spacing: .5px;
-    }
-
-    .brand-sub {
-      color: var(--muted);
-      font-size: 11px;
-      margin-top: 3px;
-    }
-
-    .status {
-      font-size: 11px;
-      color: var(--green);
-      background: rgba(53,212,154,.1);
-      border: 1px solid rgba(53,212,154,.2);
-      padding: 7px 10px;
-      border-radius: 30px;
-    }
-
-    .page {
-      display: none;
-      animation: appear .2s ease;
-    }
-
-    .page.active {
-      display: block;
-    }
-
-    @keyframes appear {
-      from { opacity: 0; transform: translateY(5px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .welcome {
-      background: linear-gradient(135deg, #24163f, #171329 70%);
-      border: 1px solid rgba(180,130,255,.18);
-      border-radius: 25px;
-      padding: 23px 20px;
-      position: relative;
-      overflow: hidden;
-      margin-bottom: 18px;
-    }
-
-    .welcome:after {
-      content: "✦";
-      position: absolute;
-      right: 18px;
-      top: 15px;
-      font-size: 75px;
-      color: rgba(255,255,255,.07);
-    }
-
-    .welcome h1 {
-      font-size: 25px;
-      line-height: 1.25;
-      margin-bottom: 10px;
-      max-width: 290px;
-    }
-
-    .welcome p {
-      color: #c3bad9;
-      font-size: 13px;
-      line-height: 1.6;
-      max-width: 300px;
-    }
-
-    .gradient-text {
-      background: linear-gradient(90deg, #b69aff, #f0a4ff);
-      -webkit-background-clip: text;
-      color: transparent;
-    }
-
-    .section-title {
-      font-size: 17px;
-      font-weight: 800;
-      margin: 23px 0 12px;
-    }
-
-    .card {
-      background: rgba(24,21,42,.92);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 17px;
-      margin-bottom: 13px;
-    }
-
-    .upload-box {
-      border: 1.5px dashed rgba(174,139,255,.5);
-      border-radius: 20px;
-      background: rgba(139,92,246,.07);
-      text-align: center;
-      padding: 26px 15px;
-      transition: .2s;
-    }
-
-    .upload-box:active {
-      background: rgba(139,92,246,.16);
-    }
-
-    .upload-icon {
-      width: 55px;
-      height: 55px;
-      border-radius: 18px;
-      background: rgba(139,92,246,.2);
-      display: grid;
-      place-items: center;
-      font-size: 26px;
-      margin: 0 auto 13px;
-    }
-
-    .upload-box h3 {
-      font-size: 15px;
-      margin-bottom: 7px;
-    }
-
-    .upload-box p {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
-    }
-
-    .primary-btn {
-      width: 100%;
-      padding: 15px;
-      border-radius: 15px;
-      color: white;
-      font-weight: 800;
-      font-size: 14px;
-      background: linear-gradient(100deg, #7951ec, #bd4de1);
-      box-shadow: 0 7px 22px rgba(139,92,246,.22);
-      margin-top: 14px;
-    }
-
-    .primary-btn:disabled {
-      opacity: .45;
-      cursor: not-allowed;
-    }
-
-    .secondary-btn {
-      width: 100%;
-      padding: 13px;
-      border-radius: 14px;
-      background: #28233e;
-      color: white;
-      font-weight: 700;
-      margin-top: 10px;
-    }
-
-    .file-info {
-      display: none;
-      margin-top: 14px;
-      padding: 12px;
-      border-radius: 13px;
-      background: rgba(255,255,255,.05);
-      text-align: left;
-    }
-
-    .file-info strong {
-      display: block;
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-
-    .file-info span {
-      display: block;
-      color: var(--muted);
-      font-size: 11px;
-      margin-top: 5px;
-    }
-
-    .option-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-    }
-
-    .option {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 15px 12px;
-      text-align: left;
-      color: white;
-      min-height: 91px;
-      transition: .15s;
-    }
-
-    .option.selected {
-      border-color: #a77aff;
-      background: rgba(139,92,246,.16);
-      box-shadow: inset 0 0 0 1px rgba(139,92,246,.2);
-    }
-
-    .option .emoji {
-      font-size: 22px;
-      display: block;
-      margin-bottom: 9px;
-    }
-
-    .option strong {
-      display: block;
-      font-size: 13px;
-    }
-
-    .option small {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
-      margin-top: 5px;
-      line-height: 1.4;
-    }
-
-    .format-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 9px;
-    }
-
-    .format {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      color: white;
-      border-radius: 14px;
-      padding: 13px 5px;
-      text-align: center;
-    }
-
-    .format.selected {
-      border-color: #a77aff;
-      background: rgba(139,92,246,.16);
-    }
-
-    .format .shape {
-      font-size: 23px;
-      display: block;
-      margin-bottom: 7px;
-    }
-
-    .format strong {
-      font-size: 12px;
-    }
-
-    .format small {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
-      margin-top: 4px;
-    }
-
-    .notice {
-      padding: 12px 13px;
-      border-radius: 13px;
-      background: rgba(139,92,246,.09);
-      border: 1px solid rgba(139,92,246,.15);
-      color: #c9b9f4;
-      font-size: 11px;
-      line-height: 1.6;
-      margin-top: 13px;
-    }
-
-    .disabled-option {
-      opacity: .42;
-      position: relative;
-    }
-
-    .disabled-option:after {
-      content: "Скоро";
-      position: absolute;
-      right: 9px;
-      top: 9px;
-      font-size: 9px;
-      background: #443b5a;
-      padding: 4px 7px;
-      border-radius: 20px;
-    }
-
-    .progress-card {
-      display: none;
-      margin-top: 15px;
-    }
-
-    .progress-head {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      margin-bottom: 10px;
-    }
-
-    .progress-track {
-      width: 100%;
-      height: 8px;
-      background: #302b43;
-      border-radius: 20px;
-      overflow: hidden;
-    }
-
-    .progress-fill {
-      width: 0%;
-      height: 100%;
-      background: linear-gradient(90deg, #8b5cf6, #e879f9);
-      border-radius: 20px;
-      transition: width .2s;
-    }
-
-    .progress-note {
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.5;
-      margin-top: 9px;
-    }
-
-    .result-box {
-      display: none;
-      margin-top: 15px;
-      border: 1px solid rgba(53,212,154,.25);
-      background: rgba(53,212,154,.07);
-      border-radius: 18px;
-      padding: 16px;
-    }
-
-    .result-box h3 {
-      font-size: 15px;
-      margin-bottom: 7px;
-    }
-
-    .result-box p {
-      color: #b5c9c1;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-
-    .result-item {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 15px;
-      padding: 13px;
-      margin-bottom: 10px;
-    }
-
-    .result-item strong {
-      font-size: 13px;
-      overflow-wrap: anywhere;
-    }
-
-    .result-item small {
-      color: var(--muted);
-      display: block;
-      margin-top: 5px;
-    }
-
-    .empty {
-      text-align: center;
-      padding: 35px 15px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.7;
-    }
+import os
+import re
+import json
+import hmac
+import time
+import uuid
+import shutil
+import hashlib
+import logging
+import asyncio
+import tempfile
+from pathlib import Path
+from urllib.parse import parse_qsl
+from contextlib import asynccontextmanager
+
+import httpx
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
+from aiogram import Bot, Dispatcher
+from aiogram.filters import CommandStart, Command
+from aiogram.types import Message, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.enums import ParseMode
+
+
+# ==========================================
+# CONFIG
+# ==========================================
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+
+WEB_APP_URL = os.getenv(
+    "WEB_APP_URL",
+    "https://gapcut-ai-web.vercel.app"
+).strip()
+
+CHANNEL = os.getenv("CHANNEL", "").strip()
+
+GROQ_MODEL = "whisper-large-v3-turbo"
+GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+
+MAX_INPUT_SIZE = 100 * 1024 * 1024
+MAX_OUTPUT_SIZE = 150 * 1024 * 1024
+MAX_DURATION = 60
+MAX_AUDIO_SIZE = 24 * 1024 * 1024
+
+UPLOAD_CHUNK = 256 * 1024
+
+BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
+BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger("gapcut-ai")
+
+bot = Bot(BOT_TOKEN) if BOT_TOKEN else None
+dp = Dispatcher()
+
+PROCESS_LOCK = asyncio.Lock()
+
+
+# ==========================================
+# TELEGRAM BOT
+# ==========================================
+
+@dp.message(CommandStart())
+async def start_command(message: Message):
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎬 Открыть GAPCUT AI",
+                    web_app=WebAppInfo(url=WEB_APP_URL)
+                )
+            ]
+        ]
+    )
+
+    await message.answer(
+        "🎬 <b>GAPCUT AI</b>\n\n"
+        "Автоматические субтитры и AI-монтаж видео.\n\n"
+        "Нажми кнопку, чтобы открыть приложение.",
+        reply_markup=keyboard
+    )
+
+
+@dp.message(Command("help"))
+async def help_command(message: Message):
+    await message.answer(
+        "Отправь видео через Mini App GAPCUT AI.\n"
+        "Поддерживаются субтитры на таджикском и русском языках."
+    )
+
+
+# ==========================================
+# TELEGRAM WEB APP AUTH
+# ==========================================
+
+def validate_telegram_init_data(init_data: str) -> bool:
+    if not BOT_TOKEN or not init_data:
+        return False
+
+    try:
+        data = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = data.pop("hash", None)
+
+        if not received_hash:
+            return False
+
+        auth_date = int(data.get("auth_date", "0"))
+        now = int(time.time())
+
+        if auth_date <= 0 or now - auth_date > 86400:
+            return False
 
-    .profile-avatar {
-      width: 65px;
-      height: 65px;
-      border-radius: 50%;
-      background: linear-gradient(135deg,#7951ec,#d946ef);
-      display: grid;
-      place-items: center;
-      font-size: 26px;
-      margin-bottom: 13px;
-      overflow: hidden;
-    }
-
-    .profile-avatar img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    .nav {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      z-index: 20;
-      display: flex;
-      justify-content: space-around;
-      background: rgba(15,13,27,.96);
-      backdrop-filter: blur(18px);
-      border-top: 1px solid var(--border);
-      padding: 10px 3px calc(10px + env(safe-area-inset-bottom));
-    }
-
-    .nav button {
-      flex: 1;
-      color: #77718c;
-      background: transparent;
-      font-size: 10px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 5px;
-    }
-
-    .nav button span {
-      font-size: 19px;
-    }
+        if auth_date > now + 60:
+            return False
 
-    .nav button.active {
-      color: #c5a7ff;
-    }
-
-    .toast {
-      position: fixed;
-      z-index: 100;
-      bottom: 100px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: max-content;
-      max-width: calc(100% - 35px);
-      padding: 12px 16px;
-      border-radius: 13px;
-      background: #29243c;
-      border: 1px solid var(--border);
-      color: white;
-      font-size: 12px;
-      display: none;
-      text-align: center;
-      box-shadow: 0 8px 30px rgba(0,0,0,.3);
-    }
-
-    .muted {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.6;
-    }
-
-    .field {
-      width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 13px;
-      padding: 13px;
-      background: #100e1d;
-      color: white;
-      margin-top: 10px;
-      outline: none;
-    }
-
-    .field:focus {
-      border-color: #9b76ef;
-    }
+        data_check_string = "\n".join(
+            f"{key}={value}"
+            for key, value in sorted(data.items())
+        )
+
+        secret_key = hmac.new(
+            b"WebAppData",
+            BOT_TOKEN.encode(),
+            hashlib.sha256
+        ).digest()
+
+        calculated_hash = hmac.new(
+            secret_key,
+            data_check_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        return hmac.compare_digest(
+            calculated_hash,
+            received_hash
+        )
+
+    except Exception:
+        logger.exception("Telegram initData validation failed")
+        return False
+
+
+# ==========================================
+# PROCESS HELPERS
+# ==========================================
+
+async def run_command(command, timeout=300):
+    logger.info("Running command: %s", " ".join(map(str, command[:5])))
+
+    process = await asyncio.create_subprocess_exec(
+        *map(str, command),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE
+    )
 
-    @media (min-width: 520px) {
-      .app { padding-top: 25px; }
+    try:
+        _, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise RuntimeError("Вақти коркарди видео тамом шуд.")
+
+    if process.returncode != 0:
+        error_text = stderr.decode(
+            "utf-8",
+            errors="replace"
+        )[-2500:]
+
+        logger.error("Command failed: %s", error_text)
+        raise RuntimeError("FFmpeg натавонист видеоро коркард кунад.")
+
+    return True
+
+
+async def get_video_info(video_path: Path):
+    command = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries",
+        "format=duration:stream=codec_type,width,height",
+        "-of", "json",
+        str(video_path)
+    ]
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+
+    stdout, _ = await asyncio.wait_for(
+        process.communicate(),
+        timeout=30
+    )
+
+    if process.returncode != 0:
+        raise RuntimeError("Маълумоти видео хонда нашуд.")
+
+    info = json.loads(stdout.decode("utf-8"))
+
+    duration = float(info.get("format", {}).get("duration", 0))
+
+    if duration <= 0:
+        raise RuntimeError("Давомнокии видео муайян нашуд.")
+
+    return info, duration
+
+
+# ==========================================
+# AUDIO EXTRACTION
+# ==========================================
+
+async def extract_audio(video_path: Path, audio_path: Path):
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i", str(video_path),
+        "-map", "0:a:0",
+        "-vn",
+        "-ac", "1",
+        "-ar", "16000",
+        "-b:a", "48k",
+        "-c:a", "libmp3lame",
+        str(audio_path)
+    ]
+
+    await run_command(command, timeout=180)
+
+    if not audio_path.exists():
+        raise RuntimeError("Садо аз видео гирифта нашуд.")
+
+    if audio_path.stat().st_size > MAX_AUDIO_SIZE:
+        raise RuntimeError(
+            "Файли садо барои Groq хеле калон аст. "
+            "Видеои кӯтоҳтар ё сабуктар истифода бар."
+        )
+
+
+# ==========================================
+# GROQ WHISPER
+# ==========================================
+
+async def transcribe_audio(audio_path: Path):
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY дар Render танзим нашудааст.")
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}"
+    }
+
+    prompt = (
+        "The audio may contain Tajik or Russian speech, "
+        "including mixed Tajik-Russian sentences. "
+        "Preserve the original spoken language and wording. "
+        "Do not translate. Use correct Cyrillic spelling."
+    )
+
+    data = {
+        "model": GROQ_MODEL,
+        "response_format": "verbose_json",
+        "timestamp_granularities[]": ["word", "segment"],
+        "temperature": "0",
+        "prompt": prompt
+    }
+
+    timeout = httpx.Timeout(
+        connect=30,
+        read=240,
+        write=60,
+        pool=30
+    )
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        with audio_path.open("rb") as audio_file:
+            response = await client.post(
+                GROQ_URL,
+                headers=headers,
+                data=data,
+                files={
+                    "file": (
+                        audio_path.name,
+                        audio_file,
+                        "audio/mpeg"
+                    )
+                }
+            )
+
+    if response.status_code >= 400:
+        logger.error(
+            "Groq error %s: %s",
+            response.status_code,
+            response.text[:1500]
+        )
+        raise RuntimeError(
+            "Хатогӣ ҳангоми шинохти овоз. "
+            "Калиди Groq ё маҳдудияти API-ро санҷ."
+        )
+
+    result = response.json()
+
+    words = result.get("words") or []
+    segments = result.get("segments") or []
+
+    if not words:
+        words = []
+
+        for segment in segments:
+            text = segment.get("text", "").strip()
+            if not text:
+                continue
+
+            parts = text.split()
+            if not parts:
+                continue
+
+            start = float(segment.get("start", 0))
+            end = float(segment.get("end", start + 1))
+            step = max((end - start) / len(parts), 0.05)
+
+            for index, part in enumerate(parts):
+                words.append({
+                    "word": part,
+                    "start": start + index * step,
+                    "end": min(end, start + (index + 1) * step)
+                })
+
+    clean_words = []
+
+    for item in words:
+        word = str(item.get("word", "")).strip()
+        if not word:
+            continue
+
+        start = max(0.0, float(item.get("start", 0)))
+        end = max(start + 0.04, float(item.get("end", start + 0.1)))
+
+        clean_words.append({
+            "word": word,
+            "start": start,
+            "end": end
+        })
+
+    if not clean_words:
+        raise RuntimeError(
+            "Дар видео нутқи фаҳмо ёфт нашуд."
+        )
+
+    return clean_words, result.get("text", "")
+
+
+# ==========================================
+# SUBTITLE STYLES
+# ==========================================
+
+STYLE_CONFIG = {
+    "viral": {
+        "font": "Arial",
+        "size": 66,
+        "primary": "&H00FFFFFF",
+        "highlight": "&H0000D7FF",
+        "outline": "&H00000000",
+        "bold": 1,
+        "animation": "pop"
+    },
+    "cinema": {
+        "font": "Georgia",
+        "size": 48,
+        "primary": "&H00FFFFFF",
+        "highlight": "&H00D6B5FF",
+        "outline": "&H00101010",
+        "bold": 0,
+        "animation": "fade"
+    },
+    "podcast": {
+        "font": "Arial",
+        "size": 54,
+        "primary": "&H00FFFFFF",
+        "highlight": "&H0000D7FF",
+        "outline": "&H00101010",
+        "bold": 1,
+        "animation": "highlight"
+    },
+    "classic": {
+        "font": "Arial",
+        "size": 48,
+        "primary": "&H00FFFFFF",
+        "highlight": "&H00FFFFFF",
+        "outline": "&H00000000",
+        "bold": 0,
+        "animation": "clean"
+    },
+    "creator": {
+        "font": "Arial",
+        "size": 58,
+        "primary": "&H00FFFFFF",
+        "highlight": "&H00A8FF5C",
+        "outline": "&H00000000",
+        "bold": 1,
+        "animation": "bounce"
     }
-  </style>
-</head>
-
-<body>
-
-<div class="app">
-
-  <header class="header">
-    <div class="brand">
-      <div class="logo">G</div>
-      <div>
-        <div class="brand-name">GAPCUT <span class="gradient-text">AI</span></div>
-        <div class="brand-sub">Умный видеомонтаж</div>
-      </div>
-    </div>
-    <div class="status">● AI ONLINE</div>
-  </header>
-
-  <!-- HOME -->
-  <section class="page active" id="page-home">
-
-    <div class="welcome">
-      <h1>Твой видеомонтаж с помощью <span class="gradient-text">AI</span></h1>
-      <p>Загрузи видео. Выбери стиль. Получи готовое видео с автоматически созданными субтитрами.</p>
-    </div>
-
-    <div class="card">
-      <div class="section-title" style="margin-top:0">🎬 Начнём монтаж?</div>
-      <p class="muted">Перейди в раздел «Монтаж», загрузи видео и выбери оформление.</p>
-      <button class="primary-btn" onclick="showPage('montage')">Начать монтаж →</button>
-    </div>
-
-    <div class="section-title">Возможности GAPCUT AI</div>
-
-    <div class="option-grid">
-      <div class="option">
-        <span class="emoji">🎙️</span>
-        <strong>AI-субтитры</strong>
-        <small>Распознавание речи в видео</small>
-      </div>
-      <div class="option">
-        <span class="emoji">✨</span>
-        <strong>Стили текста</strong>
-        <small>Оформление субтитров</small>
-      </div>
-      <div class="option">
-        <span class="emoji">📱</span>
-        <strong>Формат Reels</strong>
-        <small>Вертикальный формат 9:16</small>
-      </div>
-      <div class="option">
-        <span class="emoji">⚡</span>
-        <strong>AI-обработка</strong>
-        <small>Автоматическая обработка видео</small>
-      </div>
-    </div>
-
-    <div class="notice">
-      Поддержка видео до 300 MB и продолжительностью до 2 минут. Фактическая возможность загрузки также зависит от ограничений сервера.
-    </div>
-
-  </section>
-
-  <!-- INVITE -->
-  <section class="page" id="page-invite">
-
-    <div class="welcome">
-      <h1>Приглашай друзей 🤝</h1>
-      <p>Поделись GAPCUT AI с друзьями и расскажи им о возможностях AI-монтажа.</p>
-    </div>
-
-    <div class="card">
-      <div class="section-title" style="margin-top:0">Твоя ссылка</div>
-      <p class="muted">Поделись ссылкой на Mini App.</p>
-      <input class="field" id="inviteLink" readonly>
-      <button class="primary-btn" onclick="copyInvite()">Копировать ссылку</button>
-      <button class="secondary-btn" onclick="shareInvite()">Поделиться</button>
-    </div>
-
-    <div class="notice">
-      Внимание: система реферального учёта приглашённых пользователей пока не подключена. Эта ссылка предназначена для обычного приглашения.
-    </div>
-
-  </section>
-
-  <!-- MONTAGE -->
-  <section class="page" id="page-montage">
-
-    <div class="welcome">
-      <h1>AI <span class="gradient-text">Монтаж</span></h1>
-      <p>Загрузи исходное видео и настрой обработку.</p>
-    </div>
-
-    <div class="section-title">1. Загрузи видео</div>
-
-    <div class="upload-box" onclick="document.getElementById('videoInput').click()">
-      <div class="upload-icon">📤</div>
-      <h3>Нажми, чтобы выбрать видео</h3>
-      <p>MP4, MOV, WEBM, MKV<br>Максимум 300 MB · До 2 минут</p>
-    </div>
-
-    <input
-      type="file"
-      id="videoInput"
-      accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mp4,.mov,.webm,.mkv"
-      hidden
-    >
-
-    <div class="file-info" id="fileInfo">
-      <strong id="fileName"></strong>
-      <span id="fileSize"></span>
-      <span id="fileDuration"></span>
-      <button class="secondary-btn" onclick="removeVideo()">Удалить видео</button>
-    </div>
-
-    <div class="section-title">2. Выбери стиль субтитров</div>
-
-    <div class="option-grid" id="styleOptions">
-
-      <button class="option selected" data-value="viral" onclick="selectStyle(this)">
-        <span class="emoji">🔥</span>
-        <strong>Viral Reels</strong>
-        <small>Яркий стиль для Reels и TikTok</small>
-      </button>
-
-      <button class="option" data-value="cinema" onclick="selectStyle(this)">
-        <span class="emoji">🎬</span>
-        <strong>Cinematic</strong>
-        <small>Кинематографичный стиль</small>
-      </button>
-
-      <button class="option" data-value="podcast" onclick="selectStyle(this)">
-        <span class="emoji">🎙️</span>
-        <strong>Podcast</strong>
-        <small>Для разговорных видео</small>
-      </button>
-
-      <button class="option" data-value="classic" onclick="selectStyle(this)">
-        <span class="emoji">📝</span>
-        <strong>AI Auto</strong>
-        <small>Автоматическое оформление</small>
-      </button>
-
-    </div>
-
-    <div class="section-title">3. Формат видео</div>
-
-    <div class="format-grid" id="formatOptions">
-
-      <button class="format selected" data-value="9:16" onclick="selectFormat(this)">
-        <span class="shape">▯</span>
-        <strong>9:16</strong>
-        <small>Reels / TikTok</small>
-      </button>
-
-      <button class="format" data-value="16:9" onclick="selectFormat(this)">
-        <span class="shape">▭</span>
-        <strong>16:9</strong>
-        <small>YouTube</small>
-      </button>
-
-      <button class="format" data-value="1:1" onclick="selectFormat(this)">
-        <span class="shape">□</span>
-        <strong>1:1</strong>
-        <small>Instagram</small>
-      </button>
-
-    </div>
-
-    <div class="section-title">4. Дополнительные функции</div>
-
-    <div class="option-grid">
-      <div class="option disabled-option">
-        <span class="emoji">🌍</span>
-        <strong>Перевод субтитров</strong>
-        <small>Пока не подключён</small>
-      </div>
-
-      <div class="option disabled-option">
-        <span class="emoji">🔊</span>
-        <strong>Очистка звука</strong>
-        <small>Пока не подключена</small>
-      </div>
-    </div>
-
-    <div class="notice">
-      Сейчас доступна обработка видео с распознаванием речи и добавлением субтитров. Перевод и очистка звука пока не реализованы.
-    </div>
-
-    <button class="primary-btn" id="processBtn" onclick="startMontage()">
-      ✨ Начать AI-монтаж
-    </button>
-
-    <div class="progress-card card" id="progressCard">
-      <div class="progress-head">
-        <strong id="progressTitle">Подготовка...</strong>
-        <span id="progressPercent">0%</span>
-      </div>
-
-      <div class="progress-track">
-        <div class="progress-fill" id="progressFill"></div>
-      </div>
-
-      <div class="progress-note" id="progressNote">
-        Подготовка видео к отправке.
-      </div>
-    </div>
-
-    <div class="result-box" id="resultBox">
-      <h3>✅ Видео готово!</h3>
-      <p id="resultMessage">Обработка завершена.</p>
-      <button class="primary-btn" id="downloadBtn">⬇️ Скачать видео</button>
-      <button class="secondary-btn" onclick="showPage('results')">Открыть результаты</button>
-    </div>
-
-  </section>
-
-  <!-- RESULTS -->
-  <section class="page" id="page-results">
-
-    <div class="welcome">
-      <h1>Твои <span class="gradient-text">результаты</span></h1>
-      <p>Здесь отображаются видео, обработанные в этом Mini App на данном устройстве.</p>
-    </div>
-
-    <div id="resultsList"></div>
-
-  </section>
-
-  <!-- PROFILE -->
-  <section class="page" id="page-profile">
-
-    <div class="welcome">
-      <h1>Профиль</h1>
-      <p>Информация о твоём аккаунте GAPCUT AI.</p>
-    </div>
-
-    <div class="card">
-      <div class="profile-avatar" id="profileAvatar">👤</div>
-      <h3 id="profileName">Пользователь GAPCUT</h3>
-      <p class="muted" id="profileId">Telegram Mini App</p>
-    </div>
-
-    <div class="card">
-      <div class="section-title" style="margin-top:0">О приложении</div>
-      <p class="muted">GAPCUT AI — инструмент автоматической обработки видео и создания субтитров.</p>
-      <p class="muted" style="margin-top:10px">Версия интерфейса: 2.1.0</p>
-    </div>
-
-    <div class="card">
-      <div class="section-title" style="margin-top:0">Поддержка</div>
-      <p class="muted">Если возникла проблема, свяжись с поддержкой.</p>
-      <button class="primary-btn" onclick="openSupport()">Написать в поддержку</button>
-    </div>
-
-  </section>
-
-</div>
-
-<!-- NAVIGATION -->
-<nav class="nav">
-  <button class="active" data-page="home" onclick="showPage('home')">
-    <span>⌂</span>Главная
-  </button>
-  <button data-page="invite" onclick="showPage('invite')">
-    <span>♧</span>Пригласить
-  </button>
-  <button data-page="montage" onclick="showPage('montage')">
-    <span>✂</span>Монтаж
-  </button>
-  <button data-page="results" onclick="showPage('results')">
-    <span>▣</span>Результаты
-  </button>
-  <button data-page="profile" onclick="showPage('profile')">
-    <span>♙</span>Профиль
-  </button>
-</nav>
-
-<div class="toast" id="toast"></div>
-
-<script>
-"use strict";
-
-/* ==============================
-   CONFIGURATION
-============================== */
-
-const API_URL = "https://gapcut-ai.onrender.com";
-const SUPPORT_URL = "https://t.me/aikomron";
-
-const MAX_FILE_SIZE = 300 * 1024 * 1024;
-const MAX_DURATION = 120;
-const REQUEST_TIMEOUT = 15 * 60 * 1000;
-const DATABASE_NAME = "gapcut_ai_db";
-const DATABASE_VERSION = 1;
-const STORE_NAME = "results";
-
-const tg = window.Telegram?.WebApp;
-
-if (tg) {
-  tg.ready();
-  tg.expand();
-
-  try {
-    tg.setHeaderColor("#090812");
-    tg.setBackgroundColor("#090812");
-  } catch (e) {}
 }
 
-/* ==============================
-   APP STATE
-============================== */
 
-let selectedFile = null;
-let selectedDuration = 0;
-let selectedStyle = "viral";
-let selectedFormat = "9:16";
+def ass_time(seconds: float) -> str:
+    seconds = max(0, seconds)
 
-let currentResultUrl = null;
-let currentResultBlob = null;
-let currentRequest = null;
-let isProcessing = false;
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    whole_seconds = int(seconds % 60)
+    centiseconds = int((seconds - int(seconds)) * 100)
 
-let databasePromise = null;
+    return (
+        f"{hours}:{minutes:02d}:"
+        f"{whole_seconds:02d}.{centiseconds:02d}"
+    )
 
-/* ==============================
-   HELPERS
-============================== */
 
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return "Неизвестный размер";
+def ass_escape(text: str) -> str:
+    text = str(text)
+    text = text.replace("\\", r"\\")
+    text = text.replace("{", r"\{")
+    text = text.replace("}", r"\}")
+    text = text.replace("\n", " ")
+    return text
 
-  if (bytes < 1024 * 1024) {
-    return (bytes / 1024).toFixed(1) + " KB";
-  }
 
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-}
+def build_ass(words, style_name, width, height, output_path):
+    config = STYLE_CONFIG.get(
+        style_name,
+        STYLE_CONFIG["viral"]
+    )
 
-function formatDuration(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
+    font = config["font"]
+    size = config["size"]
+    primary = config["primary"]
+    highlight = config["highlight"]
+    outline = config["outline"]
+    bold = config["bold"]
+    animation = config["animation"]
 
-  return mins + ":" + String(secs).padStart(2, "0");
-}
+    margin_v = max(65, int(height * 0.13))
 
-function showToast(message) {
-  const toast = document.getElementById("toast");
+    header = f"""[Script Info]
+ScriptType: v4.00+
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+PlayResX: {width}
+PlayResY: {height}
 
-  toast.textContent = message;
-  toast.style.display = "block";
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{font},{size},{primary},{highlight},{outline},&H99000000,{bold},0,0,0,100,100,0,0,1,4,1,2,70,70,{margin_v},1
 
-  clearTimeout(showToast.timer);
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
 
-  showToast.timer = setTimeout(() => {
-    toast.style.display = "none";
-  }, 3000);
-}
+    events = []
 
-function showPage(name) {
-  document.querySelectorAll(".page").forEach(page => {
-    page.classList.remove("active");
-  });
+    # 5-word groups, with one active word at a time.
+    group_size = 5
 
-  document.querySelectorAll(".nav button").forEach(button => {
-    button.classList.toggle(
-      "active",
-      button.dataset.page === name
-    );
-  });
+    for group_start in range(0, len(words), group_size):
+        group = words[group_start:group_start + group_size]
 
-  const target = document.getElementById("page-" + name);
+        for active_index, item in enumerate(group):
+            start = item["start"]
+            end = item["end"]
 
-  if (target) {
-    target.classList.add("active");
-  }
+            if end <= start:
+                end = start + 0.12
 
-  if (name === "results") {
-    renderResults();
-  }
+            parts = []
 
-  if (name === "profile") {
-    updateProfile();
-  }
+            for index, token in enumerate(group):
+                text = ass_escape(token["word"])
 
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
+                if index == active_index:
+                    if animation == "pop":
+                        tag = (
+                            r"{\c" + highlight +
+                            r"\fscx115\fscy115"
+                            r"\t(0,100,\fscx100\fscy100)}"
+                        )
+                    elif animation == "bounce":
+                        tag = (
+                            r"{\c" + highlight +
+                            r"\fscx120\fscy120"
+                            r"\t(0,130,\fscx100\fscy100)}"
+                        )
+                    elif animation == "fade":
+                        tag = (
+                            r"{\alpha&HFF&"
+                            r"\t(0,180,\alpha&H00&)}"
+                        )
+                    elif animation == "highlight":
+                        tag = r"{\c" + highlight + "}"
+                    else:
+                        tag = ""
 
-function setProgress(percent, title, note) {
-  const value = Math.max(0, Math.min(100, percent));
+                    parts.append(tag + text + r"{\rDefault}")
+                else:
+                    parts.append(text)
 
-  document.getElementById("progressFill").style.width = value + "%";
-  document.getElementById("progressPercent").textContent =
-    Math.round(value) + "%";
+            line = " ".join(parts)
 
-  document.getElementById("progressTitle").textContent = title;
-  document.getElementById("progressNote").textContent = note;
-}
+            # Keep the group centered at the bottom.
+            event = (
+                f"Dialogue: 0,{ass_time(start)},"
+                f"{ass_time(end)},Default,,0,0,0,,"
+                f"{{\\an2}}{line}"
+            )
 
-/* ==============================
-   FILE SELECTION
-============================== */
+            events.append(event)
 
-const videoInput = document.getElementById("videoInput");
+    output_path.write_text(
+        header + "\n".join(events) + "\n",
+        encoding="utf-8"
+    )
 
-videoInput.addEventListener("change", async event => {
-  const file = event.target.files?.[0];
 
-  if (!file) return;
+# ==========================================
+# VIDEO RENDER
+# ==========================================
 
-  if (!file.type.startsWith("video/") &&
-      !/\.(mp4|mov|webm|mkv)$/i.test(file.name)) {
-    showToast("Выбери видеофайл.");
-    videoInput.value = "";
-    return;
-  }
+def get_output_dimensions(video_format, original_info):
+    if video_format == "16:9":
+        return 1280, 720
 
-  if (file.size > MAX_FILE_SIZE) {
-    showToast("Размер видео превышает 300 MB.");
-    videoInput.value = "";
-    return;
-  }
+    if video_format == "1:1":
+        return 720, 720
 
-  if (file.size === 0) {
-    showToast("Файл пустой.");
-    videoInput.value = "";
-    return;
-  }
+    if video_format == "original":
+        streams = original_info.get("streams", [])
 
-  try {
-    const duration = await getVideoDuration(file);
+        for stream in streams:
+            if stream.get("codec_type") == "video":
+                width = int(stream.get("width", 720))
+                height = int(stream.get("height", 1280))
+                return width, height
 
-    if (!Number.isFinite(duration) || duration <= 0) {
-      throw new Error("Не удалось определить длительность видео.");
+    return 720, 1280
+
+
+async def render_video(
+    input_path,
+    output_path,
+    ass_path,
+    video_format,
+    original_info
+):
+    width, height = get_output_dimensions(
+        video_format,
+        original_info
+    )
+
+    subtitle_filter = (
+        "ass=" + str(ass_path).replace("\\", "/")
+        .replace(":", r"\:")
+        .replace("'", r"\'")
+    )
+
+    if video_format == "original":
+        scale_filter = (
+            f"scale='min({width},1280)':"
+            f"'min({height},1920)':"
+            "force_original_aspect_ratio=decrease"
+        )
+    else:
+        scale_filter = (
+            f"scale={width}:{height}:"
+            "force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}"
+        )
+
+    video_filter = scale_filter + "," + subtitle_filter
+
+    command = [
+        "ffmpeg",
+        "-y",
+        "-threads", "1",
+        "-filter_threads", "1",
+        "-i", str(input_path),
+        "-vf", video_filter,
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "27",
+        "-threads", "1",
+        "-c:a", "aac",
+        "-b:a", "96k",
+        "-movflags", "+faststart",
+        "-fs", str(MAX_OUTPUT_SIZE),
+        str(output_path)
+    ]
+
+    await run_command(command, timeout=600)
+
+    if not output_path.exists() or output_path.stat().st_size < 1000:
+        raise RuntimeError("Файли натиҷа сохта нашуд.")
+
+    if output_path.stat().st_size >= MAX_OUTPUT_SIZE:
+        raise RuntimeError(
+            "Файли натиҷа аз маҳдудияти сервер калон шуд."
+        )
+
+
+# ==========================================
+# FILE CLEANUP
+# ==========================================
+
+def cleanup_job(job_dir: str):
+    try:
+        shutil.rmtree(job_dir, ignore_errors=True)
+    except Exception:
+        logger.exception("Temporary folder cleanup failed")
+
+
+def finish_response(job_dir: str):
+    cleanup_job(job_dir)
+
+    if PROCESS_LOCK.locked():
+        PROCESS_LOCK.release()
+
+
+# ==========================================
+# FASTAPI
+# ==========================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    polling_task = None
+
+    if bot:
+        polling_task = asyncio.create_task(
+            dp.start_polling(bot)
+        )
+
+    yield
+
+    if polling_task:
+        polling_task.cancel()
+
+        try:
+            await polling_task
+        except asyncio.CancelledError:
+            pass
+
+    if bot:
+        await bot.session.close()
+
+
+app = FastAPI(
+    title="GAPCUT AI",
+    version="3.0.0",
+    lifespan=lifespan
+)
+
+
+@app.get("/")
+async def home():
+    return {
+        "app": "GAPCUT AI",
+        "version": "3.0.0",
+        "status": "online",
+        "max_upload_mb": 100,
+        "max_duration_seconds": 60,
+        "styles": list(STYLE_CONFIG.keys()),
+        "languages": ["tg", "ru", "tg_ru"]
     }
 
-    if (duration > MAX_DURATION) {
-      showToast("Максимальная длительность — 2 минуты.");
-      videoInput.value = "";
-      return;
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "version": "3.0.0"
     }
 
-    selectedFile = file;
-    selectedDuration = duration;
-
-    document.getElementById("fileInfo").style.display = "block";
-    document.getElementById("fileName").textContent = file.name;
-    document.getElementById("fileSize").textContent =
-      "Размер: " + formatBytes(file.size);
-    document.getElementById("fileDuration").textContent =
-      "Длительность: " + formatDuration(duration);
-
-    hidePreviousResult();
-
-    showToast("Видео успешно выбрано.");
-
-  } catch (error) {
-    showToast(error.message || "Не удалось открыть видео.");
-    videoInput.value = "";
-  }
-});
-
-function getVideoDuration(file) {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement("video");
-    const url = URL.createObjectURL(file);
-
-    video.preload = "metadata";
-    video.muted = true;
-
-    const cleanup = () => {
-      URL.revokeObjectURL(url);
-      video.removeAttribute("src");
-      video.load();
-    };
-
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("Не удалось прочитать видео. Попробуй другой файл."));
-    }, 20000);
-
-    video.onloadedmetadata = () => {
-      clearTimeout(timer);
-      const duration = video.duration;
-      cleanup();
-      resolve(duration);
-    };
-
-    video.onerror = () => {
-      clearTimeout(timer);
-      cleanup();
-      reject(new Error("Не удалось прочитать этот видеофайл."));
-    };
-
-    video.src = url;
-  });
-}
-
-function removeVideo() {
-  if (isProcessing) {
-    showToast("Дождись завершения обработки.");
-    return;
-  }
-
-  selectedFile = null;
-  selectedDuration = 0;
-  videoInput.value = "";
-
-  document.getElementById("fileInfo").style.display = "none";
-
-  showToast("Видео удалено.");
-}
-
-/* ==============================
-   OPTIONS
-============================== */
-
-function selectStyle(element) {
-  document.querySelectorAll("#styleOptions .option").forEach(option => {
-    option.classList.remove("selected");
-  });
-
-  element.classList.add("selected");
-  selectedStyle = element.dataset.value;
-}
-
-function selectFormat(element) {
-  document.querySelectorAll("#formatOptions .format").forEach(option => {
-    option.classList.remove("selected");
-  });
-
-  element.classList.add("selected");
-  selectedFormat = element.dataset.value;
-}
-
-/* ==============================
-   TELEGRAM AUTH
-============================== */
-
-function getTelegramInitData() {
-  if (!tg || !tg.initData) {
-    return "";
-  }
-
-  return tg.initData;
-}
-
-/* ==============================
-   DATABASE
-============================== */
-
-function openDatabase() {
-  if (databasePromise) return databasePromise;
-
-  databasePromise = new Promise((resolve, reject) => {
-    if (!("indexedDB" in window)) {
-      reject(new Error("IndexedDB недоступен."));
-      return;
-    }
-
-    const request = indexedDB.open(
-      DATABASE_NAME,
-      DATABASE_VERSION
-    );
-
-    request.onupgradeneeded = event => {
-      const db = event.target.result;
-
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, {
-          keyPath: "id",
-          autoIncrement: true
-        });
-
-        store.createIndex("createdAt", "createdAt");
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-
-    request.onerror = () => {
-      databasePromise = null;
-      reject(request.error || new Error("Ошибка базы данных."));
-    };
-  });
-
-  return databasePromise;
-}
-
-async function saveResult(blob, filename) {
-  try {
-    const db = await openDatabase();
-
-    return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(
-        STORE_NAME,
-        "readwrite"
-      );
 
-      const store = transaction.objectStore(STORE_NAME);
-
-      store.add({
-        filename,
-        blob,
-        createdAt: Date.now(),
-        size: blob.size
-      });
-
-      transaction.oncomplete = () => resolve(true);
-
-      transaction.onerror = () => {
-        reject(transaction.error || new Error("Ошибка сохранения."));
-      };
-
-      transaction.onabort = () => {
-        reject(transaction.error || new Error("Сохранение отменено."));
-      };
-    });
-
-  } catch (error) {
-    console.warn("Не удалось сохранить результат:", error);
-    return false;
-  }
-}
-
-async function getAllResults() {
-  try {
-    const db = await openDatabase();
-
-    return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(
-        STORE_NAME,
-        "readonly"
-      );
-
-      const request = transaction.objectStore(STORE_NAME).getAll();
-
-      request.onsuccess = () => {
-        const items = request.result || [];
-        items.sort((a, b) => b.createdAt - a.createdAt);
-        resolve(items);
-      };
-
-      request.onerror = () => reject(request.error);
-    });
-
-  } catch (error) {
-    console.warn(error);
-    return [];
-  }
-}
-
-async function deleteResult(id) {
-  try {
-    const db = await openDatabase();
-
-    await new Promise((resolve, reject) => {
-      const transaction = db.transaction(
-        STORE_NAME,
-        "readwrite"
-      );
-
-      transaction.objectStore(STORE_NAME).delete(id);
-
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error);
-    });
-
-    renderResults();
-
-  } catch (error) {
-    showToast("Не удалось удалить результат.");
-  }
-}
-
-/* ==============================
-   RESULT DISPLAY
-============================== */
-
-function hidePreviousResult() {
-  document.getElementById("resultBox").style.display = "none";
-
-  if (currentResultUrl) {
-    URL.revokeObjectURL(currentResultUrl);
-    currentResultUrl = null;
-  }
-
-  currentResultBlob = null;
-}
-
-function showResult(blob, filename) {
-  hidePreviousResult();
-
-  currentResultBlob = blob;
-  currentResultUrl = URL.createObjectURL(blob);
-
-  const downloadBtn = document.getElementById("downloadBtn");
-
-  downloadBtn.onclick = () => {
-    downloadBlob(currentResultBlob, filename);
-  };
-
-  document.getElementById("resultMessage").textContent =
-    "Обработка завершена. Размер файла: " + formatBytes(blob.size);
-
-  document.getElementById("resultBox").style.display = "block";
-}
-
-function downloadBlob(blob, filename) {
-  if (!blob) {
-    showToast("Файл недоступен.");
-    return;
-  }
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-
-  link.href = url;
-  link.download = filename || "gapcut-ai-video.mp4";
-
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
-
-async function renderResults() {
-  const container = document.getElementById("resultsList");
-
-  container.innerHTML = `
-    <div class="empty">Загрузка результатов...</div>
-  `;
-
-  const results = await getAllResults();
-
-  if (!results.length) {
-    container.innerHTML = `
-      <div class="card empty">
-        <div style="font-size:35px;margin-bottom:12px">🎞️</div>
-        Пока нет готовых видео.<br>
-        Обработай первое видео в разделе «Монтаж».
-      </div>
-    `;
-    return;
-  }
-
-  container.innerHTML = "";
-
-  results.forEach(item => {
-    const element = document.createElement("div");
-    element.className = "result-item";
-
-    const title = document.createElement("strong");
-    title.textContent = item.filename || "GAPCUT AI video";
-
-    const details = document.createElement("small");
-    details.textContent =
-      new Date(item.createdAt).toLocaleString("ru-RU") +
-      " · " + formatBytes(item.size || 0);
-
-    const download = document.createElement("button");
-    download.className = "primary-btn";
-    download.textContent = "⬇️ Скачать";
-    download.onclick = () => downloadBlob(
-      item.blob,
-      item.filename
-    );
-
-    const remove = document.createElement("button");
-    remove.className = "secondary-btn";
-    remove.textContent = "Удалить";
-    remove.onclick = () => deleteResult(item.id);
-
-    element.append(title, details, download, remove);
-    container.appendChild(element);
-  });
-}
-
-/* ==============================
-   API ERROR READING
-============================== */
-
-async function readApiError(xhr) {
-  try {
-    let text = "";
-
-    if (xhr.response instanceof Blob) {
-      text = await xhr.response.text();
-    } else if (typeof xhr.response === "string") {
-      text = xhr.response;
-    }
-
-    if (text) {
-      try {
-        const data = JSON.parse(text);
-
-        return (
-          data.detail ||
-          data.message ||
-          data.error ||
-          text
-        );
-      } catch (e) {
-        return text.slice(0, 500);
-      }
-    }
-
-  } catch (error) {
-    console.warn("Ошибка чтения ответа:", error);
-  }
-
-  if (xhr.status === 413) {
-    return "Сервер не принимает файл такого размера.";
-  }
-
-  if (xhr.status === 401 || xhr.status === 403) {
-    return "Ошибка авторизации Telegram. Закрой Mini App и открой его снова через бота.";
-  }
-
-  if (xhr.status === 404) {
-    return "API не нашёл нужный адрес.";
-  }
-
-  if (xhr.status >= 500) {
-    return "Ошибка сервера. Попробуй позже.";
-  }
-
-  return "Не удалось обработать видео. Код: " + xhr.status;
-}
-
-/* ==============================
-   START PROCESSING
-============================== */
-
-async function startMontage() {
-  if (isProcessing) return;
-
-  if (!selectedFile) {
-    showToast("Сначала выбери видео.");
-    return;
-  }
-
-  if (selectedFile.size > MAX_FILE_SIZE) {
-    showToast("Максимальный размер видео — 300 MB.");
-    return;
-  }
-
-  if (selectedDuration > MAX_DURATION) {
-    showToast("Максимальная длительность — 2 минуты.");
-    return;
-  }
-
-  const initData = getTelegramInitData();
-
-  if (!initData) {
-    showToast("Открой приложение через Telegram-бота.");
-    return;
-  }
-
-  if (!navigator.onLine) {
-    showToast("Нет подключения к интернету.");
-    return;
-  }
-
-  isProcessing = true;
-
-  const button = document.getElementById("processBtn");
-  const progressCard = document.getElementById("progressCard");
-
-  button.disabled = true;
-  button.textContent = "⏳ Обработка...";
-
-  document.getElementById("resultBox").style.display = "none";
-  progressCard.style.display = "block";
-
-  setProgress(
-    0,
-    "Подготовка видео",
-    "Подготавливаем файл к отправке на сервер."
-  );
-
-  const formData = new FormData();
-
-  formData.append("file", selectedFile, selectedFile.name);
-  formData.append("style", selectedStyle);
-  formData.append("language", "tg");
-  formData.append("video_format", selectedFormat);
-  formData.append("init_data", initData);
-
-  const xhr = new XMLHttpRequest();
-
-  currentRequest = xhr;
-
-  xhr.open("POST", API_URL + "/api/process", true);
-  xhr.responseType = "blob";
-  xhr.timeout = REQUEST_TIMEOUT;
-
-  xhr.upload.onprogress = event => {
-    if (event.lengthComputable) {
-      const percent = Math.round(
-        (event.loaded / event.total) * 100
-      );
-
-      setProgress(
-        percent,
-        "Загрузка видео: " + percent + "%",
-        "Отправлено " + formatBytes(event.loaded) +
-        " из " + formatBytes(event.total) +
-        ". После загрузки начнётся обработка на сервере."
-      );
-    }
-  };
-
-  xhr.upload.onload = () => {
-    setProgress(
-      100,
-      "Видео отправлено",
-      "Сервер обрабатывает видео. Это может занять некоторое время."
-    );
-  };
-
-  xhr.onload = async () => {
-    try {
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = await readApiError(xhr);
-        throw new Error(message);
-      }
-
-      const contentType = (
-        xhr.getResponseHeader("Content-Type") || ""
-      ).toLowerCase();
-
-      const blob = xhr.response;
-
-      if (!(blob instanceof Blob) || blob.size === 0) {
-        throw new Error("Сервер вернул пустой файл.");
-      }
-
-      if (
-        contentType.includes("application/json") ||
-        contentType.includes("text/")
-      ) {
-        const message = await blob.text();
-        throw new Error(message || "Сервер вернул ошибку.");
-      }
-
-      if (
-        !contentType.includes("video/") &&
-        !contentType.includes("application/octet-stream")
-      ) {
-        throw new Error(
-          "Сервер вернул неизвестный формат файла: " +
-          (contentType || "не указан")
-        );
-      }
-
-      const resultBlob = new Blob(
-        [blob],
-        { type: "video/mp4" }
-      );
-
-      const filename =
-        "GAPCUT_AI_" + Date.now() + ".mp4";
-
-      setProgress(
-        100,
-        "Готово!",
-        "Видео успешно обработано."
-      );
-
-      showResult(resultBlob, filename);
-
-      const saved = await saveResult(
-        resultBlob,
-        filename
-      );
-
-      if (saved) {
-        document.getElementById("resultMessage").textContent =
-          "Видео обработано и сохранено в результатах. Размер: " +
-          formatBytes(resultBlob.size);
-      } else {
-        document.getElementById("resultMessage").textContent =
-          "Видео обработано. Сохранение в историю не удалось, но его можно скачать прямо сейчас.";
-      }
-
-      showToast("Видео успешно обработано!");
-
-    } catch (error) {
-      console.error(error);
-
-      showToast(
-        error.message || "Ошибка обработки видео."
-      );
-
-      setProgress(
-        0,
-        "Ошибка",
-        error.message || "Не удалось обработать видео."
-      );
-    } finally {
-      finishProcessing();
-    }
-  };
-
-  xhr.onerror = () => {
-    setProgress(
-      0,
-      "Ошибка соединения",
-      "Не удалось связаться с сервером. Проверь интернет или попробуй позже."
-    );
-
-    showToast("Ошибка соединения с сервером.");
-    finishProcessing();
-  };
-
-  xhr.ontimeout = () => {
-    setProgress(
-      0,
-      "Время ожидания истекло",
-      "Сервер не успел завершить обработку за отведённое время."
-    );
-
-    showToast("Превышено время ожидания.");
-    finishProcessing();
-  };
-
-  xhr.onabort = () => {
-    setProgress(
-      0,
-      "Запрос отменён",
-      "Обработка была прервана."
-    );
-
-    finishProcessing();
-  };
-
-  try {
-    xhr.send(formData);
-  } catch (error) {
-    console.error(error);
-    showToast("Не удалось отправить видео.");
-    finishProcessing();
-  }
-}
-
-function finishProcessing() {
-  isProcessing = false;
-  currentRequest = null;
-
-  const button = document.getElementById("processBtn");
-
-  button.disabled = false;
-  button.textContent = "✨ Начать AI-монтаж";
-}
-
-/* ==============================
-   PROFILE
-============================== */
-
-function updateProfile() {
-  const user = tg?.initDataUnsafe?.user;
-
-  const name = user
-    ? [user.first_name, user.last_name].filter(Boolean).join(" ")
-    : "Пользователь GAPCUT";
-
-  document.getElementById("profileName").textContent =
-    name || "Пользователь GAPCUT";
-
-  document.getElementById("profileId").textContent =
-    user?.username
-      ? "@" + user.username
-      : "Telegram Mini App";
-
-  const avatar = document.getElementById("profileAvatar");
-
-  if (user?.photo_url) {
-    avatar.innerHTML = "";
-
-    const img = document.createElement("img");
-    img.src = user.photo_url;
-    img.alt = "Avatar";
-
-    avatar.appendChild(img);
-  } else {
-    avatar.textContent = "👤";
-  }
-}
-
-/* ==============================
-   INVITE
-============================== */
-
-function getInviteLink() {
-  const url = new URL(window.location.href);
-
-  return url.toString();
-}
-
-function copyInvite() {
-  const link = document.getElementById("inviteLink").value;
-
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(link)
-      .then(() => showToast("Ссылка скопирована."))
-      .catch(() => fallbackCopy(link));
-  } else {
-    fallbackCopy(link);
-  }
-}
-
-function fallbackCopy(text) {
-  const input = document.getElementById("inviteLink");
-
-  input.focus();
-  input.select();
-
-  try {
-    document.execCommand("copy");
-    showToast("Ссылка скопирована.");
-  } catch (error) {
-    showToast("Не удалось скопировать ссылку.");
-  }
-}
-
-function shareInvite() {
-  const link = getInviteLink();
-
-  const text = "Попробуй GAPCUT AI — AI-монтаж видео: " + link;
-
-  if (tg?.openTelegramLink) {
-    tg.openTelegramLink(
-      "https://t.me/share/url?url=" +
-      encodeURIComponent(link) +
-      "&text=" +
-      encodeURIComponent("Попробуй GAPCUT AI!")
-    );
-  } else if (navigator.share) {
-    navigator.share({
-      title: "GAPCUT AI",
-      text,
-      url: link
-    }).catch(() => {});
-  } else {
-    copyInvite();
-  }
-}
-
-/* ==============================
-   SUPPORT
-============================== */
-
-function openSupport() {
-  if (tg?.openTelegramLink) {
-    tg.openTelegramLink(SUPPORT_URL);
-  } else {
-    window.open(SUPPORT_URL, "_blank");
-  }
-}
-
-/* ==============================
-   INITIALIZATION
-============================== */
-
-document.getElementById("inviteLink").value = getInviteLink();
-
-updateProfile();
-
-renderResults();
-
-window.addEventListener("beforeunload", () => {
-  if (currentResultUrl) {
-    URL.revokeObjectURL(currentResultUrl);
-  }
-});
-
-</script>
-
-</body>
-</html>
+@app.post("/api/process")
+async def process_video(
+    file: UploadFile = File(...),
+    style: str = Form("viral"),
+    language: str = Form("tg_ru"),
+    video_format: str = Form("9:16"),
+    init_data: str = Form(...)
+):
+    if not validate_telegram_init_data(init_data):
+        raise HTTPException(
+            status_code=401,
+            detail="Telegram авторизация нодуруст аст."
+        )
+
+    if not GROQ_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="GROQ_API_KEY танзим нашудааст."
+        )
+
+    if PROCESS_LOCK.locked():
+        raise HTTPException(
+            status_code=429,
+            detail="Сервер ҳоло видеои дигарро коркард мекунад. Баъдтар кӯшиш кун."
+        )
+
+    await PROCESS_LOCK.acquire()
+
+    job_dir = str(BASE_DIR / uuid.uuid4().hex)
+    Path(job_dir).mkdir(parents=True, exist_ok=True)
+
+    input_path = Path(job_dir) / "input_video"
+    audio_path = Path(job_dir) / "audio.mp3"
+    ass_path = Path(job_dir) / "captions.ass"
+    output_path = Path(job_dir) / "gapcut_ai.mp4"
+
+    try:
+        suffix = Path(file.filename or "video.mp4").suffix.lower()
+
+        if suffix not in {
+            ".mp4", ".mov", ".webm", ".mkv", ".m4v"
+        }:
+            raise HTTPException(
+                status_code=400,
+                detail="Формати видео дастгирӣ намешавад."
+            )
+
+        total_size = 0
+
+        with input_path.open("wb") as destination:
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK)
+
+                if not chunk:
+                    break
+
+                total_size += len(chunk)
+
+                if total_size > MAX_INPUT_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Ҳаҷми максималии видео 100 MB аст."
+                    )
+
+                destination.write(chunk)
+
+        await file.close()
+
+        if total_size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Файли видео холӣ аст."
+            )
+
+        original_info, duration = await get_video_info(input_path)
+
+        if duration > MAX_DURATION:
+            raise HTTPException(
+                status_code=413,
+                detail="Давомнокии максималии видео 60 сония аст."
+            )
+
+        has_audio = any(
+            stream.get("codec_type") == "audio"
+            for stream in original_info.get("streams", [])
+        )
+
+        if not has_audio:
+            raise HTTPException(
+                status_code=400,
+                detail="Дар видео садо ёфт нашуд."
+            )
+
+        await extract_audio(input_path, audio_path)
+
+        words, transcript = await transcribe_audio(audio_path)
+
+        if language not in {"tg", "ru", "tg_ru", "both"}:
+            language = "tg_ru"
+
+        # For tg_ru/both, Whisper auto-detects mixed speech.
+        # For a single-language selection, the API receives its code.
+        # Tajik uses ISO-639-1 code "tg".
+        if language in {"tg", "ru"}:
+            # Current transcription function intentionally auto-detects
+            # by default; mixed speech must not be forced into one language.
+            logger.info("Requested language mode: %s", language)
+
+        style = style if style in STYLE_CONFIG else "viral"
+
+        if video_format not in {
+            "9:16", "16:9", "1:1", "original"
+        }:
+            video_format = "9:16"
+
+        build_ass(
+            words,
+            style,
+            720 if video_format != "16:9" else 1280,
+            1280 if video_format != "16:9" else 720,
+            ass_path
+        )
+
+        await render_video(
+            input_path,
+            output_path,
+            ass_path,
+            video_format,
+            original_info
+        )
+
+        logger.info(
+            "Job complete: duration=%.2f words=%d size=%d",
+            duration,
+            len(words),
+            output_path.stat().st_size
+        )
+
+        return FileResponse(
+            path=str(output_path),
+            media_type="video/mp4",
+            filename="GAPCUT_AI.mp4",
+            background=BackgroundTask(
+                finish_response,
+                job_dir
+            )
+        )
+
+    except HTTPException:
+        cleanup_job(job_dir)
+        if PROCESS_LOCK.locked():
+            PROCESS_LOCK.release()
+        raise
+
+    except Exception as error:
+        logger.exception("Video processing failed")
+
+        cleanup_job(job_dir)
+
+        if PROCESS_LOCK.locked():
+            PROCESS_LOCK.release()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)[:400]
+        )
+
+    finally:
+        await file.close()
+
+
+# ==========================================
+# LOCAL ENTRY POINT
+# ==========================================
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "10000")),
+        workers=1,
+        limit_concurrency=10
+    )
