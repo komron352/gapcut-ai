@@ -7,76 +7,89 @@
 <title>GAPCUT AI</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#07060b;--card:#13101f;--line:#2b2545;--pu:#8b5cf6;--pu2:#c026d3;--gold:#f5b937;--tx:#f5f2ff;--mu:#9d97bb;--r:18px}
+:root{--bg:#07060b;--card:#13101f;--line:#2b2545;--pu:#8b5cf6;--pu2:#c026d3;--gold:#f5b937;--tx:#f5f2ff;--mu:#9d97bb;--r:20px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans","DejaVu Sans",sans-serif}
-body{min-height:100vh;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px calc(env(safe-area-inset-bottom,0px) + 28px)}
-.bg{position:fixed;inset:0;z-index:-1;background:radial-gradient(60% 40% at 15% 0%,rgba(139,92,246,.35),transparent 70%),radial-gradient(50% 35% at 100% 10%,rgba(245,185,55,.16),transparent 70%)}
+body{min-height:100vh;padding:calc(env(safe-area-inset-top,0px) + 10px) 16px calc(env(safe-area-inset-bottom,0px) + 30px)}
+.bg{position:fixed;inset:0;z-index:-1;background:radial-gradient(60% 40% at 10% 0%,rgba(139,92,246,.38),transparent 70%),radial-gradient(50% 35% at 100% 8%,rgba(245,185,55,.16),transparent 70%)}
 main{max-width:520px;margin:0 auto}
-header{display:flex;justify-content:space-between;align-items:center;margin:6px 0 18px}
-.logo{font-weight:800;font-size:22px;letter-spacing:.5px}.logo b{background:linear-gradient(90deg,var(--pu),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
-.pill{background:var(--card);color:var(--tx);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-weight:700;font-size:13px}
+header{display:flex;align-items:center;gap:10px;margin:6px 0 16px}
+.logo{font-weight:900;font-size:24px;letter-spacing:.3px}.logo b{background:linear-gradient(90deg,var(--pu),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.step{color:var(--mu);font-size:13px;font-weight:700;flex:1}
+.pill{background:var(--card);color:var(--tx);border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-weight:800;font-size:13px}
 .screen{display:none;animation:in .45s ease both}.screen.on{display:block}
 @keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-h1{font-size:26px;line-height:1.15;margin:0 0 6px}.sub{color:var(--mu);margin:0 0 18px;font-size:15px}
+h1{font-size:28px;line-height:1.12;margin:0 0 8px;font-weight:900}.sub{color:var(--mu);margin:0 0 18px;font-size:15px;line-height:1.4}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
-.card h3{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--mu)}
-.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;min-height:150px;border:1.5px dashed #4b3f7a;border-radius:var(--r);background:rgba(139,92,246,.07);margin-bottom:14px;padding:18px;cursor:pointer;transition:.2s}
-.drop:active{transform:scale(.98)}.drop .ic{font-size:34px}.drop small{color:var(--mu)}
-.drop input{display:none}
-video{width:100%;max-height:340px;border-radius:14px;background:#000;margin-bottom:14px;display:block}
+.card h3{margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--mu)}
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;min-height:190px;border:1.5px dashed #4b3f7a;border-radius:var(--r);background:rgba(139,92,246,.07);margin-bottom:14px;padding:18px;cursor:pointer;transition:.2s}
+.drop:active{transform:scale(.98)}.drop small{color:var(--mu)}.drop input{display:none}
+.plus{width:68px;height:68px;border-radius:50%;display:grid;place-items:center;font-size:34px;font-weight:300;background:linear-gradient(135deg,var(--gold),var(--pu2) 55%,var(--pu));box-shadow:0 10px 30px rgba(192,38,211,.4)}
+#pv{width:100%;max-height:300px;border-radius:16px;background:#000;margin-bottom:14px;display:block}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
-.chip{border:1px solid var(--line);background:#0e0b18;color:var(--tx);padding:10px 14px;border-radius:12px;font-size:14px;font-weight:600;transition:.18s}
-.chip.on{border-color:var(--gold);background:linear-gradient(135deg,rgba(139,92,246,.35),rgba(245,185,55,.18));box-shadow:0 0 0 1px var(--gold) inset}
+.chip{border:1px solid var(--line);background:#0e0b18;color:var(--tx);padding:10px 14px;border-radius:999px;font-size:14px;font-weight:700;transition:.18s}
+.chip.on{border-color:var(--gold);background:linear-gradient(135deg,rgba(139,92,246,.38),rgba(245,185,55,.2));box-shadow:0 0 0 1px var(--gold) inset}
 .chip:active{transform:scale(.96)}
-.styles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.sty{border:1px solid var(--line);background:#0e0b18;color:var(--tx);border-radius:14px;padding:12px 10px;text-align:center;transition:.18s}
-.sty.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}.sty:active{transform:scale(.96)}
-.sty .smp{height:44px;display:flex;align-items:center;justify-content:center;font-size:19px;margin-bottom:6px}
-.sty span{font-size:12px;color:var(--mu)}
-.btn{width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:800;color:#fff;background:linear-gradient(90deg,var(--pu),var(--pu2));box-shadow:0 8px 28px rgba(139,92,246,.4);transition:.18s}
+.btn{width:100%;border:0;border-radius:18px;padding:17px;font-size:17px;font-weight:900;color:#fff;background:linear-gradient(90deg,var(--pu),var(--pu2));box-shadow:0 10px 30px rgba(139,92,246,.42);transition:.18s}
 .btn:active{transform:scale(.98)}.btn:disabled{opacity:.4;box-shadow:none}
-.btn.gold{background:linear-gradient(90deg,#f5b937,#f59e0b);color:#1a1200;box-shadow:0 8px 28px rgba(245,185,55,.3)}
+.btn.gold{background:linear-gradient(90deg,#f5b937,#f59e0b);color:#1a1200;box-shadow:0 10px 30px rgba(245,185,55,.3)}
 .btn.ghost{background:var(--card);border:1px solid var(--line);box-shadow:none;margin-top:10px}
-.prog{text-align:center;padding:34px 10px}
-.pct{font-size:58px;font-weight:800;background:linear-gradient(90deg,var(--pu),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.prog{text-align:center;padding:36px 10px}
+.pct{font-size:60px;font-weight:900;background:linear-gradient(90deg,var(--pu),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
 .bar{height:10px;border-radius:9px;background:#1b1630;overflow:hidden;margin:18px 0 12px}
-.bar i{display:block;height:100%;width:0;border-radius:9px;background:linear-gradient(90deg,var(--pu),var(--gold));background-size:200% 100%;animation:sh 1.6s linear infinite;transition:width .5s}
+.bar i{display:block;height:100%;width:0;border-radius:9px;background:linear-gradient(90deg,var(--pu),var(--gold),var(--pu));background-size:200% 100%;animation:sh 1.6s linear infinite;transition:width .5s}
 @keyframes sh{to{background-position:-200% 0}}
-.stage{color:var(--mu);font-size:15px}
-.line{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
-.line time{flex:0 0 42px;font-size:12px;color:var(--gold);padding-top:11px;font-variant-numeric:tabular-nums}
-.line textarea{flex:1;background:#0e0b18;color:var(--tx);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;resize:none;min-height:46px}
-.line textarea:focus{outline:0;border-color:var(--pu)}
-.hint{color:var(--mu);font-size:13px;margin:-4px 0 12px}
-#toast{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 18px);background:#2a0f1c;border:1px solid #7f1d3a;color:#ffd7e0;padding:13px 16px;border-radius:14px;opacity:0;pointer-events:none;transform:translateY(12px);transition:.3s;z-index:9;font-size:14px}
-#toast.on{opacity:1;transform:none}
+.stg{color:var(--mu);font-size:15px}
+/* step 2 */
+.pvbox{position:sticky;top:0;z-index:5;padding:6px 0 12px;background:linear-gradient(var(--bg) 82%,transparent)}
+.stage{position:relative;overflow:hidden;margin:0 auto;border-radius:18px;background:#000;aspect-ratio:var(--ar,.5625);width:min(100%,calc(46vh * var(--ar,.5625)));box-shadow:0 14px 40px rgba(0,0,0,.6)}
+.stage video{width:100%;height:100%;object-fit:cover;display:block}
+#cap{position:absolute;left:7%;right:7%;text-align:center;line-height:1.18;pointer-events:none;word-break:break-word}
+.tag{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.55);border-radius:999px;padding:3px 10px;font-size:11px;font-weight:800}
+.car{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -16px;padding:2px 16px 6px;scrollbar-width:none}.car::-webkit-scrollbar{display:none}
+.sty{flex:0 0 118px;scroll-snap-align:start;border:1px solid var(--line);background:#0e0b18;color:var(--tx);border-radius:16px;padding:12px 8px;text-align:center;transition:.18s}
+.sty.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset;background:linear-gradient(160deg,rgba(139,92,246,.3),#0e0b18)}.sty:active{transform:scale(.96)}
+.smp{height:46px;display:flex;align-items:center;justify-content:center;margin-bottom:6px}.sty span{font-size:12px;color:var(--mu);font-weight:700}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 0;border-top:1px solid var(--line)}.row:first-child{border-top:0;padding-top:2px}
+.row b{font-size:16px}
+.sw{width:52px;height:30px;border-radius:99px;background:#2a2540;position:relative;border:0;transition:.2s;flex:none}.sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:.2s}.sw.on{background:linear-gradient(90deg,var(--pu),var(--pu2))}.sw.on::after{left:25px}
+.stp{display:flex;align-items:center;gap:6px;font-weight:800}.stp button{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#0e0b18;color:var(--tx);font-size:16px}.stp span{min-width:84px;text-align:center}
+.dots{display:flex;gap:10px}.dot{width:34px;height:34px;border-radius:50%;border:2px solid transparent;transition:.15s}.dot.on{border-color:#fff;transform:scale(1.12)}
+details summary{list-style:none;font-weight:800;font-size:16px;display:flex;justify-content:space-between;cursor:pointer}details summary::-webkit-details-marker{display:none}
+.line{display:flex;gap:10px;align-items:flex-start;margin-top:10px}
+.line time{flex:0 0 40px;font-size:12px;color:var(--gold);padding-top:12px;font-variant-numeric:tabular-nums}
+.line textarea{flex:1;background:#0e0b18;color:var(--tx);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;resize:none;min-height:46px}.line textarea:focus{outline:0;border-color:var(--pu)}
+#rv{width:100%;max-height:60vh;border-radius:16px;background:#000;margin-bottom:14px;display:block}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 18px);background:#2a0f1c;border:1px solid #7f1d3a;color:#ffd7e0;padding:13px 16px;border-radius:14px;opacity:0;pointer-events:none;transform:translateY(12px);transition:.3s;z-index:9;font-size:14px}#toast.on{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 <div class="bg"></div>
 <main>
-<header><div class="logo">GAPCUT <b>AI</b></div><button class="pill" id="langBtn"></button></header>
+<header><div class="logo">GAPCUT <b>AI</b></div><div class="step" id="stepT"></div><button class="pill" id="langBtn"></button></header>
 
 <section id="s-up" class="screen on">
   <h1 data-i="h1"></h1><p class="sub" data-i="sub"></p>
-  <label class="drop" id="drop"><input type="file" id="file" accept="video/*"><div class="ic">🎬</div><b id="dropT"></b><small data-i="limits"></small></label>
+  <label class="drop"><input type="file" id="file" accept="video/*"><div class="plus">+</div><b id="dropT"></b><small data-i="limits"></small></label>
   <video id="pv" controls playsinline hidden></video>
   <div class="card"><h3 data-i="speech"></h3><div class="chips" id="langs"></div></div>
-  <button class="btn" id="startBtn" disabled data-i="start"></button>
+  <button class="btn" id="startBtn" disabled data-i="next"></button>
 </section>
 
-<section id="s-pr" class="screen">
-  <div class="card prog"><div class="pct" id="pct">0%</div><div class="bar"><i id="bar"></i></div><div class="stage" id="stage"></div></div>
-</section>
+<section id="s-pr" class="screen"><div class="card prog"><div class="pct" id="pct">0%</div><div class="bar"><i id="bar"></i></div><div class="stg" id="stage"></div></div></section>
 
 <section id="s-ed" class="screen">
-  <h1 data-i="edH"></h1><p class="sub" data-i="edS"></p>
-  <video id="ev" controls playsinline></video>
-  <div class="card" id="lines"></div>
-  <div class="card"><h3 data-i="styleT"></h3><div class="styles" id="styles"></div></div>
-  <div class="card"><h3 data-i="fmtT"></h3><div class="chips" id="fmts"></div></div>
+  <div class="pvbox"><div class="stage" id="stage2"><video id="ev" controls playsinline></video><div id="cap"></div><div class="tag" data-i="live"></div></div></div>
+  <div class="card"><h3 data-i="styleT"></h3><div class="car" id="styles"></div></div>
+  <div class="card">
+    <div class="row"><b data-i="subs"></b><button class="sw on" id="swSubs"></button></div>
+    <div class="row" id="rowColor"><b data-i="color"></b><div class="dots" id="dots"></div></div>
+    <div class="row"><b data-i="size"></b><div class="stp"><button id="szL">‹</button><span id="szV"></span><button id="szR">›</button></div></div>
+    <div class="row"><b data-i="pos"></b><div class="stp"><button id="psL">‹</button><span id="psV"></span><button id="psR">›</button></div></div>
+    <div class="row" style="display:block"><b data-i="fmtT"></b><div class="chips" id="fmts" style="margin-top:10px"></div></div>
+  </div>
+  <div class="card"><details><summary><span data-i="edT"></span><span>✎</span></summary><div id="lines"></div></details></div>
   <button class="btn gold" id="makeBtn" data-i="make"></button>
 </section>
 
@@ -85,6 +98,7 @@ video{width:100%;max-height:340px;border-radius:14px;background:#000;margin-bott
   <video id="rv" controls playsinline></video>
   <button class="btn gold" id="dlBtn" data-i="dl"></button>
   <button class="btn ghost" id="shBtn" data-i="share" hidden></button>
+  <button class="btn ghost" id="backBtn" data-i="back"></button>
   <button class="btn ghost" id="newBtn" data-i="again"></button>
 </section>
 </main>
@@ -98,148 +112,176 @@ const initData=tg?tg.initData:"";
 const $=id=>document.getElementById(id);
 
 const T={
-ru:{h1:"Авто-монтаж с субтитрами",sub:"Загрузите видео. Мы распознаем речь и наложим анимированные субтитры.",limits:"до 100 MB · до 60 секунд",pick:"Выберите видео",speech:"Язык речи",start:"Начать",
-edH:"Проверьте текст",edS:"Исправьте ошибки распознавания. Это важно для таджикской речи.",styleT:"Стиль субтитров",fmtT:"Формат видео",make:"Создать видео",
-done:"Видео готово",doneS:"Проверьте результат и скачайте.",dl:"Скачать",share:"Поделиться",again:"Новое видео",
-langs:{tg:"Таджикский",ru:"Русский",tg_ru:"Тоджикский + русский"},up:"Загрузка",
+ru:{h1:"Автомонтаж с субтитрами",sub:"Загрузите видео — мы распознаем речь и наложим анимированные субтитры.",limits:"до 100 MB · до 60 секунд",pick:"Выбрать видео",speech:"Язык речи",next:"Далее: оформление",
+step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",
+done:"Видео готово",doneS:"Проверьте результат и скачайте.",dl:"Скачать",share:"Поделиться",back:"Изменить оформление",again:"Новое видео",
+langs:{tg:"Таджикский",ru:"Русский",tg_ru:"Таджикский + русский"},sizes:["Малый","Средний","Крупный"],poss:["Авто","Сверху","По центру"],up:"Загрузка",
 eBig:"Файл больше 100 MB.",eLong:"Видео длиннее 60 секунд.",eTg:"Откройте приложение через Telegram-бота.",eNet:"Нет связи с сервером. Подождите минуту и попробуйте снова.",eExp:"Сессия истекла. Загрузите видео заново.",eEmpty:"Текст пуст."},
-tg:{h1:"Монтажи худкор бо субтитр",sub:"Видеоро бор кунед. Мо нутқро мешиносем ва субтитри аниматсиягӣ мегузорем.",limits:"то 100 MB · то 60 сония",pick:"Видеоро интихоб кунед",speech:"Забони нутқ",start:"Оғоз",
-edH:"Матнро санҷед",edS:"Хатоҳои шинохтро ислоҳ кунед. Барои нутқи тоҷикӣ ин хеле муҳим аст.",styleT:"Услуби субтитр",fmtT:"Формати видео",make:"Сохтани видео",
-done:"Видео омода шуд",doneS:"Натиҷаро бинед ва зеркашӣ кунед.",dl:"Зеркашӣ",share:"Мубодила",again:"Видеои нав",
-langs:{tg:"Тоҷикӣ",ru:"Русӣ",tg_ru:"Тоҷикӣ + русӣ"},up:"Бор шуда истодааст",
+tg:{h1:"Монтажи худкор бо субтитр",sub:"Видеоро бор кунед — мо нутқро мешиносем ва субтитри аниматсиягӣ мегузорем.",limits:"то 100 MB · то 60 сония",pick:"Видеоро интихоб кунед",speech:"Забони нутқ",next:"Минбаъд: тарроҳӣ",
+step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",
+done:"Видео омода шуд",doneS:"Натиҷаро бинед ва зеркашӣ кунед.",dl:"Зеркашӣ",share:"Мубодила",back:"Тағйири тарроҳӣ",again:"Видеои нав",
+langs:{tg:"Тоҷикӣ",ru:"Русӣ",tg_ru:"Тоҷикӣ + русӣ"},sizes:["Хурд","Миёна","Калон"],poss:["Худкор","Боло","Миёна"],up:"Бор шуда истодааст",
 eBig:"Файл аз 100 MB калон аст.",eLong:"Видео аз 60 сония дарозтар аст.",eTg:"Барномаро тавассути боти Telegram кушоед.",eNet:"Бо сервер алоқа нест. Як дақиқа интизор шавед ва дубора кӯшиш кунед.",eExp:"Сессия тамом шуд. Видеоро дубора бор кунед.",eEmpty:"Матн холӣ аст."}
 };
-const STY=[["viral","Viral",'<b style="color:#ffe500;font-size:22px;text-shadow:0 2px 0 #000">ВИДЕО</b>'],["classic","Classic",'<span style="font-size:15px">Classic text</span>'],["cinema","Cinema",'<i style="font-family:Georgia,serif;letter-spacing:2px;font-size:16px">Cinema</i>'],["podcast","Podcast",'<span style="background:#000;padding:4px 8px;border-radius:5px;font-weight:700;font-size:15px">Pod<b style="color:#f5b937">cast</b></span>'],["karaoke","Karaoke",'<b style="font-size:18px"><span style="color:#f5b937">Kara</span>oke</b>']];
-const FMT=[["9:16","9:16 Reels/TikTok"],["16:9","16:9 YouTube"],["1:1","1:1"],["original","Original"]];
+// style model: mirrors the backend (size, words per phrase, mode)
+const SM={
+viral:{n:"Viral",sz:92,w:2,c:18,up:1,b:800,m:.22,mode:"pop",ol:7,acc:"FFE500",f:"'Noto Sans',system-ui,sans-serif"},
+classic:{n:"Classic",sz:58,w:6,c:38,b:400,m:.14,mode:"plain",ol:4,f:"'DejaVu Sans',system-ui,sans-serif"},
+cinema:{n:"Cinema",sz:56,w:7,c:42,b:400,m:.10,mode:"fade",ol:2,ls:3,f:"'Noto Serif',Georgia,serif"},
+podcast:{n:"Podcast",sz:60,w:4,c:28,b:800,m:.14,mode:"hl",ol:0,box:1,acc:"F5B937",f:"'Noto Sans',system-ui,sans-serif"},
+karaoke:{n:"Karaoke",sz:78,w:4,c:26,b:800,m:.18,mode:"kara",ol:6,acc:"F5B937",f:"'Noto Sans',system-ui,sans-serif"}};
+const SAMPLE={viral:'<b style="color:#ffe500;font-size:21px;text-shadow:0 2px 0 #000">ВИДЕО</b>',classic:'<span style="font-size:15px">Classic</span>',cinema:'<i style="font-family:Georgia,serif;letter-spacing:2px;font-size:16px">Cinema</i>',podcast:'<span style="background:#000;padding:4px 8px;border-radius:6px;font-weight:800;font-size:14px">Pod<b style="color:#f5b937">cast</b></span>',karaoke:'<b style="font-size:18px"><span style="color:#f5b937">Kara</span>oke</b>'};
+const COLORS=["FFE500","38BDF8","A3E635","F472B6","F5B937"];
+const FMT=[["9:16","9:16"],["16:9","16:9"],["1:1","1:1"],["original","Original"]];
+const AR={"9:16":9/16,"16:9":16/9,"1:1":1};
+const SIZEK=["s","m","l"],SIZEM=[.8,1,1.25],POSK=["auto","top","center"];
 
 let L=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code==="tg")?"tg":"ru";
-let file=null,objUrl=null,jobId=null,lines=[],sel={lang:"tg_ru",style:"viral",fmt:"9:16"},timer=null,blobUrl=null,blobFile=null;
+let file=null,objUrl=null,jobId=null,lines=[],words=[],phrases=[],timer=null,blobUrl=null,blobFile=null,vr=.5625,raf=0;
+let sel={lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
+const t=k=>T[L][k];
 
-function t(k){return T[L][k]}
 function render(){
   document.documentElement.lang=L;
   document.querySelectorAll("[data-i]").forEach(e=>{e.textContent=t(e.dataset.i)});
   $("langBtn").textContent=L==="tg"?"TJ":"RU";
   $("dropT").textContent=file?file.name:t("pick");
+  const on=document.querySelector(".screen.on");$("stepT").textContent=on&&on.id==="s-ed"?t("step2"):(on&&on.id==="s-up"?t("step1"):"");
   chips("langs",["tg","ru","tg_ru"].map(k=>[k,T[L].langs[k]]),"lang");
   chips("fmts",FMT,"fmt");
   $("styles").innerHTML="";
-  STY.forEach(s=>{const b=document.createElement("button");b.className="sty"+(sel.style===s[0]?" on":"");b.innerHTML='<div class="smp">'+s[2]+'</div><span>'+s[1]+'</span>';b.onclick=()=>{sel.style=s[0];render()};$("styles").appendChild(b)});
+  Object.keys(SM).forEach(k=>{const b=document.createElement("button");b.className="sty"+(sel.style===k?" on":"");b.innerHTML='<div class="smp">'+SAMPLE[k]+'</div><span>'+SM[k].n+'</span>';
+    b.onclick=()=>{sel.style=k;if(SM[k].acc)sel.accent=SM[k].acc;render()};$("styles").appendChild(b)});
+  $("dots").innerHTML="";
+  COLORS.forEach(c=>{const d=document.createElement("button");d.className="dot"+(sel.accent===c?" on":"");d.style.background="#"+c;d.onclick=()=>{sel.accent=c;render()};$("dots").appendChild(d)});
+  $("rowColor").style.display=SM[sel.style].acc?"flex":"none";
+  $("swSubs").className="sw"+(sel.subs?" on":"");
+  $("szV").textContent=t("sizes")[sel.size];$("psV").textContent=t("poss")[sel.pos];
+  fitStage();drawCap();
 }
-function chips(id,items,key){
-  const box=$(id);box.innerHTML="";
-  items.forEach(i=>{const b=document.createElement("button");b.className="chip"+(sel[key]===i[0]?" on":"");b.textContent=i[1];b.onclick=()=>{sel[key]=i[0];render()};box.appendChild(b)});
-}
-function show(id){document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on",s.id===id));window.scrollTo(0,0)}
+function chips(id,items,key){const box=$(id);box.innerHTML="";items.forEach(i=>{const b=document.createElement("button");b.className="chip"+(sel[key]===i[0]?" on":"");b.textContent=i[1];b.onclick=()=>{sel[key]=i[0];render()};box.appendChild(b)})}
+function show(id){document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on",s.id===id));window.scrollTo(0,0);render()}
 function toast(m){const e=$("toast");e.textContent=m;e.classList.add("on");clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove("on"),5000)}
-function setP(p,s){p=Math.max(0,Math.min(100,Math.round(p)));$("pct").textContent=p+"%";$("bar").style.width=p+"%";if(s)$("stage").textContent=s}
-function fmtT(s){s=Math.floor(s);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
+function setP(p,s){p=Math.max(0,Math.min(100,Math.round(p)));$("pct").textContent=p+"%";$("bar").style.width=p+"%";if(s!==undefined)$("stage").textContent=s}
+const fmtT=s=>Math.floor(s/60)+":"+String(Math.floor(s)%60).padStart(2,"0");
 
-function req(method,path,form,onUp){
-  return new Promise((res,rej)=>{
-    const x=new XMLHttpRequest();x.open(method,API+path);
-    x.setRequestHeader("X-Init-Data",initData);
-    x.onload=()=>{let d=null;try{d=JSON.parse(x.responseText)}catch(e){}
-      if(x.status>=200&&x.status<300)res(d);else{let m=d&&d.detail;if(Array.isArray(m))m=m.map(z=>z.msg).join("; ");rej({status:x.status,msg:m||("HTTP "+x.status)})}};
-    x.onerror=()=>rej({status:0,msg:t("eNet")});
-    if(onUp&&x.upload)x.upload.onprogress=e=>{if(e.lengthComputable)onUp(e.loaded/e.total)};
-    x.send(form||null);
-  });
-}
+function req(method,path,form,onUp){return new Promise((res,rej)=>{
+  const x=new XMLHttpRequest();x.open(method,API+path);x.setRequestHeader("X-Init-Data",initData);
+  x.onload=()=>{let d=null;try{d=JSON.parse(x.responseText)}catch(e){}
+    if(x.status>=200&&x.status<300)res(d);else{let m=d&&d.detail;if(Array.isArray(m))m=m.map(z=>z.msg).join("; ");rej({status:x.status,msg:m||("HTTP "+x.status)})}};
+  x.onerror=()=>rej({status:0,msg:t("eNet")});
+  if(onUp&&x.upload)x.upload.onprogress=e=>{if(e.lengthComputable)onUp(e.loaded/e.total)};
+  x.send(form||null)})}
 
-// ---- upload screen
-$("file").onchange=e=>{
-  const f=e.target.files[0];if(!f)return;
+// ---- step 1
+$("file").onchange=e=>{const f=e.target.files[0];if(!f)return;
   if(f.size>100*1024*1024){toast(t("eBig"));e.target.value="";return}
-  if(objUrl)URL.revokeObjectURL(objUrl);
-  objUrl=URL.createObjectURL(f);file=f;
+  if(objUrl)URL.revokeObjectURL(objUrl);objUrl=URL.createObjectURL(f);file=f;
   const v=$("pv");v.src=objUrl;v.hidden=false;
-  v.onloadedmetadata=()=>{if(v.duration>60.5){toast(t("eLong"));$("startBtn").disabled=true}else $("startBtn").disabled=false};
-  $("dropT").textContent=f.name;
-};
+  v.onloadedmetadata=()=>{vr=v.videoWidth/v.videoHeight||.5625;if(v.duration>60.5){toast(t("eLong"));$("startBtn").disabled=true}else $("startBtn").disabled=false};
+  $("dropT").textContent=f.name};
 $("langBtn").onclick=()=>{L=L==="ru"?"tg":"ru";render()};
 $("startBtn").onclick=async()=>{
   if(!initData){toast(t("eTg"));return}
   const fd=new FormData();fd.append("file",file);fd.append("language",sel.lang);fd.append("init_data",initData);
   show("s-pr");setP(0,t("up"));
-  try{
-    const j=await req("POST","/api/jobs",fd,p=>setP(p*20,t("up")+" "+Math.round(p*100)+"%"));
-    jobId=j.job_id;poll();
-  }catch(e){toast(e.msg);show("s-up")}
-};
+  try{const j=await req("POST","/api/jobs",fd,p=>setP(p*20,t("up")+" "+Math.round(p*100)+"%"));jobId=j.job_id;poll()}
+  catch(e){toast(e.msg);show("s-up")}};
 
-// ---- polling
-function poll(){
-  clearInterval(timer);let fails=0;
-  const tick=async()=>{
-    try{
-      const j=await req("GET","/api/jobs/"+jobId);fails=0;
-      if(j.status==="transcribed"&&$("s-ed").classList.contains("on")===false&&!poll.rendering){clearInterval(timer);openEditor(j);return}
-      if(j.status==="done"){clearInterval(timer);poll.rendering=false;openResult();return}
-      if(j.status==="error"){clearInterval(timer);poll.rendering=false;toast(j.error||"Error");if(lines.length)show("s-ed");else show("s-up");return}
-      setP(j.progress,j.stage);
-    }catch(e){
-      if(e.status===404){clearInterval(timer);toast(t("eExp"));resetAll();return}
-      if(++fails>8){clearInterval(timer);toast(e.msg||t("eNet"));show("s-up")}
-    }
-  };
-  tick();timer=setInterval(tick,1500);
+function poll(){clearInterval(timer);let fails=0;
+  const tick=async()=>{try{const j=await req("GET","/api/jobs/"+jobId);fails=0;
+    if(j.status==="transcribed"&&!poll.rendering){clearInterval(timer);openEditor(j);return}
+    if(j.status==="done"){clearInterval(timer);poll.rendering=false;openResult();return}
+    if(j.status==="error"){clearInterval(timer);poll.rendering=false;toast(j.error||"Error");show(lines.length?"s-ed":"s-up");return}
+    setP(j.progress,j.stage)}
+  catch(e){if(e.status===404){clearInterval(timer);toast(t("eExp"));resetAll();return}if(++fails>8){clearInterval(timer);toast(e.msg||t("eNet"));show("s-up")}}};
+  tick();timer=setInterval(tick,1500)}
+
+// ---- step 2: live preview
+function buildWords(){words=[];lines.forEach(l=>{const tk=l.text.trim().split(/\s+/).filter(Boolean);if(!tk.length)return;
+  if(l.words&&l.words.length===tk.length)tk.forEach((w,i)=>words.push({w,s:l.words[i].start,e:l.words[i].end}));
+  else{const wt=tk.map(x=>x.length+1),tot=wt.reduce((a,b)=>a+b,0);let c=l.start;tk.forEach((w,i)=>{const d=(l.end-l.start)*wt[i]/tot;words.push({w,s:c,e:c+d});c+=d})}});
+  words.sort((a,b)=>a.s-b.s);makePhrases()}
+function makePhrases(){const m=SM[sel.style];phrases=[];let cur=[];
+  words.forEach((x,i)=>{cur.push(x);const len=cur.reduce((a,b)=>a+b.w.length+1,0),nx=words[i+1],gap=nx?nx.s-x.e:0;
+    if(cur.length>=m.w||len>=m.c||gap>.7||/[.!?…]$/.test(x.w)){phrases.push(cur);cur=[]}});
+  if(cur.length)phrases.push(cur)}
+function fitStage(){const s=$("stage2");if(!s)return;const ar=sel.fmt==="original"?vr:AR[sel.fmt];s.style.setProperty("--ar",ar)}
+function drawCap(){
+  const cap=$("cap"),st=$("stage2"),m=SM[sel.style];if(!st||!m)return;
+  if(!sel.subs||!phrases.length){cap.innerHTML="";return}
+  const v=$("ev"),tm=v.currentTime;
+  let ph=null;for(const p of phrases){if(tm>=p[0].s-.05&&tm<=p[p.length-1].e+.2){ph=p;break}}
+  if(!ph){cap.innerHTML="";return}
+  const outW=sel.fmt==="16:9"?1280:720,outH=sel.fmt==="16:9"?720:(sel.fmt==="1:1"?720:1280);
+  let bs=Math.min(outW,outH)/720;if(outW>outH)bs*=.8;
+  const k=st.clientWidth/outW*bs*SIZEM[sel.size];
+  cap.style.fontSize=k+"px";cap.style.fontFamily=m.f;cap.style.fontWeight=m.b;cap.style.letterSpacing=(m.ls||0)+"em";
+  const o=(m.ol/m.sz)*.7;
+  cap.style.textShadow=m.ol?[[o,o],[-o,o],[o,-o],[-o,-o]].map(a=>a[0]+"em "+a[1]+"em 0 #000").join(",")+",0 "+o*1.5+"em "+o*2+"em rgba(0,0,0,.5)":"none";
+  const f=m.sz;cap.style.fontSize=(k*f)+"px";
+  const ratio=(outW>outH)?Math.min(m.m,.09):m.m;
+  cap.style.top=cap.style.bottom=cap.style.transform="";
+  if(sel.pos===1)cap.style.top="10%";else if(sel.pos===2){cap.style.top="50%";cap.style.transform="translateY(-50%)"}else cap.style.bottom=(ratio*100)+"%";
+  let ai=-1;ph.forEach((x,i)=>{if(tm>=x.s)ai=i});
+  const col="#"+(sel.accent||"FFFFFF");
+  cap.innerHTML=ph.map((x,i)=>{let w=x.w.replace(/[<>&]/g,"");if(m.up)w=w.toUpperCase();
+    let c="#fff";if((m.mode==="pop"||m.mode==="hl")&&i===ai)c=col;if(m.mode==="kara"&&i<=ai)c=col;
+    return '<span style="color:'+c+'">'+w+'</span>'}).join(" ");
+  cap.style.background=m.box?"rgba(0,0,0,.72)":"none";cap.style.padding=m.box?".18em .4em":"0";cap.style.borderRadius=m.box?".25em":"0";
+  cap.style.left=m.box?"auto":"7%";cap.style.right=m.box?"auto":"7%";
+  if(m.box){cap.style.left="50%";cap.style.right="auto";cap.style.width="max-content";cap.style.maxWidth="86%";cap.style.transform=(sel.pos===2?"translate(-50%,-50%)":"translateX(-50%)")}
 }
+function loop(){drawCap();raf=requestAnimationFrame(loop)}
+$("ev").onplay=()=>{cancelAnimationFrame(raf);loop()};
+["pause","ended","seeked","loadeddata"].forEach(e=>$("ev").addEventListener(e,()=>{cancelAnimationFrame(raf);drawCap()}));
+window.addEventListener("resize",drawCap);
 
-// ---- editor
 function openEditor(j){
-  lines=j.lines||[];
-  $("ev").src=objUrl;
+  lines=j.lines||[];$("ev").src=objUrl;
+  if(SM[sel.style].acc&&!sel.accent)sel.accent=SM[sel.style].acc;
   const box=$("lines");box.innerHTML="";
-  lines.forEach((l,i)=>{
-    const row=document.createElement("div");row.className="line";
+  lines.forEach((l,i)=>{const row=document.createElement("div");row.className="line";
     const tm=document.createElement("time");tm.textContent=fmtT(l.start);
     const ta=document.createElement("textarea");ta.rows=2;ta.value=l.text;
-    ta.oninput=()=>{lines[i].text=ta.value};
-    ta.onfocus=()=>{const v=$("ev");v.currentTime=l.start;v.pause()};
-    row.append(tm,ta);box.appendChild(row);
-  });
-  show("s-ed");
+    ta.oninput=()=>{lines[i].text=ta.value;buildWords();drawCap()};
+    ta.onfocus=()=>{const v=$("ev");v.currentTime=l.start+.05;v.pause()};
+    row.append(tm,ta);box.appendChild(row)});
+  buildWords();show("s-ed");
 }
+$("swSubs").onclick=()=>{sel.subs=!sel.subs;render()};
+const stp=(id,key,max)=>{$(id+"L").onclick=()=>{sel[key]=(sel[key]+max-1)%max;render()};$(id+"R").onclick=()=>{sel[key]=(sel[key]+1)%max;render()}};
+stp("sz","size",3);stp("ps","pos",3);
+$("styles").addEventListener("click",()=>{makePhrases();drawCap()});
+
 $("makeBtn").onclick=async()=>{
   const payload=lines.filter(l=>l.text.trim());
   if(!payload.length){toast(t("eEmpty"));return}
   const fd=new FormData();fd.append("style",sel.style);fd.append("video_format",sel.fmt);
-  fd.append("lines",JSON.stringify(payload));fd.append("init_data",initData);
+  fd.append("lines",JSON.stringify(payload));fd.append("subtitles",sel.subs?"1":"0");
+  fd.append("size",SIZEK[sel.size]);fd.append("position",POSK[sel.pos]);
+  if(SM[sel.style].acc&&sel.accent)fd.append("accent",sel.accent);
+  fd.append("init_data",initData);
   show("s-pr");setP(0,"");
-  try{await req("POST","/api/jobs/"+jobId+"/render",fd);poll.rendering=true;poll()}
-  catch(e){toast(e.msg);show("s-ed")}
-};
+  try{await req("POST","/api/jobs/"+jobId+"/render",fd);poll.rendering=true;poll()}catch(e){toast(e.msg);show("s-ed")}};
 
-// ---- result
-async function openResult(){
-  setP(100,"");
-  try{
-    const r=await fetch(API+"/api/jobs/"+jobId+"/download",{headers:{"X-Init-Data":initData}});
-    if(!r.ok)throw 0;
-    const b=await r.blob();
-    if(blobUrl)URL.revokeObjectURL(blobUrl);
-    blobUrl=URL.createObjectURL(b);blobFile=new File([b],"GAPCUT_AI.mp4",{type:"video/mp4"});
-    $("rv").src=blobUrl;
-    $("shBtn").hidden=!(navigator.canShare&&navigator.canShare({files:[blobFile]}));
-    show("s-rs");
-  }catch(e){toast(t("eNet"));show("s-ed")}
-}
+async function openResult(){setP(100,"");
+  try{const r=await fetch(API+"/api/jobs/"+jobId+"/download",{headers:{"X-Init-Data":initData}});if(!r.ok)throw 0;
+    const b=await r.blob();if(blobUrl)URL.revokeObjectURL(blobUrl);
+    blobUrl=URL.createObjectURL(b);blobFile=new File([b],"GAPCUT_AI.mp4",{type:"video/mp4"});$("rv").src=blobUrl;
+    $("shBtn").hidden=!(navigator.canShare&&navigator.canShare({files:[blobFile]}));show("s-rs")}
+  catch(e){toast(t("eNet"));show("s-ed")}}
 $("dlBtn").onclick=()=>{
-  if(tg&&tg.isVersionAtLeast&&tg.isVersionAtLeast("8.0")&&tg.downloadFile){
-    tg.downloadFile({url:API+"/api/jobs/"+jobId+"/download?init_data="+encodeURIComponent(initData),file_name:"GAPCUT_AI.mp4"});return}
-  const a=document.createElement("a");a.href=blobUrl;a.download="GAPCUT_AI.mp4";document.body.appendChild(a);a.click();a.remove();
-};
+  if(tg&&tg.isVersionAtLeast&&tg.isVersionAtLeast("8.0")&&tg.downloadFile){tg.downloadFile({url:API+"/api/jobs/"+jobId+"/download?init_data="+encodeURIComponent(initData),file_name:"GAPCUT_AI.mp4"});return}
+  const a=document.createElement("a");a.href=blobUrl;a.download="GAPCUT_AI.mp4";document.body.appendChild(a);a.click();a.remove()};
 $("shBtn").onclick=()=>{navigator.share({files:[blobFile]}).catch(()=>{})};
-function resetAll(){
-  if(jobId)req("DELETE","/api/jobs/"+jobId).catch(()=>{});
-  jobId=null;lines=[];file=null;poll.rendering=false;$("file").value="";$("pv").hidden=true;$("pv").removeAttribute("src");
-  $("startBtn").disabled=true;render();show("s-up");
-}
+$("backBtn").onclick=()=>show("s-ed");
+function resetAll(){if(jobId)req("DELETE","/api/jobs/"+jobId).catch(()=>{});
+  jobId=null;lines=[];words=[];phrases=[];file=null;poll.rendering=false;$("file").value="";$("pv").hidden=true;$("pv").removeAttribute("src");$("startBtn").disabled=true;show("s-up")}
 $("newBtn").onclick=resetAll;
 
 render();
-fetch(API+"/health").catch(()=>{}); // wakes the free Render instance
+fetch(API+"/health").catch(()=>{});
 </script>
 </body>
 </html>
