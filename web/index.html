@@ -1,876 +1,245 @@
-
-import os
-import re
-import json
-import hmac
-import time
-import uuid
-import shutil
-import hashlib
-import logging
-import asyncio
-import tempfile
-from pathlib import Path
-from urllib.parse import parse_qsl
-from contextlib import asynccontextmanager
-
-import httpx
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
-from starlette.background import BackgroundTask
-from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.enums import ParseMode
-
-
-# ==========================================
-# CONFIG
-# ==========================================
-
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-
-WEB_APP_URL = os.getenv(
-    "WEB_APP_URL",
-    "https://gapcut-ai-web.vercel.app"
-).strip()
-
-CHANNEL = os.getenv("CHANNEL", "").strip()
-
-GROQ_MODEL = "whisper-large-v3-turbo"
-GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
-
-MAX_INPUT_SIZE = 100 * 1024 * 1024
-MAX_OUTPUT_SIZE = 150 * 1024 * 1024
-MAX_DURATION = 60
-MAX_AUDIO_SIZE = 24 * 1024 * 1024
-
-UPLOAD_CHUNK = 256 * 1024
-
-BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
-BASE_DIR.mkdir(parents=True, exist_ok=True)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-logger = logging.getLogger("gapcut-ai")
-
-bot = Bot(BOT_TOKEN) if BOT_TOKEN else None
-dp = Dispatcher()
-
-PROCESS_LOCK = asyncio.Lock()
-
-
-# ==========================================
-# TELEGRAM BOT
-# ==========================================
-
-@dp.message(CommandStart())
-async def start_command(message: Message):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🎬 Открыть GAPCUT AI",
-                    web_app=WebAppInfo(url=WEB_APP_URL)
-                )
-            ]
-        ]
-    )
-
-    await message.answer(
-        "🎬 <b>GAPCUT AI</b>\n\n"
-        "Автоматические субтитры и AI-монтаж видео.\n\n"
-        "Нажми кнопку, чтобы открыть приложение.",
-        reply_markup=keyboard
-    )
-
-
-@dp.message(Command("help"))
-async def help_command(message: Message):
-    await message.answer(
-        "Отправь видео через Mini App GAPCUT AI.\n"
-        "Поддерживаются субтитры на таджикском и русском языках."
-    )
-
-
-# ==========================================
-# TELEGRAM WEB APP AUTH
-# ==========================================
-
-def validate_telegram_init_data(init_data: str) -> bool:
-    if not BOT_TOKEN or not init_data:
-        return False
-
-    try:
-        data = dict(parse_qsl(init_data, keep_blank_values=True))
-        received_hash = data.pop("hash", None)
-
-        if not received_hash:
-            return False
-
-        auth_date = int(data.get("auth_date", "0"))
-        now = int(time.time())
-
-        if auth_date <= 0 or now - auth_date > 86400:
-            return False
-
-        if auth_date > now + 60:
-            return False
-
-        data_check_string = "\n".join(
-            f"{key}={value}"
-            for key, value in sorted(data.items())
-        )
-
-        secret_key = hmac.new(
-            b"WebAppData",
-            BOT_TOKEN.encode(),
-            hashlib.sha256
-        ).digest()
-
-        calculated_hash = hmac.new(
-            secret_key,
-            data_check_string.encode(),
-            hashlib.sha256
-        ).hexdigest()
-
-        return hmac.compare_digest(
-            calculated_hash,
-            received_hash
-        )
-
-    except Exception:
-        logger.exception("Telegram initData validation failed")
-        return False
-
-
-# ==========================================
-# PROCESS HELPERS
-# ==========================================
-
-async def run_command(command, timeout=300):
-    logger.info("Running command: %s", " ".join(map(str, command[:5])))
-
-    process = await asyncio.create_subprocess_exec(
-        *map(str, command),
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE
-    )
-
-    try:
-        _, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=timeout
-        )
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        raise RuntimeError("Вақти коркарди видео тамом шуд.")
-
-    if process.returncode != 0:
-        error_text = stderr.decode(
-            "utf-8",
-            errors="replace"
-        )[-2500:]
-
-        logger.error("Command failed: %s", error_text)
-        raise RuntimeError("FFmpeg натавонист видеоро коркард кунад.")
-
-    return True
-
-
-async def get_video_info(video_path: Path):
-    command = [
-        "ffprobe",
-        "-v", "error",
-        "-show_entries",
-        "format=duration:stream=codec_type,width,height",
-        "-of", "json",
-        str(video_path)
-    ]
-
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-
-    stdout, _ = await asyncio.wait_for(
-        process.communicate(),
-        timeout=30
-    )
-
-    if process.returncode != 0:
-        raise RuntimeError("Маълумоти видео хонда нашуд.")
-
-    info = json.loads(stdout.decode("utf-8"))
-
-    duration = float(info.get("format", {}).get("duration", 0))
-
-    if duration <= 0:
-        raise RuntimeError("Давомнокии видео муайян нашуд.")
-
-    return info, duration
-
-
-# ==========================================
-# AUDIO EXTRACTION
-# ==========================================
-
-async def extract_audio(video_path: Path, audio_path: Path):
-    command = [
-        "ffmpeg",
-        "-y",
-        "-i", str(video_path),
-        "-map", "0:a:0",
-        "-vn",
-        "-ac", "1",
-        "-ar", "16000",
-        "-b:a", "48k",
-        "-c:a", "libmp3lame",
-        str(audio_path)
-    ]
-
-    await run_command(command, timeout=180)
-
-    if not audio_path.exists():
-        raise RuntimeError("Садо аз видео гирифта нашуд.")
-
-    if audio_path.stat().st_size > MAX_AUDIO_SIZE:
-        raise RuntimeError(
-            "Файли садо барои Groq хеле калон аст. "
-            "Видеои кӯтоҳтар ё сабуктар истифода бар."
-        )
-
-
-# ==========================================
-# GROQ WHISPER
-# ==========================================
-
-async def transcribe_audio(audio_path: Path):
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY дар Render танзим нашудааст.")
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}"
-    }
-
-    prompt = (
-        "The audio may contain Tajik or Russian speech, "
-        "including mixed Tajik-Russian sentences. "
-        "Preserve the original spoken language and wording. "
-        "Do not translate. Use correct Cyrillic spelling."
-    )
-
-    data = {
-        "model": GROQ_MODEL,
-        "response_format": "verbose_json",
-        "timestamp_granularities[]": ["word", "segment"],
-        "temperature": "0",
-        "prompt": prompt
-    }
-
-    timeout = httpx.Timeout(
-        connect=30,
-        read=240,
-        write=60,
-        pool=30
-    )
-
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        with audio_path.open("rb") as audio_file:
-            response = await client.post(
-                GROQ_URL,
-                headers=headers,
-                data=data,
-                files={
-                    "file": (
-                        audio_path.name,
-                        audio_file,
-                        "audio/mpeg"
-                    )
-                }
-            )
-
-    if response.status_code >= 400:
-        logger.error(
-            "Groq error %s: %s",
-            response.status_code,
-            response.text[:1500]
-        )
-        raise RuntimeError(
-            "Хатогӣ ҳангоми шинохти овоз. "
-            "Калиди Groq ё маҳдудияти API-ро санҷ."
-        )
-
-    result = response.json()
-
-    words = result.get("words") or []
-    segments = result.get("segments") or []
-
-    if not words:
-        words = []
-
-        for segment in segments:
-            text = segment.get("text", "").strip()
-            if not text:
-                continue
-
-            parts = text.split()
-            if not parts:
-                continue
-
-            start = float(segment.get("start", 0))
-            end = float(segment.get("end", start + 1))
-            step = max((end - start) / len(parts), 0.05)
-
-            for index, part in enumerate(parts):
-                words.append({
-                    "word": part,
-                    "start": start + index * step,
-                    "end": min(end, start + (index + 1) * step)
-                })
-
-    clean_words = []
-
-    for item in words:
-        word = str(item.get("word", "")).strip()
-        if not word:
-            continue
-
-        start = max(0.0, float(item.get("start", 0)))
-        end = max(start + 0.04, float(item.get("end", start + 0.1)))
-
-        clean_words.append({
-            "word": word,
-            "start": start,
-            "end": end
-        })
-
-    if not clean_words:
-        raise RuntimeError(
-            "Дар видео нутқи фаҳмо ёфт нашуд."
-        )
-
-    return clean_words, result.get("text", "")
-
-
-# ==========================================
-# SUBTITLE STYLES
-# ==========================================
-
-STYLE_CONFIG = {
-    "viral": {
-        "font": "Arial",
-        "size": 66,
-        "primary": "&H00FFFFFF",
-        "highlight": "&H0000D7FF",
-        "outline": "&H00000000",
-        "bold": 1,
-        "animation": "pop"
-    },
-    "cinema": {
-        "font": "Georgia",
-        "size": 48,
-        "primary": "&H00FFFFFF",
-        "highlight": "&H00D6B5FF",
-        "outline": "&H00101010",
-        "bold": 0,
-        "animation": "fade"
-    },
-    "podcast": {
-        "font": "Arial",
-        "size": 54,
-        "primary": "&H00FFFFFF",
-        "highlight": "&H0000D7FF",
-        "outline": "&H00101010",
-        "bold": 1,
-        "animation": "highlight"
-    },
-    "classic": {
-        "font": "Arial",
-        "size": 48,
-        "primary": "&H00FFFFFF",
-        "highlight": "&H00FFFFFF",
-        "outline": "&H00000000",
-        "bold": 0,
-        "animation": "clean"
-    },
-    "creator": {
-        "font": "Arial",
-        "size": 58,
-        "primary": "&H00FFFFFF",
-        "highlight": "&H00A8FF5C",
-        "outline": "&H00000000",
-        "bold": 1,
-        "animation": "bounce"
-    }
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#07060b">
+<title>GAPCUT AI</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#07060b;--card:#13101f;--line:#2b2545;--pu:#8b5cf6;--pu2:#c026d3;--gold:#f5b937;--tx:#f5f2ff;--mu:#9d97bb;--r:18px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans","DejaVu Sans",sans-serif}
+body{min-height:100vh;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px calc(env(safe-area-inset-bottom,0px) + 28px)}
+.bg{position:fixed;inset:0;z-index:-1;background:radial-gradient(60% 40% at 15% 0%,rgba(139,92,246,.35),transparent 70%),radial-gradient(50% 35% at 100% 10%,rgba(245,185,55,.16),transparent 70%)}
+main{max-width:520px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center;margin:6px 0 18px}
+.logo{font-weight:800;font-size:22px;letter-spacing:.5px}.logo b{background:linear-gradient(90deg,var(--pu),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.pill{background:var(--card);color:var(--tx);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-weight:700;font-size:13px}
+.screen{display:none;animation:in .45s ease both}.screen.on{display:block}
+@keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+h1{font-size:26px;line-height:1.15;margin:0 0 6px}.sub{color:var(--mu);margin:0 0 18px;font-size:15px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card h3{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--mu)}
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;min-height:150px;border:1.5px dashed #4b3f7a;border-radius:var(--r);background:rgba(139,92,246,.07);margin-bottom:14px;padding:18px;cursor:pointer;transition:.2s}
+.drop:active{transform:scale(.98)}.drop .ic{font-size:34px}.drop small{color:var(--mu)}
+.drop input{display:none}
+video{width:100%;max-height:340px;border-radius:14px;background:#000;margin-bottom:14px;display:block}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:#0e0b18;color:var(--tx);padding:10px 14px;border-radius:12px;font-size:14px;font-weight:600;transition:.18s}
+.chip.on{border-color:var(--gold);background:linear-gradient(135deg,rgba(139,92,246,.35),rgba(245,185,55,.18));box-shadow:0 0 0 1px var(--gold) inset}
+.chip:active{transform:scale(.96)}
+.styles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sty{border:1px solid var(--line);background:#0e0b18;color:var(--tx);border-radius:14px;padding:12px 10px;text-align:center;transition:.18s}
+.sty.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}.sty:active{transform:scale(.96)}
+.sty .smp{height:44px;display:flex;align-items:center;justify-content:center;font-size:19px;margin-bottom:6px}
+.sty span{font-size:12px;color:var(--mu)}
+.btn{width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:800;color:#fff;background:linear-gradient(90deg,var(--pu),var(--pu2));box-shadow:0 8px 28px rgba(139,92,246,.4);transition:.18s}
+.btn:active{transform:scale(.98)}.btn:disabled{opacity:.4;box-shadow:none}
+.btn.gold{background:linear-gradient(90deg,#f5b937,#f59e0b);color:#1a1200;box-shadow:0 8px 28px rgba(245,185,55,.3)}
+.btn.ghost{background:var(--card);border:1px solid var(--line);box-shadow:none;margin-top:10px}
+.prog{text-align:center;padding:34px 10px}
+.pct{font-size:58px;font-weight:800;background:linear-gradient(90deg,var(--pu),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.bar{height:10px;border-radius:9px;background:#1b1630;overflow:hidden;margin:18px 0 12px}
+.bar i{display:block;height:100%;width:0;border-radius:9px;background:linear-gradient(90deg,var(--pu),var(--gold));background-size:200% 100%;animation:sh 1.6s linear infinite;transition:width .5s}
+@keyframes sh{to{background-position:-200% 0}}
+.stage{color:var(--mu);font-size:15px}
+.line{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
+.line time{flex:0 0 42px;font-size:12px;color:var(--gold);padding-top:11px;font-variant-numeric:tabular-nums}
+.line textarea{flex:1;background:#0e0b18;color:var(--tx);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;resize:none;min-height:46px}
+.line textarea:focus{outline:0;border-color:var(--pu)}
+.hint{color:var(--mu);font-size:13px;margin:-4px 0 12px}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 18px);background:#2a0f1c;border:1px solid #7f1d3a;color:#ffd7e0;padding:13px 16px;border-radius:14px;opacity:0;pointer-events:none;transform:translateY(12px);transition:.3s;z-index:9;font-size:14px}
+#toast.on{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<main>
+<header><div class="logo">GAPCUT <b>AI</b></div><button class="pill" id="langBtn"></button></header>
+
+<section id="s-up" class="screen on">
+  <h1 data-i="h1"></h1><p class="sub" data-i="sub"></p>
+  <label class="drop" id="drop"><input type="file" id="file" accept="video/*"><div class="ic">🎬</div><b id="dropT"></b><small data-i="limits"></small></label>
+  <video id="pv" controls playsinline hidden></video>
+  <div class="card"><h3 data-i="speech"></h3><div class="chips" id="langs"></div></div>
+  <button class="btn" id="startBtn" disabled data-i="start"></button>
+</section>
+
+<section id="s-pr" class="screen">
+  <div class="card prog"><div class="pct" id="pct">0%</div><div class="bar"><i id="bar"></i></div><div class="stage" id="stage"></div></div>
+</section>
+
+<section id="s-ed" class="screen">
+  <h1 data-i="edH"></h1><p class="sub" data-i="edS"></p>
+  <video id="ev" controls playsinline></video>
+  <div class="card" id="lines"></div>
+  <div class="card"><h3 data-i="styleT"></h3><div class="styles" id="styles"></div></div>
+  <div class="card"><h3 data-i="fmtT"></h3><div class="chips" id="fmts"></div></div>
+  <button class="btn gold" id="makeBtn" data-i="make"></button>
+</section>
+
+<section id="s-rs" class="screen">
+  <h1 data-i="done"></h1><p class="sub" data-i="doneS"></p>
+  <video id="rv" controls playsinline></video>
+  <button class="btn gold" id="dlBtn" data-i="dl"></button>
+  <button class="btn ghost" id="shBtn" data-i="share" hidden></button>
+  <button class="btn ghost" id="newBtn" data-i="again"></button>
+</section>
+</main>
+<div id="toast"></div>
+
+<script>
+const API="https://gapcut-ai.onrender.com";
+const tg=window.Telegram&&Telegram.WebApp;
+if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#07060b");tg.setBackgroundColor("#07060b")}catch(e){}}
+const initData=tg?tg.initData:"";
+const $=id=>document.getElementById(id);
+
+const T={
+ru:{h1:"Авто-монтаж с субтитрами",sub:"Загрузите видео. Мы распознаем речь и наложим анимированные субтитры.",limits:"до 100 MB · до 60 секунд",pick:"Выберите видео",speech:"Язык речи",start:"Начать",
+edH:"Проверьте текст",edS:"Исправьте ошибки распознавания. Это важно для таджикской речи.",styleT:"Стиль субтитров",fmtT:"Формат видео",make:"Создать видео",
+done:"Видео готово",doneS:"Проверьте результат и скачайте.",dl:"Скачать",share:"Поделиться",again:"Новое видео",
+langs:{tg:"Таджикский",ru:"Русский",tg_ru:"Тоджикский + русский"},up:"Загрузка",
+eBig:"Файл больше 100 MB.",eLong:"Видео длиннее 60 секунд.",eTg:"Откройте приложение через Telegram-бота.",eNet:"Нет связи с сервером. Подождите минуту и попробуйте снова.",eExp:"Сессия истекла. Загрузите видео заново.",eEmpty:"Текст пуст."},
+tg:{h1:"Монтажи худкор бо субтитр",sub:"Видеоро бор кунед. Мо нутқро мешиносем ва субтитри аниматсиягӣ мегузорем.",limits:"то 100 MB · то 60 сония",pick:"Видеоро интихоб кунед",speech:"Забони нутқ",start:"Оғоз",
+edH:"Матнро санҷед",edS:"Хатоҳои шинохтро ислоҳ кунед. Барои нутқи тоҷикӣ ин хеле муҳим аст.",styleT:"Услуби субтитр",fmtT:"Формати видео",make:"Сохтани видео",
+done:"Видео омода шуд",doneS:"Натиҷаро бинед ва зеркашӣ кунед.",dl:"Зеркашӣ",share:"Мубодила",again:"Видеои нав",
+langs:{tg:"Тоҷикӣ",ru:"Русӣ",tg_ru:"Тоҷикӣ + русӣ"},up:"Бор шуда истодааст",
+eBig:"Файл аз 100 MB калон аст.",eLong:"Видео аз 60 сония дарозтар аст.",eTg:"Барномаро тавассути боти Telegram кушоед.",eNet:"Бо сервер алоқа нест. Як дақиқа интизор шавед ва дубора кӯшиш кунед.",eExp:"Сессия тамом шуд. Видеоро дубора бор кунед.",eEmpty:"Матн холӣ аст."}
+};
+const STY=[["viral","Viral",'<b style="color:#ffe500;font-size:22px;text-shadow:0 2px 0 #000">ВИДЕО</b>'],["classic","Classic",'<span style="font-size:15px">Classic text</span>'],["cinema","Cinema",'<i style="font-family:Georgia,serif;letter-spacing:2px;font-size:16px">Cinema</i>'],["podcast","Podcast",'<span style="background:#000;padding:4px 8px;border-radius:5px;font-weight:700;font-size:15px">Pod<b style="color:#f5b937">cast</b></span>'],["karaoke","Karaoke",'<b style="font-size:18px"><span style="color:#f5b937">Kara</span>oke</b>']];
+const FMT=[["9:16","9:16 Reels/TikTok"],["16:9","16:9 YouTube"],["1:1","1:1"],["original","Original"]];
+
+let L=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code==="tg")?"tg":"ru";
+let file=null,objUrl=null,jobId=null,lines=[],sel={lang:"tg_ru",style:"viral",fmt:"9:16"},timer=null,blobUrl=null,blobFile=null;
+
+function t(k){return T[L][k]}
+function render(){
+  document.documentElement.lang=L;
+  document.querySelectorAll("[data-i]").forEach(e=>{e.textContent=t(e.dataset.i)});
+  $("langBtn").textContent=L==="tg"?"TJ":"RU";
+  $("dropT").textContent=file?file.name:t("pick");
+  chips("langs",["tg","ru","tg_ru"].map(k=>[k,T[L].langs[k]]),"lang");
+  chips("fmts",FMT,"fmt");
+  $("styles").innerHTML="";
+  STY.forEach(s=>{const b=document.createElement("button");b.className="sty"+(sel.style===s[0]?" on":"");b.innerHTML='<div class="smp">'+s[2]+'</div><span>'+s[1]+'</span>';b.onclick=()=>{sel.style=s[0];render()};$("styles").appendChild(b)});
+}
+function chips(id,items,key){
+  const box=$(id);box.innerHTML="";
+  items.forEach(i=>{const b=document.createElement("button");b.className="chip"+(sel[key]===i[0]?" on":"");b.textContent=i[1];b.onclick=()=>{sel[key]=i[0];render()};box.appendChild(b)});
+}
+function show(id){document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on",s.id===id));window.scrollTo(0,0)}
+function toast(m){const e=$("toast");e.textContent=m;e.classList.add("on");clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove("on"),5000)}
+function setP(p,s){p=Math.max(0,Math.min(100,Math.round(p)));$("pct").textContent=p+"%";$("bar").style.width=p+"%";if(s)$("stage").textContent=s}
+function fmtT(s){s=Math.floor(s);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
+
+function req(method,path,form,onUp){
+  return new Promise((res,rej)=>{
+    const x=new XMLHttpRequest();x.open(method,API+path);
+    x.setRequestHeader("X-Init-Data",initData);
+    x.onload=()=>{let d=null;try{d=JSON.parse(x.responseText)}catch(e){}
+      if(x.status>=200&&x.status<300)res(d);else{let m=d&&d.detail;if(Array.isArray(m))m=m.map(z=>z.msg).join("; ");rej({status:x.status,msg:m||("HTTP "+x.status)})}};
+    x.onerror=()=>rej({status:0,msg:t("eNet")});
+    if(onUp&&x.upload)x.upload.onprogress=e=>{if(e.lengthComputable)onUp(e.loaded/e.total)};
+    x.send(form||null);
+  });
 }
 
+// ---- upload screen
+$("file").onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  if(f.size>100*1024*1024){toast(t("eBig"));e.target.value="";return}
+  if(objUrl)URL.revokeObjectURL(objUrl);
+  objUrl=URL.createObjectURL(f);file=f;
+  const v=$("pv");v.src=objUrl;v.hidden=false;
+  v.onloadedmetadata=()=>{if(v.duration>60.5){toast(t("eLong"));$("startBtn").disabled=true}else $("startBtn").disabled=false};
+  $("dropT").textContent=f.name;
+};
+$("langBtn").onclick=()=>{L=L==="ru"?"tg":"ru";render()};
+$("startBtn").onclick=async()=>{
+  if(!initData){toast(t("eTg"));return}
+  const fd=new FormData();fd.append("file",file);fd.append("language",sel.lang);fd.append("init_data",initData);
+  show("s-pr");setP(0,t("up"));
+  try{
+    const j=await req("POST","/api/jobs",fd,p=>setP(p*20,t("up")+" "+Math.round(p*100)+"%"));
+    jobId=j.job_id;poll();
+  }catch(e){toast(e.msg);show("s-up")}
+};
 
-def ass_time(seconds: float) -> str:
-    seconds = max(0, seconds)
-
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    whole_seconds = int(seconds % 60)
-    centiseconds = int((seconds - int(seconds)) * 100)
-
-    return (
-        f"{hours}:{minutes:02d}:"
-        f"{whole_seconds:02d}.{centiseconds:02d}"
-    )
-
-
-def ass_escape(text: str) -> str:
-    text = str(text)
-    text = text.replace("\\", r"\\")
-    text = text.replace("{", r"\{")
-    text = text.replace("}", r"\}")
-    text = text.replace("\n", " ")
-    return text
-
-
-def build_ass(words, style_name, width, height, output_path):
-    config = STYLE_CONFIG.get(
-        style_name,
-        STYLE_CONFIG["viral"]
-    )
-
-    font = config["font"]
-    size = config["size"]
-    primary = config["primary"]
-    highlight = config["highlight"]
-    outline = config["outline"]
-    bold = config["bold"]
-    animation = config["animation"]
-
-    margin_v = max(65, int(height * 0.13))
-
-    header = f"""[Script Info]
-ScriptType: v4.00+
-WrapStyle: 2
-ScaledBorderAndShadow: yes
-PlayResX: {width}
-PlayResY: {height}
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},{primary},{highlight},{outline},&H99000000,{bold},0,0,0,100,100,0,0,1,4,1,2,70,70,{margin_v},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-
-    events = []
-
-    # 5-word groups, with one active word at a time.
-    group_size = 5
-
-    for group_start in range(0, len(words), group_size):
-        group = words[group_start:group_start + group_size]
-
-        for active_index, item in enumerate(group):
-            start = item["start"]
-            end = item["end"]
-
-            if end <= start:
-                end = start + 0.12
-
-            parts = []
-
-            for index, token in enumerate(group):
-                text = ass_escape(token["word"])
-
-                if index == active_index:
-                    if animation == "pop":
-                        tag = (
-                            r"{\c" + highlight +
-                            r"\fscx115\fscy115"
-                            r"\t(0,100,\fscx100\fscy100)}"
-                        )
-                    elif animation == "bounce":
-                        tag = (
-                            r"{\c" + highlight +
-                            r"\fscx120\fscy120"
-                            r"\t(0,130,\fscx100\fscy100)}"
-                        )
-                    elif animation == "fade":
-                        tag = (
-                            r"{\alpha&HFF&"
-                            r"\t(0,180,\alpha&H00&)}"
-                        )
-                    elif animation == "highlight":
-                        tag = r"{\c" + highlight + "}"
-                    else:
-                        tag = ""
-
-                    parts.append(tag + text + r"{\rDefault}")
-                else:
-                    parts.append(text)
-
-            line = " ".join(parts)
-
-            # Keep the group centered at the bottom.
-            event = (
-                f"Dialogue: 0,{ass_time(start)},"
-                f"{ass_time(end)},Default,,0,0,0,,"
-                f"{{\\an2}}{line}"
-            )
-
-            events.append(event)
-
-    output_path.write_text(
-        header + "\n".join(events) + "\n",
-        encoding="utf-8"
-    )
-
-
-# ==========================================
-# VIDEO RENDER
-# ==========================================
-
-def get_output_dimensions(video_format, original_info):
-    if video_format == "16:9":
-        return 1280, 720
-
-    if video_format == "1:1":
-        return 720, 720
-
-    if video_format == "original":
-        streams = original_info.get("streams", [])
-
-        for stream in streams:
-            if stream.get("codec_type") == "video":
-                width = int(stream.get("width", 720))
-                height = int(stream.get("height", 1280))
-                return width, height
-
-    return 720, 1280
-
-
-async def render_video(
-    input_path,
-    output_path,
-    ass_path,
-    video_format,
-    original_info
-):
-    width, height = get_output_dimensions(
-        video_format,
-        original_info
-    )
-
-    subtitle_filter = (
-        "ass=" + str(ass_path).replace("\\", "/")
-        .replace(":", r"\:")
-        .replace("'", r"\'")
-    )
-
-    if video_format == "original":
-        scale_filter = (
-            f"scale='min({width},1280)':"
-            f"'min({height},1920)':"
-            "force_original_aspect_ratio=decrease"
-        )
-    else:
-        scale_filter = (
-            f"scale={width}:{height}:"
-            "force_original_aspect_ratio=increase,"
-            f"crop={width}:{height}"
-        )
-
-    video_filter = scale_filter + "," + subtitle_filter
-
-    command = [
-        "ffmpeg",
-        "-y",
-        "-threads", "1",
-        "-filter_threads", "1",
-        "-i", str(input_path),
-        "-vf", video_filter,
-        "-map", "0:v:0",
-        "-map", "0:a?",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "27",
-        "-threads", "1",
-        "-c:a", "aac",
-        "-b:a", "96k",
-        "-movflags", "+faststart",
-        "-fs", str(MAX_OUTPUT_SIZE),
-        str(output_path)
-    ]
-
-    await run_command(command, timeout=600)
-
-    if not output_path.exists() or output_path.stat().st_size < 1000:
-        raise RuntimeError("Файли натиҷа сохта нашуд.")
-
-    if output_path.stat().st_size >= MAX_OUTPUT_SIZE:
-        raise RuntimeError(
-            "Файли натиҷа аз маҳдудияти сервер калон шуд."
-        )
-
-
-# ==========================================
-# FILE CLEANUP
-# ==========================================
-
-def cleanup_job(job_dir: str):
-    try:
-        shutil.rmtree(job_dir, ignore_errors=True)
-    except Exception:
-        logger.exception("Temporary folder cleanup failed")
-
-
-def finish_response(job_dir: str):
-    cleanup_job(job_dir)
-
-    if PROCESS_LOCK.locked():
-        PROCESS_LOCK.release()
-
-
-# ==========================================
-# FASTAPI
-# ==========================================
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    polling_task = None
-
-    if bot:
-        polling_task = asyncio.create_task(
-            dp.start_polling(bot)
-        )
-
-    yield
-
-    if polling_task:
-        polling_task.cancel()
-
-        try:
-            await polling_task
-        except asyncio.CancelledError:
-            pass
-
-    if bot:
-        await bot.session.close()
-
-
-app = FastAPI(
-    title="GAPCUT AI",
-    version="3.0.0",
-    lifespan=lifespan
-)
-
-
-@app.get("/")
-async def home():
-    return {
-        "app": "GAPCUT AI",
-        "version": "3.0.0",
-        "status": "online",
-        "max_upload_mb": 100,
-        "max_duration_seconds": 60,
-        "styles": list(STYLE_CONFIG.keys()),
-        "languages": ["tg", "ru", "tg_ru"]
+// ---- polling
+function poll(){
+  clearInterval(timer);let fails=0;
+  const tick=async()=>{
+    try{
+      const j=await req("GET","/api/jobs/"+jobId);fails=0;
+      if(j.status==="transcribed"&&$("s-ed").classList.contains("on")===false&&!poll.rendering){clearInterval(timer);openEditor(j);return}
+      if(j.status==="done"){clearInterval(timer);poll.rendering=false;openResult();return}
+      if(j.status==="error"){clearInterval(timer);poll.rendering=false;toast(j.error||"Error");if(lines.length)show("s-ed");else show("s-up");return}
+      setP(j.progress,j.stage);
+    }catch(e){
+      if(e.status===404){clearInterval(timer);toast(t("eExp"));resetAll();return}
+      if(++fails>8){clearInterval(timer);toast(e.msg||t("eNet"));show("s-up")}
     }
+  };
+  tick();timer=setInterval(tick,1500);
+}
 
+// ---- editor
+function openEditor(j){
+  lines=j.lines||[];
+  $("ev").src=objUrl;
+  const box=$("lines");box.innerHTML="";
+  lines.forEach((l,i)=>{
+    const row=document.createElement("div");row.className="line";
+    const tm=document.createElement("time");tm.textContent=fmtT(l.start);
+    const ta=document.createElement("textarea");ta.rows=2;ta.value=l.text;
+    ta.oninput=()=>{lines[i].text=ta.value};
+    ta.onfocus=()=>{const v=$("ev");v.currentTime=l.start;v.pause()};
+    row.append(tm,ta);box.appendChild(row);
+  });
+  show("s-ed");
+}
+$("makeBtn").onclick=async()=>{
+  const payload=lines.filter(l=>l.text.trim());
+  if(!payload.length){toast(t("eEmpty"));return}
+  const fd=new FormData();fd.append("style",sel.style);fd.append("video_format",sel.fmt);
+  fd.append("lines",JSON.stringify(payload));fd.append("init_data",initData);
+  show("s-pr");setP(0,"");
+  try{await req("POST","/api/jobs/"+jobId+"/render",fd);poll.rendering=true;poll()}
+  catch(e){toast(e.msg);show("s-ed")}
+};
 
-@app.get("/health")
-async def health():
-    return {
-        "status": "healthy",
-        "version": "3.0.0"
-    }
+// ---- result
+async function openResult(){
+  setP(100,"");
+  try{
+    const r=await fetch(API+"/api/jobs/"+jobId+"/download",{headers:{"X-Init-Data":initData}});
+    if(!r.ok)throw 0;
+    const b=await r.blob();
+    if(blobUrl)URL.revokeObjectURL(blobUrl);
+    blobUrl=URL.createObjectURL(b);blobFile=new File([b],"GAPCUT_AI.mp4",{type:"video/mp4"});
+    $("rv").src=blobUrl;
+    $("shBtn").hidden=!(navigator.canShare&&navigator.canShare({files:[blobFile]}));
+    show("s-rs");
+  }catch(e){toast(t("eNet"));show("s-ed")}
+}
+$("dlBtn").onclick=()=>{
+  if(tg&&tg.isVersionAtLeast&&tg.isVersionAtLeast("8.0")&&tg.downloadFile){
+    tg.downloadFile({url:API+"/api/jobs/"+jobId+"/download?init_data="+encodeURIComponent(initData),file_name:"GAPCUT_AI.mp4"});return}
+  const a=document.createElement("a");a.href=blobUrl;a.download="GAPCUT_AI.mp4";document.body.appendChild(a);a.click();a.remove();
+};
+$("shBtn").onclick=()=>{navigator.share({files:[blobFile]}).catch(()=>{})};
+function resetAll(){
+  if(jobId)req("DELETE","/api/jobs/"+jobId).catch(()=>{});
+  jobId=null;lines=[];file=null;poll.rendering=false;$("file").value="";$("pv").hidden=true;$("pv").removeAttribute("src");
+  $("startBtn").disabled=true;render();show("s-up");
+}
+$("newBtn").onclick=resetAll;
 
-
-@app.post("/api/process")
-async def process_video(
-    file: UploadFile = File(...),
-    style: str = Form("viral"),
-    language: str = Form("tg_ru"),
-    video_format: str = Form("9:16"),
-    init_data: str = Form(...)
-):
-    if not validate_telegram_init_data(init_data):
-        raise HTTPException(
-            status_code=401,
-            detail="Telegram авторизация нодуруст аст."
-        )
-
-    if not GROQ_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="GROQ_API_KEY танзим нашудааст."
-        )
-
-    if PROCESS_LOCK.locked():
-        raise HTTPException(
-            status_code=429,
-            detail="Сервер ҳоло видеои дигарро коркард мекунад. Баъдтар кӯшиш кун."
-        )
-
-    await PROCESS_LOCK.acquire()
-
-    job_dir = str(BASE_DIR / uuid.uuid4().hex)
-    Path(job_dir).mkdir(parents=True, exist_ok=True)
-
-    input_path = Path(job_dir) / "input_video"
-    audio_path = Path(job_dir) / "audio.mp3"
-    ass_path = Path(job_dir) / "captions.ass"
-    output_path = Path(job_dir) / "gapcut_ai.mp4"
-
-    try:
-        suffix = Path(file.filename or "video.mp4").suffix.lower()
-
-        if suffix not in {
-            ".mp4", ".mov", ".webm", ".mkv", ".m4v"
-        }:
-            raise HTTPException(
-                status_code=400,
-                detail="Формати видео дастгирӣ намешавад."
-            )
-
-        total_size = 0
-
-        with input_path.open("wb") as destination:
-            while True:
-                chunk = await file.read(UPLOAD_CHUNK)
-
-                if not chunk:
-                    break
-
-                total_size += len(chunk)
-
-                if total_size > MAX_INPUT_SIZE:
-                    raise HTTPException(
-                        status_code=413,
-                        detail="Ҳаҷми максималии видео 100 MB аст."
-                    )
-
-                destination.write(chunk)
-
-        await file.close()
-
-        if total_size == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Файли видео холӣ аст."
-            )
-
-        original_info, duration = await get_video_info(input_path)
-
-        if duration > MAX_DURATION:
-            raise HTTPException(
-                status_code=413,
-                detail="Давомнокии максималии видео 60 сония аст."
-            )
-
-        has_audio = any(
-            stream.get("codec_type") == "audio"
-            for stream in original_info.get("streams", [])
-        )
-
-        if not has_audio:
-            raise HTTPException(
-                status_code=400,
-                detail="Дар видео садо ёфт нашуд."
-            )
-
-        await extract_audio(input_path, audio_path)
-
-        words, transcript = await transcribe_audio(audio_path)
-
-        if language not in {"tg", "ru", "tg_ru", "both"}:
-            language = "tg_ru"
-
-        # For tg_ru/both, Whisper auto-detects mixed speech.
-        # For a single-language selection, the API receives its code.
-        # Tajik uses ISO-639-1 code "tg".
-        if language in {"tg", "ru"}:
-            # Current transcription function intentionally auto-detects
-            # by default; mixed speech must not be forced into one language.
-            logger.info("Requested language mode: %s", language)
-
-        style = style if style in STYLE_CONFIG else "viral"
-
-        if video_format not in {
-            "9:16", "16:9", "1:1", "original"
-        }:
-            video_format = "9:16"
-
-        build_ass(
-            words,
-            style,
-            720 if video_format != "16:9" else 1280,
-            1280 if video_format != "16:9" else 720,
-            ass_path
-        )
-
-        await render_video(
-            input_path,
-            output_path,
-            ass_path,
-            video_format,
-            original_info
-        )
-
-        logger.info(
-            "Job complete: duration=%.2f words=%d size=%d",
-            duration,
-            len(words),
-            output_path.stat().st_size
-        )
-
-        return FileResponse(
-            path=str(output_path),
-            media_type="video/mp4",
-            filename="GAPCUT_AI.mp4",
-            background=BackgroundTask(
-                finish_response,
-                job_dir
-            )
-        )
-
-    except HTTPException:
-        cleanup_job(job_dir)
-        if PROCESS_LOCK.locked():
-            PROCESS_LOCK.release()
-        raise
-
-    except Exception as error:
-        logger.exception("Video processing failed")
-
-        cleanup_job(job_dir)
-
-        if PROCESS_LOCK.locked():
-            PROCESS_LOCK.release()
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error)[:400]
-        )
-
-    finally:
-        await file.close()
-
-
-# ==========================================
-# LOCAL ENTRY POINT
-# ==========================================
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "10000")),
-        workers=1,
-        limit_concurrency=10
-    )
+render();
+fetch(API+"/health").catch(()=>{}); // wakes the free Render instance
+</script>
+</body>
+</html>
