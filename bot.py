@@ -94,6 +94,7 @@ GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 
 JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "1800"))
 MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "4"))
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 KEYWORDS_LLM = os.getenv("KEYWORDS_LLM", "1").strip() != "0"
 KEYWORD_MODEL = os.getenv("KEYWORD_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -812,6 +813,80 @@ async def mark_keywords(words):
 
 
 # =========================================================
+# MEDIA CARDS (Pexels pictures shown for concrete nouns)
+# =========================================================
+
+async def suggest_cards(words, work_dir):
+    """Up to 3 cards: {id, at, query, thumb, credit, file}. Never raises."""
+    if not (PEXELS_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6:
+        return []
+    numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
+    payload = {
+        "model": KEYWORD_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You pick moments of a short video where a stock photo helps. "
+                    "The text is numbered word by word (Tajik or Russian). Choose at "
+                    "most 3 concrete, visual nouns or objects (not abstract words), "
+                    "at least 12 words apart. Answer only with JSON: "
+                    '{"cards":[{"index":word index,"query":"2-3 word English stock-photo search"}]}.'
+                ),
+            },
+            {"role": "user", "content": numbered},
+        ],
+    }
+    cards = []
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            response = await client.post(
+                GROQ_CHAT_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                json=payload,
+            )
+            if response.status_code != 200:
+                return []
+            raw = json.loads(response.json()["choices"][0]["message"]["content"])
+            last_at = -10.0
+            for item in raw.get("cards", [])[:3]:
+                index = int(item["index"])
+                query = str(item["query"]).strip()[:60]
+                if not (0 <= index < len(words)) or not query:
+                    continue
+                at = max(1.0, words[index]["start"])
+                if at - last_at < 4.0:
+                    continue
+                found = await client.get(
+                    "https://api.pexels.com/v1/search",
+                    params={"query": query, "per_page": 1, "orientation": "square"},
+                    headers={"Authorization": PEXELS_API_KEY},
+                )
+                photos = found.json().get("photos") if found.status_code == 200 else None
+                if not photos:
+                    continue
+                image = await client.get(photos[0]["src"]["large"])
+                if image.status_code != 200 or len(image.content) < 2000:
+                    continue
+                path = Path(work_dir) / f"card_{len(cards)}.jpg"
+                path.write_bytes(image.content)
+                cards.append({
+                    "id": len(cards),
+                    "at": round(at, 2),
+                    "query": query,
+                    "thumb": photos[0]["src"].get("small", ""),
+                    "credit": str(photos[0].get("photographer", ""))[:60],
+                    "file": str(path),
+                })
+                last_at = at
+    except Exception:
+        logger.warning("Card suggestion failed", exc_info=True)
+    return cards
+
+
+# =========================================================
 # LINES (editable transcript) <-> WORDS
 # =========================================================
 
@@ -1201,6 +1276,92 @@ def build_ass(words, style_name, width, height, output_path,
 # RENDER
 # =========================================================
 
+def zoom_expression(starts, amount=0.12):
+    terms = []
+    for index, moment in enumerate(starts[:40]):
+        sign = "+" if index % 2 == 0 else "-"
+        terms.append(f"{sign}clip((t-{moment:.2f})/0.18,0,1)")
+    if not terms:
+        return None
+    body = "".join(terms)
+    if body.startswith("+"):
+        body = body[1:]
+    return f"(1+{amount}*({body}))"
+
+
+def between_expression(moments, length):
+    return "+".join(f"between(t,{m:.2f},{m + length:.2f})" for m in moments)
+
+
+def build_graph(words, base_filter, width, height, duration, options, ass_name,
+                fonts_option, card_inputs):
+    """Return (filtergraph, has_audio_graph, sfx_times)."""
+    steps = [f"[0:v]{base_filter}"]
+
+    lines = make_lines(words)
+    starts = [l["start"] for l in lines[1:] if 1.0 < l["start"] < duration - 0.5]
+
+    zoom = zoom_expression(starts) if options.get("zoom") else None
+    if zoom:
+        steps[0] += (
+            f",scale=w='2*trunc({width}*{zoom}/2)':h='2*trunc({height}*{zoom}/2)'"
+            f":eval=frame:flags=bilinear,crop={width}:{height}"
+        )
+
+    cards = options.get("cards") or []
+    flash_times = [s for i, s in enumerate(starts) if i % 3 == 2] if options.get("fx") else []
+    flash_times += [c["at"] for c in cards] if options.get("fx") else []
+    flash_times = sorted(flash_times)[:12]
+    if flash_times:
+        enable = between_expression(flash_times, 0.10)
+        steps[0] += (
+            f",negate=enable='{enable}',"
+            f"rgbashift=rh=-12:bh=12:enable='{enable}'"
+        )
+
+    label = "v0"
+    steps[0] += f"[{label}]"
+    graph = [steps[0]]
+
+    for number, card in enumerate(cards):
+        start = card["at"]
+        end = min(duration, start + 1.9)
+        input_index = card_inputs[number]
+        card_w, card_h = int(width * 0.78), int(height * 0.46)
+        radius = 30
+        graph.append(
+            f"[{input_index}:v]scale=w={card_w}:h={card_h}:"
+            f"force_original_aspect_ratio=decrease,format=yuva420p,"
+            f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':"
+            f"a='if(gt(abs(W/2-X),W/2-{radius})*gt(abs(H/2-Y),H/2-{radius}),"
+            f"if(lte(hypot(abs(W/2-X)-(W/2-{radius}),abs(H/2-Y)-(H/2-{radius})),{radius}),255,0),255)',"
+            f"setpts=PTS+{start:.2f}/TB[c{number}]"
+        )
+        graph.append(
+            f"[{label}]drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:"
+            f"enable='between(t,{start:.2f},{end:.2f})'[w{number}]"
+        )
+        new_label = f"v{number + 1}"
+        graph.append(
+            f"[w{number}][c{number}]overlay="
+            f"x='(W-w)/2+W*pow(1-min(1,max(0,(t-{start:.2f})/0.28)),3)':"
+            f"y='(H-h)/2':enable='between(t,{start:.2f},{end:.2f})':format=auto"
+            f"[{new_label}]"
+        )
+        label = new_label
+
+    if options.get("subtitles", True):
+        graph.append(f"[{label}]ass={ass_name}{fonts_option}[vout]")
+    else:
+        graph.append(f"[{label}]null[vout]")
+
+    sfx_times = []
+    if options.get("sfx"):
+        sfx_times = sorted(set(starts[:12] + [c["at"] for c in cards]))[:16]
+
+    return ";".join(graph), sfx_times
+
+
 async def render_video(
     input_path, output_path, work_dir, words, style_name, video_format,
     info, duration, report, options=None,
@@ -1214,7 +1375,7 @@ async def render_video(
     width, height = get_output_size(video_format, display_width, display_height)
 
     ass_name = "captions.ass"
-    filter_chain = get_video_filter(video_format, width, height)
+    base_filter = get_video_filter(video_format, width, height)
     if options.get("subtitles", True):
         build_ass(
             words, style_name, width, height, Path(work_dir) / ass_name,
@@ -1222,18 +1383,64 @@ async def render_video(
             size=options.get("size", "m"),
             position=options.get("position", "auto"),
         )
-        filter_chain += f",ass={ass_name}"
-        if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
-            filter_chain += f":fontsdir={FONTS_DIR}"
+    fonts_option = ""
+    if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
+        fonts_option = f":fontsdir={FONTS_DIR}"
+
+    cards = options.get("cards") or []
+    extra_inputs = []
+    card_inputs = []
+    for card in cards:
+        card_inputs.append(1 + len(card_inputs))
+        extra_inputs += [
+            "-loop", "1", "-framerate", "30", "-t", "2.2", "-i", card["file"],
+        ]
+
+    graph, sfx_times = build_graph(
+        words, base_filter, width, height, duration, options, ass_name,
+        fonts_option, card_inputs,
+    )
+
+    audio_map = ["-map", "0:a:0?"]
+    if sfx_times:
+        whoosh = work_dir / "whoosh.wav"
+        await run_command(
+            [
+                "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "anoisesrc=d=0.45:c=pink:a=0.9",
+                "-af",
+                "highpass=f=350,lowpass=f=6500,afade=t=in:st=0:d=0.16,"
+                "afade=t=out:st=0.2:d=0.25,volume=0.8,aformat=channel_layouts=stereo",
+                str(whoosh),
+            ],
+            timeout=30,
+            cwd=work_dir,
+        )
+        whoosh_index = 1 + len(card_inputs)
+        extra_inputs += ["-i", str(whoosh)]
+        count = len(sfx_times)
+        parts = [f"[{whoosh_index}:a]asplit={count}" + "".join(f"[s{i}]" for i in range(count))]
+        mix_inputs = "[a0]"
+        parts.append("[0:a]aformat=channel_layouts=stereo[a0]")
+        for i, moment in enumerate(sfx_times):
+            ms = int(moment * 1000)
+            parts.append(f"[s{i}]adelay={ms}|{ms},volume=0.35[d{i}]")
+            mix_inputs += f"[d{i}]"
+        parts.append(
+            f"{mix_inputs}amix=inputs={count + 1}:duration=first:normalize=0[aout]"
+        )
+        graph += ";" + ";".join(parts)
+        audio_map = ["-map", "[aout]"]
 
     command = [
         "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-progress", "pipe:1", "-nostats",
         "-threads", "1", "-filter_threads", "1",
         "-i", str(input_path),
+        *extra_inputs,
         "-t", str(MAX_DURATION),
-        "-vf", filter_chain,
-        "-map", "0:v:0", "-map", "0:a:0?",
+        "-filter_complex", graph,
+        "-map", "[vout]", *audio_map,
         "-c:v", "libx264", "-preset", FFMPEG_PRESET, "-crf", "27",
         "-threads", "1",
         "-c:a", "aac", "-b:a", "128k", "-ac", "2",
@@ -1324,7 +1531,7 @@ def clean_format(video_format):
     return video_format
 
 
-def clean_options(accent, size, position, subtitles):
+def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1"):
     accent = (accent or "").strip().lstrip("#").upper()
     if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
         raise HTTPException(status_code=400, detail="Неверный цвет.")
@@ -1337,6 +1544,9 @@ def clean_options(accent, size, position, subtitles):
         "size": size,
         "position": position,
         "subtitles": str(subtitles).strip().lower() not in ("0", "false", "off"),
+        "zoom": str(zoom).strip().lower() not in ("0", "false", "off"),
+        "fx": str(fx).strip().lower() not in ("0", "false", "off"),
+        "sfx": str(sfx).strip().lower() not in ("0", "false", "off"),
     }
 
 
@@ -1436,6 +1646,9 @@ def public_job(job):
     if job["status"] in ("transcribed", "rendering", "done") or job["lines"]:
         data["lines"] = job["lines"]
         data["detected"] = job["detected"]
+        data["cards"] = [
+            {k: v for k, v in c.items() if k != "file"} for c in job["cards"]
+        ]
     if job["status"] == "done":
         data["download_url"] = f"/api/jobs/{job['id']}/download"
     return data
@@ -1477,6 +1690,8 @@ async def run_transcribe_job(job):
                 audio_path, work_dir, job["language"], job["duration"], report
             )
 
+            report(95, "Подбираем карточки")
+            job["cards"] = await suggest_cards(words, work_dir)
             touch(
                 job,
                 words=words,
@@ -1727,6 +1942,7 @@ async def create_job(
         "words": [],
         "lines": [],
         "detected": [],
+        "cards": [],
         "output": None,
         "updated": time.time(),
     }
@@ -1756,12 +1972,23 @@ async def start_render(
     size: str = Form("m"),
     position: str = Form("auto"),
     subtitles: str = Form("1"),
+    zoom: str = Form("1"),
+    fx: str = Form("1"),
+    sfx: str = Form("1"),
+    cards: str = Form("[]"),
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
     user = require_user(init_data, x_init_data)
     job = get_job(job_id, user)
-    options = clean_options(accent, size, position, subtitles)
+    options = clean_options(accent, size, position, subtitles, zoom, fx, sfx)
+    try:
+        wanted = {int(x) for x in json.loads(cards or "[]")}
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Неверный список карточек.")
+    options["cards"] = [
+        c for c in job["cards"] if c["id"] in wanted and Path(c["file"]).exists()
+    ]
 
     style = clean_style(style)
     video_format = clean_format(video_format)
