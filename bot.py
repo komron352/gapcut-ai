@@ -94,13 +94,16 @@ GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 
 JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "1800"))
 MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "4"))
+KEYWORDS_LLM = os.getenv("KEYWORDS_LLM", "1").strip() != "0"
+KEYWORD_MODEL = os.getenv("KEYWORD_MODEL", "llama-3.3-70b-versatile").strip()
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 FFMPEG_PRESET = os.getenv("FFMPEG_PRESET", "ultrafast").strip() or "ultrafast"
 
 BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
 FONTS_DIR = Path(os.getenv("FONTS_DIR", str(Path(__file__).resolve().parent / "fonts")))
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
-ALLOWED_STYLES = {"viral", "classic", "cinema", "podcast", "karaoke", "creator"}
+ALLOWED_STYLES = {"viral", "classic", "cinema", "podcast", "karaoke", "creator", "keyword"}
 ALLOWED_FORMATS = {"9:16", "16:9", "1:1", "original"}
 ALLOWED_LANGUAGES = {"tg", "ru", "tg_ru"}
 LANGUAGE_ALIASES = {"both": "tg_ru", "tg+ru": "tg_ru", "tg-ru": "tg_ru"}
@@ -517,7 +520,10 @@ def normalize_words(words):
             end = float(item.get("end", start + 0.2))
         except (TypeError, ValueError):
             continue
-        cleaned.append({"word": word, "start": start, "end": max(end, start + 0.04)})
+        entry = {"word": word, "start": start, "end": max(end, start + 0.04)}
+        if "key" in item:
+            entry["key"] = bool(item["key"])
+        cleaned.append(entry)
 
     cleaned.sort(key=lambda w: w["start"])
 
@@ -732,8 +738,77 @@ async def transcribe_video(audio_path, work_dir, language, audio_duration, repor
     if not words:
         raise UserError("Не удалось распознать речь в видео.", 422)
 
-    report(90, "Готовим текст для редактирования")
+    report(90, "Выбираем ключевые слова")
+    await mark_keywords(words)
     return words, detected
+
+
+# =========================================================
+# KEYWORDS (emphasis words for the "keyword" style)
+# =========================================================
+
+def clean_token(text):
+    return re.sub(r"[\W_]+", "", str(text), flags=re.UNICODE)
+
+
+def heuristic_keys(words):
+    keys = set()
+    for start in range(0, len(words), 4):
+        window = range(start, min(start + 4, len(words)))
+        best = max(window, key=lambda j: len(clean_token(words[j]["word"])))
+        if len(clean_token(words[best]["word"])) >= 4:
+            keys.add(best)
+    return keys
+
+
+async def llm_keys(words):
+    if not (KEYWORDS_LLM and GROQ_API_KEY) or len(words) < 3:
+        return None
+    numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
+    payload = {
+        "model": KEYWORD_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You choose emphasis words for short-video captions. "
+                    "The text is numbered word by word (Tajik or Russian). "
+                    "Pick the most meaningful words (key nouns, verbs, numbers, "
+                    "strong adjectives): about one per 3-5 words, never "
+                    "prepositions or particles. Answer only with JSON: "
+                    '{"keys":[word indices]}.'
+                ),
+            },
+            {"role": "user", "content": numbered},
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                GROQ_CHAT_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                json=payload,
+            )
+        if response.status_code != 200:
+            logger.warning("Keyword LLM status %s", response.status_code)
+            return None
+        content = response.json()["choices"][0]["message"]["content"]
+        raw = json.loads(content).get("keys", [])
+        keys = {int(i) for i in raw if isinstance(i, int) and 0 <= i < len(words)}
+        return keys or None
+    except Exception:
+        logger.warning("Keyword LLM failed, using heuristic", exc_info=True)
+        return None
+
+
+async def mark_keywords(words):
+    keys = await llm_keys(words)
+    if keys is None:
+        keys = heuristic_keys(words)
+    for index, item in enumerate(words):
+        item["key"] = index in keys
 
 
 # =========================================================
@@ -757,6 +832,7 @@ def make_lines(words, max_words=7, max_chars=42, max_gap=0.8):
                     "word": w["word"],
                     "start": round(w["start"], 2),
                     "end": round(w["end"], 2),
+                    "key": bool(w.get("key", False)),
                 }
                 for w in current
             ],
@@ -808,11 +884,14 @@ def lines_to_words(lines, duration):
         if isinstance(original, list) and len(original) == len(tokens):
             try:
                 for token, source in zip(tokens, original):
-                    words.append({
+                    entry = {
                         "word": token,
                         "start": float(source.get("start", start)),
                         "end": float(source.get("end", end)),
-                    })
+                    }
+                    if "key" in source:
+                        entry["key"] = bool(source["key"])
+                    words.append(entry)
                 continue
             except (TypeError, ValueError, AttributeError):
                 pass
@@ -872,6 +951,14 @@ STYLES = {
         "outline": "000000", "outline_w": 14, "shadow": 0,
         "border_style": 3, "box_alpha": 0x50, "mode": "highlight",
         "max_words": 4, "max_chars": 28, "upper": False, "margin": 0.14,
+    },
+    "keyword": {
+        # Two-tier captions: small white lead words + big accent keyword.
+        "font": "Noto Sans", "size": 96, "bold": 1, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "00FFA3",
+        "outline": "000000", "outline_w": 5, "shadow": 2,
+        "border_style": 1, "box_alpha": 0, "mode": "key",
+        "max_words": 3, "max_chars": 26, "upper": False, "margin": 0.20,
     },
     "karaoke": {
         # In karaoke mode Primary = already sung, Secondary = not yet.
@@ -1039,6 +1126,44 @@ def build_ass(words, style_name, width, height, output_path,
                 events.append(
                     f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,"
                     f"0,0,0,,{' '.join(parts)}"
+                )
+
+        elif mode == "key":
+            flagged = [i for i, t in enumerate(phrase) if t.get("key")]
+            pool = flagged or list(range(len(phrase)))
+            key_idx = max(pool, key=lambda i: len(clean_token(phrase[i]["word"])))
+            key_text = display(phrase[key_idx]["word"])
+            key_size = int(font_size * min(1.0, 9.0 / max(len(key_text), 1)))
+            lead_size = int(font_size * 0.52)
+            key_color = ass_tag_color(style["active"])
+
+            for w_index, token in enumerate(phrase):
+                start = phrase_start if w_index == 0 else token["start"]
+                if w_index + 1 < len(phrase):
+                    end = phrase[w_index + 1]["start"]
+                else:
+                    end = phrase_end
+                if end <= start:
+                    end = start + 0.05
+
+                lead = " ".join(
+                    display(t["word"])
+                    for j, t in enumerate(phrase[:w_index + 1])
+                    if j != key_idx
+                )
+                pieces = []
+                if lead:
+                    pieces.append(f"{{\\fs{lead_size}\\1c&HFFFFFF&}}{lead}")
+                if key_idx <= w_index:
+                    pop = ""
+                    if w_index == key_idx:
+                        pop = "\\fscx60\\fscy60\\t(0,140,\\fscx100\\fscy100)"
+                    pieces.append(
+                        f"{{\\fs{key_size}\\1c{key_color}{pop}}}{key_text}"
+                    )
+                events.append(
+                    f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,"
+                    "0,0,0,," + "\\N".join(pieces)
                 )
 
         elif mode == "karaoke":
