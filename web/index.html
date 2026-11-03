@@ -54,6 +54,7 @@ h1{font-size:28px;line-height:1.12;margin:0 0 8px;font-weight:900}.sub{color:var
 .row b{font-size:16px}
 .sw{width:52px;height:30px;border-radius:99px;background:#2a2540;position:relative;border:0;transition:.2s;flex:none}.sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:.2s}.sw.on{background:linear-gradient(90deg,var(--pu),var(--pu2))}.sw.on::after{left:25px}
 .stp{display:flex;align-items:center;gap:6px;font-weight:800}.stp button{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#0e0b18;color:var(--tx);font-size:16px}.stp span{min-width:84px;text-align:center}
+.cd{display:flex;align-items:center;gap:12px;margin-top:12px}.cd img{width:56px;height:56px;border-radius:12px;object-fit:cover;background:#0e0b18}.cd div{flex:1;font-size:14px;font-weight:700}.cd small{display:block;color:var(--mu);font-weight:400}
 .dots{display:flex;gap:10px}.dot{width:34px;height:34px;border-radius:50%;border:2px solid transparent;transition:.15s}.dot.on{border-color:#fff;transform:scale(1.12)}
 details summary{list-style:none;font-weight:800;font-size:16px;display:flex;justify-content:space-between;cursor:pointer}details summary::-webkit-details-marker{display:none}
 .line{display:flex;gap:10px;align-items:flex-start;margin-top:10px}
@@ -87,8 +88,12 @@ details summary{list-style:none;font-weight:800;font-size:16px;display:flex;just
     <div class="row" id="rowColor"><b data-i="color"></b><div class="dots" id="dots"></div></div>
     <div class="row"><b data-i="size"></b><div class="stp"><button id="szL">‹</button><span id="szV"></span><button id="szR">›</button></div></div>
     <div class="row"><b data-i="pos"></b><div class="stp"><button id="psL">‹</button><span id="psV"></span><button id="psR">›</button></div></div>
+    <div class="row"><b data-i="zoomT"></b><button class="sw on" id="swZoom"></button></div>
+    <div class="row"><b data-i="fxT"></b><button class="sw on" id="swFx"></button></div>
+    <div class="row"><b data-i="sfxT"></b><button class="sw on" id="swSfx"></button></div>
     <div class="row" style="display:block"><b data-i="fmtT"></b><div class="chips" id="fmts" style="margin-top:10px"></div></div>
   </div>
+  <div class="card" id="cardsBox" hidden><h3 data-i="cardsT"></h3><div id="cards"></div></div>
   <div class="card"><details><summary><span data-i="edT"></span><span>✎</span></summary><div id="lines"></div></details></div>
   <button class="btn gold" id="makeBtn" data-i="make"></button>
 </section>
@@ -113,12 +118,12 @@ const $=id=>document.getElementById(id);
 
 const T={
 ru:{h1:"Автомонтаж с субтитрами",sub:"Загрузите видео — мы распознаем речь и наложим анимированные субтитры.",limits:"до 100 MB · до 60 секунд",pick:"Выбрать видео",speech:"Язык речи",next:"Далее: оформление",
-step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",
+step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",zoomT:"Зум-акценты",fxT:"Эффекты (глитч)",sfxT:"Звуки (whoosh)",cardsT:"Карточки с фото",
 done:"Видео готово",doneS:"Проверьте результат и скачайте.",dl:"Скачать",share:"Поделиться",back:"Изменить оформление",again:"Новое видео",
 langs:{tg:"Таджикский",ru:"Русский",tg_ru:"Таджикский + русский"},sizes:["Малый","Средний","Крупный"],poss:["Авто","Сверху","По центру"],up:"Загрузка",
 eBig:"Файл больше 100 MB.",eLong:"Видео длиннее 60 секунд.",eTg:"Откройте приложение через Telegram-бота.",eNet:"Нет связи с сервером. Подождите минуту и попробуйте снова.",eExp:"Сессия истекла. Загрузите видео заново.",eEmpty:"Текст пуст."},
 tg:{h1:"Монтажи худкор бо субтитр",sub:"Видеоро бор кунед — мо нутқро мешиносем ва субтитри аниматсиягӣ мегузорем.",limits:"то 100 MB · то 60 сония",pick:"Видеоро интихоб кунед",speech:"Забони нутқ",next:"Минбаъд: тарроҳӣ",
-step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",
+step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",zoomT:"Zoom",fxT:"Эффектҳо (глитч)",sfxT:"Садо (whoosh)",cardsT:"Карточкаҳои сурат",
 done:"Видео омода шуд",doneS:"Натиҷаро бинед ва зеркашӣ кунед.",dl:"Зеркашӣ",share:"Мубодила",back:"Тағйири тарроҳӣ",again:"Видеои нав",
 langs:{tg:"Тоҷикӣ",ru:"Русӣ",tg_ru:"Тоҷикӣ + русӣ"},sizes:["Хурд","Миёна","Калон"],poss:["Худкор","Боло","Миёна"],up:"Бор шуда истодааст",
 eBig:"Файл аз 100 MB калон аст.",eLong:"Видео аз 60 сония дарозтар аст.",eTg:"Барномаро тавассути боти Telegram кушоед.",eNet:"Бо сервер алоқа нест. Як дақиқа интизор шавед ва дубора кӯшиш кунед.",eExp:"Сессия тамом шуд. Видеоро дубора бор кунед.",eEmpty:"Матн холӣ аст."}
@@ -139,7 +144,8 @@ const SIZEK=["s","m","l"],SIZEM=[.8,1,1.25],POSK=["auto","top","center"];
 
 let L=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code==="tg")?"tg":"ru";
 let file=null,objUrl=null,jobId=null,lines=[],words=[],phrases=[],timer=null,blobUrl=null,blobFile=null,vr=.5625,raf=0;
-let sel={lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
+let cards=[],cardsOn=new Set();
+let sel={zoom:true,fx:true,sfx:true,lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
 const t=k=>T[L][k];
 
 function render(){
@@ -157,6 +163,7 @@ function render(){
   COLORS.forEach(c=>{const d=document.createElement("button");d.className="dot"+(sel.accent===c?" on":"");d.style.background="#"+c;d.onclick=()=>{sel.accent=c;render()};$("dots").appendChild(d)});
   $("rowColor").style.display=SM[sel.style].acc?"flex":"none";
   $("swSubs").className="sw"+(sel.subs?" on":"");
+  [["swZoom","zoom"],["swFx","fx"],["swSfx","sfx"]].forEach(a=>$(a[0]).className="sw"+(sel[a[1]]?" on":""));
   $("szV").textContent=t("sizes")[sel.size];$("psV").textContent=t("poss")[sel.pos];
   fitStage();drawCap();
 }
@@ -255,9 +262,19 @@ function openEditor(j){
     ta.oninput=()=>{lines[i].text=ta.value;buildWords();drawCap()};
     ta.onfocus=()=>{const v=$("ev");v.currentTime=l.start+.05;v.pause()};
     row.append(tm,ta);box.appendChild(row)});
+  cards=j.cards||[];cardsOn=new Set(cards.map(c=>c.id));showCards();
   buildWords();show("s-ed");
 }
+function showCards(){
+  const box=$("cards");box.innerHTML="";$("cardsBox").hidden=!cards.length;
+  cards.forEach(c=>{const r=document.createElement("div");r.className="cd";
+    const im=document.createElement("img");im.src=c.thumb;im.alt="";
+    const d=document.createElement("div");d.textContent=c.query;const sm=document.createElement("small");sm.textContent=fmtT(c.at)+(c.credit?" · "+c.credit:"");d.appendChild(sm);
+    const sw=document.createElement("button");sw.className="sw"+(cardsOn.has(c.id)?" on":"");
+    sw.onclick=()=>{cardsOn.has(c.id)?cardsOn.delete(c.id):cardsOn.add(c.id);sw.className="sw"+(cardsOn.has(c.id)?" on":"")};
+    r.append(im,d,sw);box.appendChild(r)})}
 $("swSubs").onclick=()=>{sel.subs=!sel.subs;render()};
+[["swZoom","zoom"],["swFx","fx"],["swSfx","sfx"]].forEach(a=>$(a[0]).onclick=()=>{sel[a[1]]=!sel[a[1]];render()});
 const stp=(id,key,max)=>{$(id+"L").onclick=()=>{sel[key]=(sel[key]+max-1)%max;render()};$(id+"R").onclick=()=>{sel[key]=(sel[key]+1)%max;render()}};
 stp("sz","size",3);stp("ps","pos",3);
 $("styles").addEventListener("click",()=>{makePhrases();drawCap()});
@@ -269,6 +286,7 @@ $("makeBtn").onclick=async()=>{
   fd.append("lines",JSON.stringify(payload));fd.append("subtitles",sel.subs?"1":"0");
   fd.append("size",SIZEK[sel.size]);fd.append("position",POSK[sel.pos]);
   if(SM[sel.style].acc&&sel.accent)fd.append("accent",sel.accent);
+  fd.append("zoom",sel.zoom?"1":"0");fd.append("fx",sel.fx?"1":"0");fd.append("sfx",sel.sfx?"1":"0");fd.append("cards",JSON.stringify([...cardsOn]));
   fd.append("init_data",initData);
   show("s-pr");setP(0,"");
   try{await req("POST","/api/jobs/"+jobId+"/render",fd);poll.rendering=true;poll()}catch(e){toast(e.msg);show("s-ed")}};
