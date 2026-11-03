@@ -16,6 +16,8 @@ New endpoints (async jobs with progress + editable transcript)
 POST   /api/jobs                 form: file, language, init_data -> {job_id}
 GET    /api/jobs/{id}            status, progress, editable lines
 POST   /api/jobs/{id}/render     form: style, video_format, lines (JSON, optional),
+                                 accent (RRGGBB), size (s|m|l),
+                                 position (auto|top|center), subtitles (1|0),
                                  init_data
 GET    /api/jobs/{id}/download   final MP4
 DELETE /api/jobs/{id}            remove the job and its files
@@ -935,12 +937,18 @@ def split_phrases(words, max_words, max_chars, max_gap=0.7):
     return phrases
 
 
-def build_ass(words, style_name, width, height, output_path):
-    style = STYLES.get(style_name, STYLES["viral"])
+def build_ass(words, style_name, width, height, output_path,
+              accent=None, size="m", position="auto"):
+    style = dict(STYLES.get(style_name, STYLES["viral"]))
+    if accent:
+        style["active"] = accent
+        if style["mode"] == "karaoke":
+            style["primary"] = accent
 
     scale = min(width, height) / 720.0
     if width > height:
         scale *= 0.8
+    scale *= {"s": 0.8, "m": 1.0, "l": 1.25}.get(size, 1.0)
 
     font_size = int(style["size"] * scale)
     outline_w = max(1, int(round(style["outline_w"] * scale)))
@@ -951,6 +959,11 @@ def build_ass(words, style_name, width, height, output_path):
     if width > height:
         margin_ratio = min(margin_ratio, 0.09)
     margin_v = int(height * margin_ratio)
+    alignment = 2
+    if position == "top":
+        alignment, margin_v = 8, int(height * 0.10)
+    elif position == "center":
+        alignment, margin_v = 5, 0
     margin_h = int(width * 0.07)
 
     outline_alpha = style["box_alpha"] if style["border_style"] == 3 else 0
@@ -973,7 +986,7 @@ def build_ass(words, style_name, width, height, output_path):
         f"{ass_color(style['primary'])},{ass_color(style['secondary'])},"
         f"{ass_color(style['outline'], outline_alpha)},{back_color},"
         f"{style['bold']},0,0,0,100,100,{spacing:.1f},0,"
-        f"{style['border_style']},{outline_w},{shadow},2,"
+        f"{style['border_style']},{outline_w},{shadow},{alignment},"
         f"{margin_h},{margin_h},{margin_v},1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
@@ -1065,8 +1078,9 @@ def build_ass(words, style_name, width, height, output_path):
 
 async def render_video(
     input_path, output_path, work_dir, words, style_name, video_format,
-    info, duration, report,
+    info, duration, report, options=None,
 ):
+    options = options or {}
     input_path = Path(input_path).resolve()
     output_path = Path(output_path).resolve()
     work_dir = Path(work_dir).resolve()
@@ -1075,12 +1089,17 @@ async def render_video(
     width, height = get_output_size(video_format, display_width, display_height)
 
     ass_name = "captions.ass"
-    build_ass(words, style_name, width, height, Path(work_dir) / ass_name)
-
     filter_chain = get_video_filter(video_format, width, height)
-    filter_chain += f",ass={ass_name}"
-    if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
-        filter_chain += f":fontsdir={FONTS_DIR}"
+    if options.get("subtitles", True):
+        build_ass(
+            words, style_name, width, height, Path(work_dir) / ass_name,
+            accent=options.get("accent"),
+            size=options.get("size", "m"),
+            position=options.get("position", "auto"),
+        )
+        filter_chain += f",ass={ass_name}"
+        if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
+            filter_chain += f":fontsdir={FONTS_DIR}"
 
     command = [
         "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
@@ -1178,6 +1197,22 @@ def clean_format(video_format):
     if video_format not in ALLOWED_FORMATS:
         raise HTTPException(status_code=400, detail="Неверный формат видео.")
     return video_format
+
+
+def clean_options(accent, size, position, subtitles):
+    accent = (accent or "").strip().lstrip("#").upper()
+    if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
+        raise HTTPException(status_code=400, detail="Неверный цвет.")
+    size = (size or "m").strip().lower()
+    position = (position or "auto").strip().lower()
+    if size not in ("s", "m", "l") or position not in ("auto", "top", "center"):
+        raise HTTPException(status_code=400, detail="Неверные параметры субтитров.")
+    return {
+        "accent": accent or None,
+        "size": size,
+        "position": position,
+        "subtitles": str(subtitles).strip().lower() not in ("0", "false", "off"),
+    }
 
 
 def new_work_dir():
@@ -1330,7 +1365,7 @@ async def run_transcribe_job(job):
         fail_job(job, error)
 
 
-async def run_render_job(job, style, video_format, lines):
+async def run_render_job(job, style, video_format, lines, options):
     try:
         async with PROCESS_LOCK:
             touch(job, status="rendering", progress=0, stage="Монтируем видео")
@@ -1349,7 +1384,7 @@ async def run_render_job(job, style, video_format, lines):
 
             await render_video(
                 job["input"], output_path, job["dir"], words, style,
-                video_format, job["info"], job["duration"], report,
+                video_format, job["info"], job["duration"], report, options,
             )
 
             touch(
@@ -1592,11 +1627,16 @@ async def start_render(
     style: str = Form("viral"),
     video_format: str = Form("9:16"),
     lines: str = Form(""),
+    accent: str = Form(""),
+    size: str = Form("m"),
+    position: str = Form("auto"),
+    subtitles: str = Form("1"),
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
     user = require_user(init_data, x_init_data)
     job = get_job(job_id, user)
+    options = clean_options(accent, size, position, subtitles)
 
     style = clean_style(style)
     video_format = clean_format(video_format)
@@ -1622,7 +1662,7 @@ async def start_render(
             raise HTTPException(status_code=400, detail=error.message)
 
     touch(job, status="rendering", stage="В очереди", progress=0, error=None)
-    spawn(run_render_job(job, style, video_format, parsed_lines))
+    spawn(run_render_job(job, style, video_format, parsed_lines, options))
     return public_job(job)
 
 
