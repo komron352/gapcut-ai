@@ -125,13 +125,14 @@ eBig:"Файл аз 100 MB калон аст.",eLong:"Видео аз 60 сон�
 };
 // style model: mirrors the backend (size, words per phrase, mode)
 const SM={
+keyword:{n:"Keyword",sz:96,w:3,c:26,b:800,m:.20,mode:"key",ol:5,acc:"00FFA3",f:"'Noto Sans',system-ui,sans-serif"},
 viral:{n:"Viral",sz:92,w:2,c:18,up:1,b:800,m:.22,mode:"pop",ol:7,acc:"FFE500",f:"'Noto Sans',system-ui,sans-serif"},
 classic:{n:"Classic",sz:58,w:6,c:38,b:400,m:.14,mode:"plain",ol:4,f:"'DejaVu Sans',system-ui,sans-serif"},
 cinema:{n:"Cinema",sz:56,w:7,c:42,b:400,m:.10,mode:"fade",ol:2,ls:3,f:"'Noto Serif',Georgia,serif"},
 podcast:{n:"Podcast",sz:60,w:4,c:28,b:800,m:.14,mode:"hl",ol:0,box:1,acc:"F5B937",f:"'Noto Sans',system-ui,sans-serif"},
 karaoke:{n:"Karaoke",sz:78,w:4,c:26,b:800,m:.18,mode:"kara",ol:6,acc:"F5B937",f:"'Noto Sans',system-ui,sans-serif"}};
-const SAMPLE={viral:'<b style="color:#ffe500;font-size:21px;text-shadow:0 2px 0 #000">ВИДЕО</b>',classic:'<span style="font-size:15px">Classic</span>',cinema:'<i style="font-family:Georgia,serif;letter-spacing:2px;font-size:16px">Cinema</i>',podcast:'<span style="background:#000;padding:4px 8px;border-radius:6px;font-weight:800;font-size:14px">Pod<b style="color:#f5b937">cast</b></span>',karaoke:'<b style="font-size:18px"><span style="color:#f5b937">Kara</span>oke</b>'};
-const COLORS=["FFE500","38BDF8","A3E635","F472B6","F5B937"];
+const SAMPLE={keyword:'<div style="line-height:1.1"><div style="font-size:10px">самый</div><b style="color:#00ffa3;font-size:19px">ДОРОГОЙ</b></div>',viral:'<b style="color:#ffe500;font-size:21px;text-shadow:0 2px 0 #000">ВИДЕО</b>',classic:'<span style="font-size:15px">Classic</span>',cinema:'<i style="font-family:Georgia,serif;letter-spacing:2px;font-size:16px">Cinema</i>',podcast:'<span style="background:#000;padding:4px 8px;border-radius:6px;font-weight:800;font-size:14px">Pod<b style="color:#f5b937">cast</b></span>',karaoke:'<b style="font-size:18px"><span style="color:#f5b937">Kara</span>oke</b>'};
+const COLORS=["00FFA3","FFE500","38BDF8","A3E635","F472B6","F5B937"];
 const FMT=[["9:16","9:16"],["16:9","16:9"],["1:1","1:1"],["original","Original"]];
 const AR={"9:16":9/16,"16:9":16/9,"1:1":1};
 const SIZEK=["s","m","l"],SIZEM=[.8,1,1.25],POSK=["auto","top","center"];
@@ -199,7 +200,7 @@ function poll(){clearInterval(timer);let fails=0;
 
 // ---- step 2: live preview
 function buildWords(){words=[];lines.forEach(l=>{const tk=l.text.trim().split(/\s+/).filter(Boolean);if(!tk.length)return;
-  if(l.words&&l.words.length===tk.length)tk.forEach((w,i)=>words.push({w,s:l.words[i].start,e:l.words[i].end}));
+  if(l.words&&l.words.length===tk.length)tk.forEach((w,i)=>words.push({w,s:l.words[i].start,e:l.words[i].end,k:l.words[i].key}));
   else{const wt=tk.map(x=>x.length+1),tot=wt.reduce((a,b)=>a+b,0);let c=l.start;tk.forEach((w,i)=>{const d=(l.end-l.start)*wt[i]/tot;words.push({w,s:c,e:c+d});c+=d})}});
   words.sort((a,b)=>a.s-b.s);makePhrases()}
 function makePhrases(){const m=SM[sel.style];phrases=[];let cur=[];
@@ -225,12 +226,19 @@ function drawCap(){
   if(sel.pos===1)cap.style.top="10%";else if(sel.pos===2){cap.style.top="50%";cap.style.transform="translateY(-50%)"}else cap.style.bottom=(ratio*100)+"%";
   let ai=-1;ph.forEach((x,i)=>{if(tm>=x.s)ai=i});
   const col="#"+(sel.accent||"FFFFFF");
-  cap.innerHTML=ph.map((x,i)=>{let w=x.w.replace(/[<>&]/g,"");if(m.up)w=w.toUpperCase();
+  cap.innerHTML=m.mode==="key"?keyHtml(ph,ai,col):ph.map((x,i)=>{let w=x.w.replace(/[<>&]/g,"");if(m.up)w=w.toUpperCase();
     let c="#fff";if((m.mode==="pop"||m.mode==="hl")&&i===ai)c=col;if(m.mode==="kara"&&i<=ai)c=col;
     return '<span style="color:'+c+'">'+w+'</span>'}).join(" ");
   cap.style.background=m.box?"rgba(0,0,0,.72)":"none";cap.style.padding=m.box?".18em .4em":"0";cap.style.borderRadius=m.box?".25em":"0";
   cap.style.left=m.box?"auto":"7%";cap.style.right=m.box?"auto":"7%";
   if(m.box){cap.style.left="50%";cap.style.right="auto";cap.style.width="max-content";cap.style.maxWidth="86%";cap.style.transform=(sel.pos===2?"translate(-50%,-50%)":"translateX(-50%)")}
+}
+function keyHtml(ph,ai,col){
+  const fl=ph.map((x,i)=>x.k?i:-1).filter(i=>i>=0),pool=fl.length?fl:ph.map((_,i)=>i);
+  const ki=pool.reduce((a,b)=>ph[b].w.length>ph[a].w.length?b:a);
+  const esc=x=>x.replace(/[<>&]/g,"");
+  const lead=ph.filter((x,i)=>i!==ki&&i<=ai).map(x=>esc(x.w)).join(" ");
+  return (lead?'<div style="font-size:.52em;color:#fff">'+lead+'</div>':"")+(ki<=ai?'<div style="color:'+col+'">'+esc(ph[ki].w)+'</div>':"");
 }
 function loop(){drawCap();raf=requestAnimationFrame(loop)}
 $("ev").onplay=()=>{cancelAnimationFrame(raf);loop()};
