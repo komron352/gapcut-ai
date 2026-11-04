@@ -34,6 +34,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 import uuid
@@ -95,6 +96,14 @@ GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "1800"))
 MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "4"))
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
+CUSTOM_FONTS_DIR = "/usr/local/share/fonts/gapcut"
+FONT_CANDIDATES = [
+    ("Montserrat", 1), ("Oswald", 1), ("Roboto", 1), ("Inter", 1),
+    ("Open Sans", 1), ("Ubuntu", 1), ("Comfortaa", 1), ("Lobster", 0),
+    ("Bebas Neue", 0), ("Noto Sans", 1), ("Noto Serif", 0), ("DejaVu Sans", 1),
+]
+TAJIK_CHARSET = "493 4e3 49b 4ef 4b3 4b7 492 4e2 49a 4ee 4b2 4b6"
+AVAILABLE_FONTS = [{"family": "DejaVu Sans", "bold": 1}]
 KEYWORDS_LLM = os.getenv("KEYWORDS_LLM", "1").strip() != "0"
 KEYWORD_MODEL = os.getenv("KEYWORD_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -745,6 +754,52 @@ async def transcribe_video(audio_path, work_dir, language, audio_duration, repor
 
 
 # =========================================================
+# FONTS (only fonts that contain all Tajik letters are offered)
+# =========================================================
+
+def fc_families(pattern, want_file=False):
+    fmt = "%{family}|%{file}\n" if want_file else "%{family}\n"
+    result = subprocess.run(
+        ["fc-list", pattern, "-f", fmt],
+        capture_output=True, text=True, timeout=20,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def detect_fonts():
+    found = []
+    seen = set()
+    for family, bold in FONT_CANDIDATES:
+        try:
+            lines = fc_families(f"{family}:charset={TAJIK_CHARSET}")
+        except Exception:
+            continue
+        names = {n.strip().lower() for line in lines for n in line.split(",")}
+        if family.lower() in names and family not in seen:
+            found.append({"family": family, "bold": bold})
+            seen.add(family)
+    try:
+        for line in fc_families(f":charset={TAJIK_CHARSET}", want_file=True):
+            names, _, path = line.partition("|")
+            if path.startswith(CUSTOM_FONTS_DIR):
+                family = names.split(",")[0].strip()
+                if family and family not in seen:
+                    found.append({"family": family, "bold": 0})
+                    seen.add(family)
+    except Exception:
+        pass
+    return found or [{"family": "DejaVu Sans", "bold": 1}]
+
+
+def resolve_font(name):
+    name = (name or "").strip()
+    for item in AVAILABLE_FONTS:
+        if item["family"].lower() == name.lower():
+            return item
+    return None
+
+
+# =========================================================
 # KEYWORDS (emphasis words for the "keyword" style)
 # =========================================================
 
@@ -1100,7 +1155,8 @@ def split_phrases(words, max_words, max_chars, max_gap=0.7):
 
 
 def build_ass(words, style_name, width, height, output_path,
-              accent=None, size="m", position="auto"):
+              accent=None, size="m", position="auto",
+              font=None, font2=None, mix=False):
     style = dict(STYLES.get(style_name, STYLES["viral"]))
     if accent:
         style["active"] = accent
@@ -1131,6 +1187,30 @@ def build_ass(words, style_name, width, height, output_path,
     outline_alpha = style["box_alpha"] if style["border_style"] == 3 else 0
     back_color = ass_color("000000", 0x80)
 
+    main_font = resolve_font(font)
+    base_family = main_font["family"] if main_font else style["font"]
+    base_bold = (
+        style["bold"] and main_font["bold"] if main_font else style["bold"]
+    )
+    cycle = [(base_family, base_bold)]
+    if mix:
+        for item in AVAILABLE_FONTS:
+            if item["family"] != base_family and len(cycle) < 3:
+                cycle.append((item["family"], item["bold"]))
+    accent_font = resolve_font(font2)
+    accent_family = accent_font["family"] if accent_font else None
+    font_tag = f"\\fn{accent_family}" if accent_family else ""
+
+    style_lines = "\n".join(
+        f"Style: F{i},{fam},{font_size},"
+        f"{ass_color(style['primary'])},{ass_color(style['secondary'])},"
+        f"{ass_color(style['outline'], outline_alpha)},{back_color},"
+        f"{bold},0,0,0,100,100,{spacing:.1f},0,"
+        f"{style['border_style']},{outline_w},{shadow},{alignment},"
+        f"{margin_h},{margin_h},{margin_v},1"
+        for i, (fam, bold) in enumerate(cycle)
+    )
+
     header = (
         "[Script Info]\n"
         "Title: GAPCUT AI\n"
@@ -1144,12 +1224,7 @@ def build_ass(words, style_name, width, height, output_path,
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{style['font']},{font_size},"
-        f"{ass_color(style['primary'])},{ass_color(style['secondary'])},"
-        f"{ass_color(style['outline'], outline_alpha)},{back_color},"
-        f"{style['bold']},0,0,0,100,100,{spacing:.1f},0,"
-        f"{style['border_style']},{outline_w},{shadow},{alignment},"
-        f"{margin_h},{margin_h},{margin_v},1\n\n"
+        f"{style_lines}\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
         "Effect, Text\n"
@@ -1164,6 +1239,7 @@ def build_ass(words, style_name, width, height, output_path,
 
     for p_index, phrase in enumerate(phrases):
         phrase_start = phrase[0]["start"]
+        sname = f"F{p_index % len(cycle)}"
         phrase_end = phrase[-1]["end"] + 0.15
         if p_index + 1 < len(phrases):
             phrase_end = min(phrase_end, phrases[p_index + 1][0]["start"] - 0.02)
@@ -1188,18 +1264,18 @@ def build_ass(words, style_name, width, height, output_path,
                     if t_index == w_index:
                         if mode == "pop":
                             tag = (
-                                "{\\1c" + active +
+                                "{\\1c" + active + font_tag +
                                 "\\fscx112\\fscy112"
                                 "\\t(0,110,\\fscx100\\fscy100)}"
                             )
                         else:
-                            tag = "{\\1c" + active + "}"
+                            tag = "{\\1c" + active + font_tag + "}"
                         parts.append(tag + text + "{\\r}")
                     else:
                         parts.append(text)
 
                 events.append(
-                    f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,"
+                    f"Dialogue: 0,{ass_time(start)},{ass_time(end)},{sname},,"
                     f"0,0,0,,{' '.join(parts)}"
                 )
 
@@ -1234,10 +1310,10 @@ def build_ass(words, style_name, width, height, output_path,
                     if w_index == key_idx:
                         pop = "\\fscx60\\fscy60\\t(0,140,\\fscx100\\fscy100)"
                     pieces.append(
-                        f"{{\\fs{key_size}\\1c{key_color}{pop}}}{key_text}"
+                        f"{{\\fs{key_size}\\1c{key_color}{font_tag}{pop}}}{key_text}"
                     )
                 events.append(
-                    f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Default,,"
+                    f"Dialogue: 0,{ass_time(start)},{ass_time(end)},{sname},,"
                     "0,0,0,," + "\\N".join(pieces)
                 )
 
@@ -1252,21 +1328,21 @@ def build_ass(words, style_name, width, height, output_path,
                 parts.append(f"{{\\kf{centis}}}{display(token['word'])}")
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
-                f"Default,,0,0,0,,{' '.join(parts)}"
+                f"{sname},,0,0,0,,{' '.join(parts)}"
             )
 
         elif mode == "fade":
             text = " ".join(display(t["word"]) for t in phrase)
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
-                f"Default,,0,0,0,,{{\\fad(250,200)}}{text}"
+                f"{sname},,0,0,0,,{{\\fad(250,200)}}{text}"
             )
 
         else:
             text = " ".join(display(t["word"]) for t in phrase)
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
-                f"Default,,0,0,0,,{text}"
+                f"{sname},,0,0,0,,{text}"
             )
 
     Path(output_path).write_text(header + "\n".join(events) + "\n", encoding="utf-8")
@@ -1382,6 +1458,9 @@ async def render_video(
             accent=options.get("accent"),
             size=options.get("size", "m"),
             position=options.get("position", "auto"),
+            font=options.get("font"),
+            font2=options.get("font2"),
+            mix=options.get("fontmix", False),
         )
     fonts_option = ""
     if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
@@ -1531,7 +1610,8 @@ def clean_format(video_format):
     return video_format
 
 
-def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1"):
+def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
+                  font="", font2="", fontmix="0"):
     accent = (accent or "").strip().lstrip("#").upper()
     if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
         raise HTTPException(status_code=400, detail="Неверный цвет.")
@@ -1547,6 +1627,9 @@ def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1"):
         "zoom": str(zoom).strip().lower() not in ("0", "false", "off"),
         "fx": str(fx).strip().lower() not in ("0", "false", "off"),
         "sfx": str(sfx).strip().lower() not in ("0", "false", "off"),
+        "font": (resolve_font(font) or {}).get("family"),
+        "font2": (resolve_font(font2) or {}).get("family"),
+        "fontmix": str(fontmix).strip().lower() in ("1", "true", "on"),
     }
 
 
@@ -1758,6 +1841,10 @@ async def lifespan(app_instance):
     shutil.rmtree(BASE_DIR, ignore_errors=True)
     BASE_DIR.mkdir(parents=True, exist_ok=True)
 
+    global AVAILABLE_FONTS
+    AVAILABLE_FONTS = await asyncio.to_thread(detect_fonts)
+    logger.info("Fonts with Tajik letters: %s", [f["family"] for f in AVAILABLE_FONTS])
+
     polling_task = asyncio.create_task(run_polling_forever())
     cleanup_task = asyncio.create_task(cleanup_loop())
 
@@ -1799,6 +1886,11 @@ async def home():
         "max_duration_seconds": MAX_DURATION,
         "processing_concurrency": 1,
     }
+
+
+@app.get("/api/fonts")
+async def list_fonts():
+    return {"fonts": [f["family"] for f in AVAILABLE_FONTS]}
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
@@ -1976,12 +2068,17 @@ async def start_render(
     fx: str = Form("1"),
     sfx: str = Form("1"),
     cards: str = Form("[]"),
+    font: str = Form(""),
+    font2: str = Form(""),
+    fontmix: str = Form("0"),
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
     user = require_user(init_data, x_init_data)
     job = get_job(job_id, user)
-    options = clean_options(accent, size, position, subtitles, zoom, fx, sfx)
+    options = clean_options(
+        accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix
+    )
     try:
         wanted = {int(x) for x in json.loads(cards or "[]")}
     except (ValueError, TypeError):
