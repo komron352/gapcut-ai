@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#07060b">
 <title>GAPCUT AI</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700&family=Oswald:wght@600&family=Roboto:wght@700&family=Inter:wght@700&family=Open+Sans:wght@700&family=Ubuntu:wght@700&family=Comfortaa:wght@700&family=Lobster&display=swap">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:#07060b;--card:#13101f;--line:#2b2545;--pu:#8b5cf6;--pu2:#c026d3;--gold:#f5b937;--tx:#f5f2ff;--mu:#9d97bb;--r:20px}
@@ -83,6 +84,11 @@ details summary{list-style:none;font-weight:800;font-size:16px;display:flex;just
 <section id="s-ed" class="screen">
   <div class="pvbox"><div class="stage" id="stage2"><video id="ev" controls playsinline></video><div id="cap"></div><div class="tag" data-i="live"></div></div></div>
   <div class="card"><h3 data-i="styleT"></h3><div class="car" id="styles"></div></div>
+  <div class="card" id="fontCard" hidden><h3 data-i="fontT"></h3>
+    <div style="margin-bottom:14px"><b data-i="font1"></b><div class="chips" id="fonts1" style="margin-top:10px"></div></div>
+    <div style="margin-bottom:6px"><b data-i="font2"></b><div class="chips" id="fonts2" style="margin-top:10px"></div></div>
+    <div class="row"><b data-i="fmix"></b><button class="sw" id="swMix"></button></div>
+  </div>
   <div class="card">
     <div class="row"><b data-i="subs"></b><button class="sw on" id="swSubs"></button></div>
     <div class="row" id="rowColor"><b data-i="color"></b><div class="dots" id="dots"></div></div>
@@ -118,12 +124,12 @@ const $=id=>document.getElementById(id);
 
 const T={
 ru:{h1:"Автомонтаж с субтитрами",sub:"Загрузите видео — мы распознаем речь и наложим анимированные субтитры.",limits:"до 100 MB · до 60 секунд",pick:"Выбрать видео",speech:"Язык речи",next:"Далее: оформление",
-step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",zoomT:"Зум-акценты",fxT:"Эффекты (глитч)",sfxT:"Звуки (whoosh)",cardsT:"Карточки с фото",
+step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",zoomT:"Зум-акценты",fxT:"Эффекты (глитч)",sfxT:"Звуки (whoosh)",cardsT:"Карточки с фото",fontT:"Шрифты",font1:"Основной шрифт",font2:"Шрифт акцента",fmix:"Микс шрифтов",auto:"Авто",
 done:"Видео готово",doneS:"Проверьте результат и скачайте.",dl:"Скачать",share:"Поделиться",back:"Изменить оформление",again:"Новое видео",
 langs:{tg:"Таджикский",ru:"Русский",tg_ru:"Таджикский + русский"},sizes:["Малый","Средний","Крупный"],poss:["Авто","Сверху","По центру"],up:"Загрузка",
 eBig:"Файл больше 100 MB.",eLong:"Видео длиннее 60 секунд.",eTg:"Откройте приложение через Telegram-бота.",eNet:"Нет связи с сервером. Подождите минуту и попробуйте снова.",eExp:"Сессия истекла. Загрузите видео заново.",eEmpty:"Текст пуст."},
 tg:{h1:"Монтажи худкор бо субтитр",sub:"Видеоро бор кунед — мо нутқро мешиносем ва субтитри аниматсиягӣ мегузорем.",limits:"то 100 MB · то 60 сония",pick:"Видеоро интихоб кунед",speech:"Забони нутқ",next:"Минбаъд: тарроҳӣ",
-step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",zoomT:"Zoom",fxT:"Эффектҳо (глитч)",sfxT:"Садо (whoosh)",cardsT:"Карточкаҳои сурат",
+step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",zoomT:"Zoom",fxT:"Эффектҳо (глитч)",sfxT:"Садо (whoosh)",cardsT:"Карточкаҳои сурат",fontT:"Шрифтҳо",font1:"Шрифти асосӣ",font2:"Шрифти таъкид",fmix:"Омехтаи шрифтҳо",auto:"Худкор",
 done:"Видео омода шуд",doneS:"Натиҷаро бинед ва зеркашӣ кунед.",dl:"Зеркашӣ",share:"Мубодила",back:"Тағйири тарроҳӣ",again:"Видеои нав",
 langs:{tg:"Тоҷикӣ",ru:"Русӣ",tg_ru:"Тоҷикӣ + русӣ"},sizes:["Хурд","Миёна","Калон"],poss:["Худкор","Боло","Миёна"],up:"Бор шуда истодааст",
 eBig:"Файл аз 100 MB калон аст.",eLong:"Видео аз 60 сония дарозтар аст.",eTg:"Барномаро тавассути боти Telegram кушоед.",eNet:"Бо сервер алоқа нест. Як дақиқа интизор шавед ва дубора кӯшиш кунед.",eExp:"Сессия тамом шуд. Видеоро дубора бор кунед.",eEmpty:"Матн холӣ аст."}
@@ -144,8 +150,8 @@ const SIZEK=["s","m","l"],SIZEM=[.8,1,1.25],POSK=["auto","top","center"];
 
 let L=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code==="tg")?"tg":"ru";
 let file=null,objUrl=null,jobId=null,lines=[],words=[],phrases=[],timer=null,blobUrl=null,blobFile=null,vr=.5625,raf=0;
-let cards=[],cardsOn=new Set();
-let sel={zoom:true,fx:true,sfx:true,lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
+let cards=[],cardsOn=new Set(),fontsList=[];
+let sel={font:"",font2:"",mix:false,zoom:true,fx:true,sfx:true,lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
 const t=k=>T[L][k];
 
 function render(){
@@ -162,11 +168,15 @@ function render(){
   $("dots").innerHTML="";
   COLORS.forEach(c=>{const d=document.createElement("button");d.className="dot"+(sel.accent===c?" on":"");d.style.background="#"+c;d.onclick=()=>{sel.accent=c;render()};$("dots").appendChild(d)});
   $("rowColor").style.display=SM[sel.style].acc?"flex":"none";
+  $("fontCard").hidden=fontsList.length<2;
+  fontChips("fonts1","font");fontChips("fonts2","font2");$("swMix").className="sw"+(sel.mix?" on":"");
   $("swSubs").className="sw"+(sel.subs?" on":"");
   [["swZoom","zoom"],["swFx","fx"],["swSfx","sfx"]].forEach(a=>$(a[0]).className="sw"+(sel[a[1]]?" on":""));
   $("szV").textContent=t("sizes")[sel.size];$("psV").textContent=t("poss")[sel.pos];
   fitStage();drawCap();
 }
+function fontChips(id,key){const box=$(id);box.innerHTML="";
+  [["",t("auto")]].concat(fontsList.map(f=>[f,f])).forEach(i=>{const b=document.createElement("button");b.className="chip"+(sel[key]===i[0]?" on":"");b.textContent=i[1];if(i[0])b.style.fontFamily="'"+i[0]+"',system-ui,sans-serif";b.onclick=()=>{sel[key]=i[0];render()};box.appendChild(b)})}
 function chips(id,items,key){const box=$(id);box.innerHTML="";items.forEach(i=>{const b=document.createElement("button");b.className="chip"+(sel[key]===i[0]?" on":"");b.textContent=i[1];b.onclick=()=>{sel[key]=i[0];render()};box.appendChild(b)})}
 function show(id){document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on",s.id===id));window.scrollTo(0,0);render()}
 function toast(m){const e=$("toast");e.textContent=m;e.classList.add("on");clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove("on"),5000)}
@@ -224,7 +234,9 @@ function drawCap(){
   const outW=sel.fmt==="16:9"?1280:720,outH=sel.fmt==="16:9"?720:(sel.fmt==="1:1"?720:1280);
   let bs=Math.min(outW,outH)/720;if(outW>outH)bs*=.8;
   const k=st.clientWidth/outW*bs*SIZEM[sel.size];
-  cap.style.fontSize=k+"px";cap.style.fontFamily=m.f;cap.style.fontWeight=m.b;cap.style.letterSpacing=(m.ls||0)+"em";
+  cap.style.fontSize=k+"px";const fam=x=>"'"+x+"',system-ui,sans-serif",cyc=[sel.font?fam(sel.font):m.f];
+  if(sel.mix)fontsList.filter(f=>f!==sel.font).slice(0,2).forEach(f=>cyc.push(fam(f)));
+  cap.style.fontFamily=cyc[Math.max(0,phrases.indexOf(ph))%cyc.length];cap.style.fontWeight=m.b;cap.style.letterSpacing=(m.ls||0)+"em";
   const o=(m.ol/m.sz)*.7;
   cap.style.textShadow=m.ol?[[o,o],[-o,o],[o,-o],[-o,-o]].map(a=>a[0]+"em "+a[1]+"em 0 #000").join(",")+",0 "+o*1.5+"em "+o*2+"em rgba(0,0,0,.5)":"none";
   const f=m.sz;cap.style.fontSize=(k*f)+"px";
@@ -235,7 +247,7 @@ function drawCap(){
   const col="#"+(sel.accent||"FFFFFF");
   cap.innerHTML=m.mode==="key"?keyHtml(ph,ai,col):ph.map((x,i)=>{let w=x.w.replace(/[<>&]/g,"");if(m.up)w=w.toUpperCase();
     let c="#fff";if((m.mode==="pop"||m.mode==="hl")&&i===ai)c=col;if(m.mode==="kara"&&i<=ai)c=col;
-    return '<span style="color:'+c+'">'+w+'</span>'}).join(" ");
+    const af=(i===ai&&sel.font2&&(m.mode==="pop"||m.mode==="hl"))?";font-family:'"+sel.font2+"'":"";return '<span style="color:'+c+af+'">'+w+'</span>'}).join(" ");
   cap.style.background=m.box?"rgba(0,0,0,.72)":"none";cap.style.padding=m.box?".18em .4em":"0";cap.style.borderRadius=m.box?".25em":"0";
   cap.style.left=m.box?"auto":"7%";cap.style.right=m.box?"auto":"7%";
   if(m.box){cap.style.left="50%";cap.style.right="auto";cap.style.width="max-content";cap.style.maxWidth="86%";cap.style.transform=(sel.pos===2?"translate(-50%,-50%)":"translateX(-50%)")}
@@ -245,7 +257,7 @@ function keyHtml(ph,ai,col){
   const ki=pool.reduce((a,b)=>ph[b].w.length>ph[a].w.length?b:a);
   const esc=x=>x.replace(/[<>&]/g,"");
   const lead=ph.filter((x,i)=>i!==ki&&i<=ai).map(x=>esc(x.w)).join(" ");
-  return (lead?'<div style="font-size:.52em;color:#fff">'+lead+'</div>':"")+(ki<=ai?'<div style="color:'+col+'">'+esc(ph[ki].w)+'</div>':"");
+  return (lead?'<div style="font-size:.52em;color:#fff">'+lead+'</div>':"")+(ki<=ai?'<div style="color:'+col+(sel.font2?";font-family:'"+sel.font2+"'":"")+'">'+esc(ph[ki].w)+'</div>':"");
 }
 function loop(){drawCap();raf=requestAnimationFrame(loop)}
 $("ev").onplay=()=>{cancelAnimationFrame(raf);loop()};
@@ -274,6 +286,7 @@ function showCards(){
     sw.onclick=()=>{cardsOn.has(c.id)?cardsOn.delete(c.id):cardsOn.add(c.id);sw.className="sw"+(cardsOn.has(c.id)?" on":"")};
     r.append(im,d,sw);box.appendChild(r)})}
 $("swSubs").onclick=()=>{sel.subs=!sel.subs;render()};
+$("swMix").onclick=()=>{sel.mix=!sel.mix;render()};
 [["swZoom","zoom"],["swFx","fx"],["swSfx","sfx"]].forEach(a=>$(a[0]).onclick=()=>{sel[a[1]]=!sel[a[1]];render()});
 const stp=(id,key,max)=>{$(id+"L").onclick=()=>{sel[key]=(sel[key]+max-1)%max;render()};$(id+"R").onclick=()=>{sel[key]=(sel[key]+1)%max;render()}};
 stp("sz","size",3);stp("ps","pos",3);
@@ -286,7 +299,7 @@ $("makeBtn").onclick=async()=>{
   fd.append("lines",JSON.stringify(payload));fd.append("subtitles",sel.subs?"1":"0");
   fd.append("size",SIZEK[sel.size]);fd.append("position",POSK[sel.pos]);
   if(SM[sel.style].acc&&sel.accent)fd.append("accent",sel.accent);
-  fd.append("zoom",sel.zoom?"1":"0");fd.append("fx",sel.fx?"1":"0");fd.append("sfx",sel.sfx?"1":"0");fd.append("cards",JSON.stringify([...cardsOn]));
+  fd.append("font",sel.font);fd.append("font2",sel.font2);fd.append("fontmix",sel.mix?"1":"0");fd.append("zoom",sel.zoom?"1":"0");fd.append("fx",sel.fx?"1":"0");fd.append("sfx",sel.sfx?"1":"0");fd.append("cards",JSON.stringify([...cardsOn]));
   fd.append("init_data",initData);
   show("s-pr");setP(0,"");
   try{await req("POST","/api/jobs/"+jobId+"/render",fd);poll.rendering=true;poll()}catch(e){toast(e.msg);show("s-ed")}};
@@ -308,6 +321,7 @@ $("newBtn").onclick=resetAll;
 
 render();
 fetch(API+"/health").catch(()=>{});
+fetch(API+"/api/fonts").then(r=>r.json()).then(j=>{fontsList=j.fonts||[];render()}).catch(()=>{});
 </script>
 </body>
 </html>
