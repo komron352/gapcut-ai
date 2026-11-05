@@ -1,273 +1,2431 @@
-import os, re, json, time, uuid, shutil, asyncio, tempfile, subprocess, logging, hmac, hashlib
+"""
+GAPCUT AI 3.0.0 - backend + Telegram bot.
+
+Stage 1 (backend only). web/index.html is NOT changed by this file.
+
+Compatible endpoints
+--------------------
+GET  /                      service info
+GET  /health                health check (also HEAD)
+POST /api/process           one-shot mode used by the existing Mini App
+                            (form fields: file, style, language,
+                             video_format, init_data)  -> MP4
+
+New endpoints (async jobs with progress + editable transcript)
+--------------------------------------------------------------
+POST   /api/jobs                 form: file, language, init_data -> {job_id}
+GET    /api/jobs/{id}            status, progress, editable lines
+POST   /api/jobs/{id}/render     form: style, video_format, lines (JSON, optional),
+                                 accent (RRGGBB), size (s|m|l),
+                                 position (auto|top|center), subtitles (1|0),
+                                 init_data
+GET    /api/jobs/{id}/download   final MP4
+DELETE /api/jobs/{id}            remove the job and its files
+
+init_data may be sent as a form field or as the X-Init-Data header
+(GET/DELETE use the header, download also accepts ?init_data=).
+"""
+
+import asyncio
+import difflib
+import hashlib
+import hmac
+import json
+import logging
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+import uuid
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from urllib.parse import parse_qsl
-from contextlib import asynccontextmanager
-import httpx, uvicorn
+
+import httpx
+import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.filters import Command, CommandStart
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    WebAppInfo,
+)
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
+
+
+# =========================================================
+# CONFIG
+# =========================================================
 
 load_dotenv()
-VERSION="4.0.0"
-BOT_TOKEN=os.getenv("BOT_TOKEN","")
-GROQ_API_KEY=os.getenv("GROQ_API_KEY","")
-PORT=int(os.getenv("PORT","10000"))
-APP_URL=os.getenv("MINI_APP_URL","https://gapcut-ai-web.vercel.app")
-SUPPORT=os.getenv("SUPPORT_URL","https://t.me/aikomron")
-CHANNEL=os.getenv("CHANNEL_URL","https://t.me/gapcutai")
-GROQ="https://api.groq.com/openai/v1"
-WHISPER=os.getenv("WHISPER_MODEL","whisper-large-v3-turbo")
-LLM=os.getenv("TEXT_MODEL","llama-3.3-70b-versatile")
-MAX_INPUT=100*1024*1024
-MAX_OUTPUT=150*1024*1024
-MAX_DURATION=int(os.getenv("MAX_DURATION","180"))
-ROOT=Path(tempfile.gettempdir())/"gapcut4"; ROOT.mkdir(exist_ok=True)
-logging.basicConfig(level=logging.INFO)
-log=logging.getLogger("gapcut")
-bot=Bot(BOT_TOKEN,default=DefaultBotProperties(parse_mode=ParseMode.HTML)) if BOT_TOKEN else None
-dp=Dispatcher()
-JOBS={}
-TASKS={}
-LOCK=asyncio.Lock()
-STYLES={"viral":(58,1),"classic":(48,0),"cinema":(50,1),"podcast":(48,1),"karaoke":(56,1),"creator":(54,1),"minimal":(44,0)}
-FORMATS={"9:16":(1080,1920),"16:9":(1920,1080),"1:1":(1080,1080)}
-FONTS=["DejaVu Sans","DejaVu Sans Condensed","Liberation Sans","Noto Sans"]
 
-def cmd(args,timeout=900):
-    p=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=timeout)
-    if p.returncode: raise RuntimeError((p.stderr or "FFmpeg error")[-2500:])
-    return p.stdout
+VERSION = "3.0.0"
 
-def auth(init):
-    if not BOT_TOKEN or not init: raise HTTPException(401,"Telegram initData лозим аст.")
-    v=dict(parse_qsl(init,keep_blank_values=True)); received=v.pop("hash","")
-    check="\n".join(f"{k}={val}" for k,val in sorted(v.items()))
-    secret=hmac.new(b"WebAppData",BOT_TOKEN.encode(),hashlib.sha256).digest()
-    expected=hmac.new(secret,check.encode(),hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(received,expected): raise HTTPException(401,"Telegram auth нодуруст аст.")
-    if time.time()-int(v.get("auth_date","0"))>86400: raise HTTPException(401,"Сессия гузаштааст.")
-    try:return str(json.loads(v["user"])["id"])
-    except Exception:raise HTTPException(401,"Маълумоти Telegram нодуруст аст.")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+PORT = int(os.getenv("PORT", "10000"))
 
-async def groq(endpoint,data=None,files=None,timeout=240):
-    if not GROQ_API_KEY: raise RuntimeError("GROQ_API_KEY дар Render насб нашудааст.")
-    async with httpx.AsyncClient(timeout=timeout) as c:
-        r=await c.post(GROQ+"/"+endpoint,headers={"Authorization":"Bearer "+GROQ_API_KEY},data=data,files=files)
-    if r.status_code>=400: raise RuntimeError(f"Groq {r.status_code}: {r.text[:1000]}")
-    return r.json()
+MINI_APP_URL = os.getenv("WEB_APP_URL", "https://gapcut-ai-web.vercel.app").strip()
+SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/aikomron").strip()
+CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/gapcutai").strip()
 
-def probe(path):
-    raw=cmd(["ffprobe","-v","error","-show_entries","format=duration:stream=codec_type,width,height","-of","json",str(path)],60)
-    d=json.loads(raw); s=d.get("streams",[])
-    v=next((x for x in s if x.get("codec_type")=="video"),None)
-    if not v: raise ValueError("Файл видеои дуруст нест.")
-    return {"duration":float(d["format"]["duration"]),"w":int(v["width"]),"h":int(v["height"]),
-            "audio":any(x.get("codec_type")=="audio" for x in s)}
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", MINI_APP_URL).split(",")
+    if origin.strip()
+]
 
-async def transcribe(path):
-    wav=path.parent/"audio.wav"
-    cmd(["ffmpeg","-y","-i",str(path),"-vn","-ac","1","-ar","16000","-c:a","pcm_s16le",str(wav)],300)
-    if wav.stat().st_size>24*1024*1024:
-        mp3=path.parent/"audio.mp3"; cmd(["ffmpeg","-y","-i",str(wav),"-b:a","48k",str(mp3)],300); wav=mp3
-    with wav.open("rb") as f:
-        data=await groq("audio/transcriptions",{"model":WHISPER,"response_format":"verbose_json",
-            "timestamp_granularities[]":"word","prompt":"Transcribe exactly in Tajik Cyrillic or Russian, including mixed speech. Preserve ғ ӣ қ ӯ ҳ ҷ. Do not translate."},
-            {"file":(wav.name,f,"audio/wav")})
-    words=[]
-    for x in data.get("words",[]):
-        t=str(x.get("word","")).strip()
-        if t: words.append({"word":t,"start":max(0,float(x.get("start",0))),"end":max(.1,float(x.get("end",.1))),"key":False})
-    if not words:
-        for i,t in enumerate(data.get("text","").split()): words.append({"word":t,"start":i*.4,"end":i*.4+.35,"key":False})
-    return words
+GROQ_MODEL = "whisper-large-v3-turbo"
+GROQ_MODEL_BEST = os.getenv("GROQ_MODEL_BEST", "whisper-large-v3").strip()
+GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
-async def correct(words):
-    if not words:return words
-    original=" ".join(w["word"] for w in words)
-    prompt=("Correct only obvious Tajik/Russian ASR spelling and punctuation. Keep original meaning, "
-            "word order, language switching, names. Do not translate or add/remove words. Preserve Tajik ғ ӣ қ ӯ ҳ ҷ. Return only text.")
-    try:
-        r=await groq("chat/completions",data={"model":LLM,"temperature":"0.1",
-            "messages":json.dumps([{"role":"system","content":prompt},{"role":"user","content":original}],ensure_ascii=False)},timeout=90)
-        tokens=r["choices"][0]["message"]["content"].strip().split()
-        if len(tokens)==len(words): return [{**w,"word":t} for w,t in zip(words,tokens)]
-    except Exception as e: log.warning("Correction skipped: %s",e)
-    return words
+# Render Free: conservative limits.
+MAX_INPUT_SIZE = 100 * 1024 * 1024
+MAX_OUTPUT_SIZE = 150 * 1024 * 1024
+MAX_DURATION = 60
+UPLOAD_CHUNK_SIZE = 256 * 1024
+GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 
-def groups(words):
-    result=[]; cur=[]
-    for w in words:
-        if cur and (len(cur)>=5 or w["end"]-cur[0]["start"]>2.7 or w["start"]-cur[-1]["end"]>.65):
-            result.append(cur);cur=[]
-        cur.append(w)
-        if re.search(r"[.!?…]$",w["word"]):result.append(cur);cur=[]
-    if cur:result.append(cur)
-    return result
+JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "1800"))
+MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "4"))
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
+CUSTOM_FONTS_DIR = "/usr/local/share/fonts/gapcut"
+FONT_CANDIDATES = [
+    ("Montserrat", 1), ("Oswald", 1), ("Roboto", 1), ("Inter", 1),
+    ("Open Sans", 1), ("Ubuntu", 1), ("Comfortaa", 1), ("Lobster", 0),
+    ("Bebas Neue", 0), ("Noto Sans", 1), ("Noto Serif", 0), ("DejaVu Sans", 1),
+]
+TAJIK_CHARSET = "493 4e3 49b 4ef 4b3 4b7 492 4e2 49a 4ee 4b2 4b6"
+AVAILABLE_FONTS = [{"family": "DejaVu Sans", "bold": 1}]
+KEYWORDS_LLM = os.getenv("KEYWORDS_LLM", "1").strip() != "0"
+KEYWORD_MODEL = os.getenv("KEYWORD_MODEL", "llama-3.3-70b-versatile").strip()
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+FFMPEG_PRESET = os.getenv("FFMPEG_PRESET", "ultrafast").strip() or "ultrafast"
 
-def atime(s):
-    n=max(0,int(s*100));return f"{n//360000}:{(n//6000)%60:02}:{(n//100)%60:02}.{n%100:02}"
+BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
+FONTS_DIR = Path(os.getenv("FONTS_DIR", str(Path(__file__).resolve().parent / "fonts")))
 
-def ass_file(words,opt,info,path):
-    fmt=opt["format"]; tw,th=FORMATS.get(fmt,(info["w"],info["h"]))
-    size=max(24,min(90,int(opt["font_size"])))
-    align=8 if opt["position"]=="top" else 2
-    margin=int(th*.13)
-    style=STYLES[opt["style"]]
-    primary=opt["color"]; accent=opt["accent"]
-    out=["[Script Info]","ScriptType: v4.00+","WrapStyle: 2",f"PlayResX: {tw}",f"PlayResY: {th}","",
-    "[V4+ Styles]","Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    f"Style: Default,{opt['font']},{size},{primary},&H000000FF,&H00000000,&H80000000,{style[1]},0,1,3,1,{align},50,50,{margin},1","",
-    "[Events]","Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
-    for line in groups(words):
-        text=[]
-        for w in line:
-            t=w["word"].replace("\\",r"\\").replace("{",r"\{").replace("}",r"\}")
-            if re.search(r"\d|[A-ZА-ЯҒӢҚӮҲҶ]{2,}",t):
-                text.append(r"{\c"+accent+r"\b1}"+t+r"{\c"+primary+r"\b1}")
-            else:text.append(t)
-        caption=" ".join(text)
-        if opt["style"] in ("viral","creator","karaoke"):caption=r"{\fad(90,70)\fscx96\t(0,120,\fscx104)}"+caption
-        elif opt["style"]=="cinema":caption=r"{\fad(180,180)}"+caption
-        out.append(f"Dialogue: 0,{atime(line[0]['start'])},{atime(max(line[-1]['end'],line[0]['start']+.15))},Default,,0,0,0,,{caption}")
-    path.write_text("\n".join(out),encoding="utf-8-sig")
-    return tw,th,path
+ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+ALLOWED_STYLES = {"viral", "classic", "cinema", "podcast", "karaoke", "creator", "keyword"}
+ALLOWED_FORMATS = {"9:16", "16:9", "1:1", "original"}
+ALLOWED_LANGUAGES = {"tg", "ru", "tg_ru"}
+LANGUAGE_ALIASES = {"both": "tg_ru", "tg+ru": "tg_ru", "tg-ru": "tg_ru"}
 
-def render(job):
-    src=job["input"]; out=job["dir"]/"GAPCUT_AI_4_PRO.mp4";opt=job["options"];info=job["info"]
-    tw,th,ass=ass_file(job["words"],opt,info,job["dir"]/"subs.ass")
-    ap=str(ass).replace("\\","/").replace(":","\\:")
-    filt=f"scale={tw}:{th}:force_original_aspect_ratio=increase,crop={tw}:{th},setsar=1,fps=30"
-    if opt["zoom"]:filt+=",scale=iw*1.025:ih*1.025,crop=iw/1.025:ih/1.025"
-    if opt["flash"]:filt+=",eq=contrast=1.04:saturation=1.10"
-    if opt["subtitles"]:filt+=f",subtitles='{ap}'"
-    args=["ffmpeg","-y","-i",str(src),"-vf",filt,"-c:v","libx264","-preset",os.getenv("FFMPEG_PRESET","veryfast"),
-          "-crf","21","-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-movflags","+faststart",str(out)]
-    cmd(args,1200)
-    if out.stat().st_size>MAX_OUTPUT:raise RuntimeError("Файли натиҷа аз 150 MB зиёд шуд.")
-    return out
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("gapcut-ai")
 
-def pub(j):
-    return {k:j.get(k) for k in ("id","status","progress","message","transcript","words","duration","error")}
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN не указан в Environment Variables.")
+if not GROQ_API_KEY:
+    logger.warning("GROQ_API_KEY не указан: распознавание речи работать не будет.")
 
-async def transcribe_job(j):
-    try:
-        j.update(status="transcribing",progress=10,message="Шинохти овоз...")
-        async with LOCK: words=await transcribe(j["input"])
-        j["progress"]=65;j["message"]="Ислоҳи имло..."
-        words=await correct(words);j["words"]=words;j["transcript"]=" ".join(x["word"] for x in words)
-        j.update(status="ready",progress=100,message="Матн тайёр аст. Санҷ ва монтажро оғоз кун.")
-    except Exception as e:
-        log.exception("Transcription error");j.update(status="error",error=str(e)[:1200],message="Хатогӣ дар шинохти овоз.")
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher()
 
-async def render_job(j):
-    try:
-        j.update(status="rendering",progress=8,message="Монтаж сар шуд...")
-        async with LOCK: out=await asyncio.to_thread(render,j)
-        j["output"]=str(out);j.update(status="done",progress=100,message="Видео тайёр аст!")
-    except Exception as e:
-        log.exception("Render error");j.update(status="error",error=str(e)[-1200:],message="Хатогӣ дар монтаж.")
+# Only one heavy job (transcription or render) at a time on a small server.
+PROCESS_LOCK = asyncio.Lock()
 
-def task(coro,jid):
-    t=asyncio.create_task(coro);TASKS[jid]=t;t.add_done_callback(lambda _:TASKS.pop(jid,None))
 
-@asynccontextmanager
-async def lifespan(app):
-    Path(ROOT).mkdir(exist_ok=True)
-    if bot:asyncio.create_task(dp.start_polling(bot))
-    yield
-    if bot:await bot.session.close()
+class UserError(Exception):
+    """Error whose message is safe to show to the user."""
 
-app=FastAPI(title="GAPCUT AI 4.0 PRO AUTO",version=VERSION,lifespan=lifespan)
-origins=[x.strip() for x in os.getenv("ALLOWED_ORIGINS",APP_URL).split(",") if x.strip()]
-app.add_middleware(CORSMiddleware,allow_origins=origins or ["*"],allow_methods=["*"],allow_headers=["*"])
+    def __init__(self, message, status_code=400):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
 
-def get_user(authorization):return auth((authorization or "").removeprefix("tma "))
-def owned(jid,uid):
-    j=JOBS.get(jid)
-    if not j:raise HTTPException(404,"Лоиҳа ёфт нашуд.")
-    if j["user"]!=uid:raise HTTPException(403,"Дастрасӣ манъ аст.")
-    return j
 
-@app.get("/")
-async def home():return {"name":"GAPCUT AI","version":VERSION,"status":"online"}
-@app.get("/health")
-async def health():return {"ok":True,"version":VERSION,"ffmpeg":bool(shutil.which("ffmpeg")),"groq":bool(GROQ_API_KEY)}
-@app.get("/api/fonts")
-async def fonts():return {"fonts":FONTS}
+# =========================================================
+# TELEGRAM BOT
+# =========================================================
 
-@app.post("/api/jobs")
-async def create(file:UploadFile=File(...),authorization:str|None=Header(default=None),
- style:str=Form("viral"),format:str=Form("9:16"),language:str=Form("both"),font:str=Form("DejaVu Sans"),
- font_size:int=Form(54),position:str=Form("bottom"),color:str=Form("&H00FFFFFF"),accent:str=Form("&H0000D7FF"),
- zoom:str=Form("true"),flash:str=Form("false"),cards:str=Form("false"),subtitles:str=Form("true")):
-    uid=get_user(authorization)
-    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):raise HTTPException(503,"FFmpeg дар сервер насб нест.")
-    if Path(file.filename or "").suffix.lower() not in {".mp4",".mov",".mkv",".webm",".m4v"}:raise HTTPException(400,"Формати видео нодуруст аст.")
-    jid=uuid.uuid4().hex[:12];folder=ROOT/jid;folder.mkdir()
-    src=folder/("input"+Path(file.filename).suffix.lower());total=0
-    try:
-        with src.open("wb") as f:
-            while chunk:=await file.read(1024*1024):
-                total+=len(chunk)
-                if total>MAX_INPUT:raise HTTPException(413,"Видео аз 100 MB зиёд аст.")
-                f.write(chunk)
-        info=await asyncio.to_thread(probe,src)
-        if info["duration"]<=0 or info["duration"]>MAX_DURATION:raise HTTPException(400,f"Видео бояд то {MAX_DURATION} сония бошад.")
-        style=style if style in STYLES else "viral";format=format if format in {*FORMATS,"original"} else "9:16"
-        language=language if language in {"tg","ru","both","auto"} else "both"
-        color=color if re.fullmatch(r"&H[0-9A-Fa-f]{8}",color) else "&H00FFFFFF"
-        accent=accent if re.fullmatch(r"&H[0-9A-Fa-f]{8}",accent) else "&H0000D7FF"
-        opt={"style":style,"format":format,"language":language,"font":font if font in FONTS else "DejaVu Sans",
-             "font_size":max(24,min(90,font_size)),"position":position if position in {"top","bottom"} else "bottom",
-             "color":color,"accent":accent,"zoom":zoom.lower() not in {"false","0"},
-             "flash":flash.lower() in {"true","1"},"subtitles":subtitles.lower() not in {"false","0"}}
-        j={"id":jid,"user":uid,"dir":folder,"input":src,"info":info,"duration":info["duration"],"options":opt,
-           "status":"queued","progress":0,"message":"Видео қабул шуд.","created":time.time(),"words":[],"transcript":""}
-        JOBS[jid]=j;task(transcribe_job(j),jid);return pub(j)
-    except Exception:
-        shutil.rmtree(folder,ignore_errors=True);raise
+def main_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎬 Монтаж",
+                    web_app=WebAppInfo(url=MINI_APP_URL),
+                )
+            ],
+            [
+                InlineKeyboardButton(text="💬 Поддержка", url=SUPPORT_URL),
+                InlineKeyboardButton(text="📢 Наш канал", url=CHANNEL_URL),
+            ],
+        ]
+    )
 
-@app.get("/api/jobs/{jid}")
-async def status(jid:str,authorization:str|None=Header(default=None)):
-    return pub(owned(jid,get_user(authorization)))
-
-@app.post("/api/jobs/{jid}/render")
-async def start_render(jid:str,authorization:str|None=Header(default=None),transcript:str=Form("")):
-    j=owned(jid,get_user(authorization))
-    if j["status"]!="ready":raise HTTPException(409,"Шинохти овоз ҳоло анҷом наёфтааст.")
-    if transcript.strip():
-        old=j["words"];tokens=transcript.split()
-        if len(tokens)==len(old):j["words"]=[{**w,"word":t} for w,t in zip(old,tokens)]
-        else:
-            n=len(tokens);dur=j["duration"]
-            j["words"]=[{"word":t,"start":i*dur/n,"end":min(dur,(i+1)*dur/n-.01),"key":False} for i,t in enumerate(tokens)]
-    task(render_job(j),jid);return pub(j)
-
-@app.get("/api/jobs/{jid}/download")
-async def download(jid:str,authorization:str|None=Header(default=None)):
-    j=owned(jid,get_user(authorization));p=j.get("output")
-    if j["status"]!="done" or not p or not Path(p).exists():raise HTTPException(409,"Видео ҳоло тайёр нест.")
-    return FileResponse(p,media_type="video/mp4",filename="GAPCUT_AI_4_PRO.mp4")
-
-@app.delete("/api/jobs/{jid}")
-async def delete(jid:str,authorization:str|None=Header(default=None)):
-    j=owned(jid,get_user(authorization))
-    if jid in TASKS:TASKS[jid].cancel()
-    shutil.rmtree(j["dir"],ignore_errors=True);JOBS.pop(jid,None);return {"ok":True}
 
 @dp.message(CommandStart())
-async def start(message:Message):
-    kb=InlineKeyboardMarkup(inline_keyboard=[
-      [InlineKeyboardButton(text="🎬 Оғози монтаж",web_app=WebAppInfo(url=APP_URL))],
-      [InlineKeyboardButton(text="📢 Канал",url=CHANNEL),InlineKeyboardButton(text="💬 Дастгирӣ",url=SUPPORT)]])
-    await message.answer("<b>GAPCUT AI 4.0 PRO AUTO</b>\n\nВидео бор кун ва монтажро ба AI супор.",reply_markup=kb)
-@dp.message(F.video|F.document)
-async def video_hint(message:Message):
-    await message.answer("Барои монтаж тугмаи «Оғози монтаж»-ро пахш кун.")
-if __name__=="__main__":uvicorn.run("bot:app",host="0.0.0.0",port=PORT)
+async def start_handler(message: Message):
+    text = (
+        "🎬 <b>GAPCUT AI</b>\n\n"
+        "Автоматические субтитры для ваших видео.\n\n"
+        "✨ Распознавание речи: таджикский, русский и смешанная речь\n"
+        "🎨 5 стилей субтитров\n"
+        "📱 Форматы Reels, TikTok и YouTube\n\n"
+        "📦 Максимальный размер: 100 MB\n"
+        "⏱ Максимальная длительность: 60 секунд\n\n"
+        "Нажмите «Монтаж», чтобы начать."
+    )
+    await message.answer(text, reply_markup=main_keyboard())
+
+
+@dp.message(Command("help"))
+async def help_handler(message: Message):
+    text = (
+        "ℹ️ <b>GAPCUT AI — Помощь</b>\n\n"
+        "1. Нажмите «Монтаж».\n"
+        "2. Выберите видео.\n"
+        "3. Выберите язык, стиль и формат.\n"
+        "4. Запустите обработку.\n\n"
+        "📦 Максимальный размер: 100 MB\n"
+        "⏱ Максимальная длительность: 60 секунд\n\n"
+        f"💬 Поддержка: {SUPPORT_URL}\n"
+        f"📢 Канал: {CHANNEL_URL}"
+    )
+    await message.answer(text, reply_markup=main_keyboard())
+
+
+@dp.message(F.video | F.document)
+async def video_handler(message: Message):
+    media = message.video or message.document
+
+    if message.document:
+        mime = message.document.mime_type or ""
+        if not mime.startswith("video/"):
+            await message.answer("Пожалуйста, отправьте видеофайл.")
+            return
+
+    if media.file_size and media.file_size > MAX_INPUT_SIZE:
+        await message.answer("Размер видео не должен превышать 100 MB.")
+        return
+
+    await message.answer(
+        "✅ Видео получено.\n\n"
+        "Откройте Mini App, чтобы выбрать язык, стиль субтитров "
+        "и запустить обработку.",
+        reply_markup=main_keyboard(),
+    )
+
+
+async def run_polling_forever():
+    """Telegram polling that never takes the HTTP API down with it."""
+    while True:
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+            await dp.start_polling(bot, handle_signals=False)
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Telegram polling stopped, restarting in 5 s")
+            await asyncio.sleep(5)
+
+
+# =========================================================
+# TELEGRAM MINI APP AUTH
+# =========================================================
+
+def validate_telegram_init_data(init_data):
+    if not init_data:
+        return None
+
+    try:
+        parsed = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = parsed.pop("hash", None)
+        if not received_hash:
+            return None
+
+        data_check_string = "\n".join(
+            f"{key}={value}" for key, value in sorted(parsed.items())
+        )
+
+        secret_key = hmac.new(
+            b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256
+        ).digest()
+        calculated_hash = hmac.new(
+            secret_key, data_check_string.encode(), hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(calculated_hash, received_hash):
+            return None
+
+        auth_date = int(parsed.get("auth_date", "0"))
+        now = int(time.time())
+        if auth_date <= 0 or auth_date > now + 60 or now - auth_date > 86400:
+            return None
+
+        user = json.loads(parsed.get("user", "{}"))
+        if not isinstance(user, dict) or not user.get("id"):
+            return None
+
+        return user
+    except Exception:
+        logger.exception("Telegram initData validation error")
+        return None
+
+
+def require_user(*candidates):
+    for value in candidates:
+        user = validate_telegram_init_data(value)
+        if user:
+            return user
+    raise HTTPException(
+        status_code=401,
+        detail="Откройте Mini App через Telegram-бота.",
+    )
+
+
+# =========================================================
+# PROCESS HELPERS (FFmpeg / FFprobe)
+# =========================================================
+
+async def run_command(command, timeout=300, cwd=None, capture=False):
+    """Run a command; stderr goes to a temp file (small RAM footprint)."""
+    with tempfile.TemporaryFile(mode="w+b") as error_file:
+        process = await asyncio.create_subprocess_exec(
+            *[str(part) for part in command],
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=error_file,
+            cwd=str(cwd) if cwd else None,
+        )
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise UserError(
+                "Время обработки видео истекло. Попробуйте более короткое видео.",
+                504,
+            )
+
+        error_file.seek(0, os.SEEK_END)
+        size = error_file.tell()
+        error_file.seek(max(0, size - (200000 if capture else 3000)))
+        error_text = error_file.read().decode("utf-8", errors="replace")
+
+    if process.returncode != 0:
+        logger.error("Command failed (%s): %s", command[0], error_text[-3000:])
+        raise UserError(
+            "Ошибка FFmpeg. Проверьте видео и попробуйте другой файл.", 500
+        )
+
+    return error_text
+
+
+async def get_video_info(video_path):
+    process = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "error",
+        "-show_format", "-show_streams",
+        "-of", "json",
+        str(video_path),
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise UserError("Не удалось прочитать видеофайл.")
+
+    if process.returncode != 0:
+        raise UserError("Не удалось прочитать видеофайл. Проверьте формат.")
+
+    try:
+        info = json.loads(stdout.decode("utf-8"))
+        duration = float(info.get("format", {}).get("duration", 0))
+    except (ValueError, TypeError):
+        raise UserError("Не удалось определить длительность видео.")
+
+    if duration <= 0:
+        raise UserError("Не удалось определить длительность видео.")
+
+    return info, duration
+
+
+def probe_summary(info):
+    """Return (has_video, has_audio, display_width, display_height)."""
+    has_audio = False
+    video = None
+
+    for stream in info.get("streams", []):
+        kind = stream.get("codec_type")
+        if kind == "audio":
+            has_audio = True
+        elif kind == "video" and video is None:
+            if stream.get("disposition", {}).get("attached_pic") == 1:
+                continue
+            video = stream
+
+    if video is None:
+        return False, has_audio, 0, 0
+
+    width = int(video.get("width") or 0)
+    height = int(video.get("height") or 0)
+
+    rotation = 0
+    tags = video.get("tags") or {}
+    if "rotate" in tags:
+        with suppress(ValueError, TypeError):
+            rotation = int(float(tags["rotate"]))
+    for side in video.get("side_data_list") or []:
+        if "rotation" in side:
+            with suppress(ValueError, TypeError):
+                rotation = int(float(side["rotation"]))
+
+    if abs(rotation) % 180 == 90:
+        width, height = height, width
+
+    return True, has_audio, width, height
+
+
+def even(value):
+    value = int(round(value))
+    return max(2, value - (value % 2))
+
+
+def get_output_size(video_format, display_width, display_height):
+    if video_format == "9:16":
+        return 720, 1280
+    if video_format == "16:9":
+        return 1280, 720
+    if video_format == "1:1":
+        return 720, 720
+
+    # original: keep the aspect ratio, never upscale, fit in 1280x1280.
+    width = display_width or 720
+    height = display_height or 1280
+    factor = min(1.0, 1280 / width, 1280 / height)
+    return even(width * factor), even(height * factor)
+
+
+def get_video_filter(video_format, width, height):
+    if video_format == "original":
+        return f"scale={width}:{height},setsar=1"
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},setsar=1"
+    )
+
+
+# =========================================================
+# SPEECH RECOGNITION (Groq Whisper)
+# =========================================================
+
+TG_PROMPT = "Салом! Имрӯз мо бо забони тоҷикӣ сӯҳбат мекунем."
+RU_PROMPT = "Привет! Сегодня мы говорим по-русски."
+TG_LETTERS = set("ғӣқӯҳҷҒӢҚӮҲҶ")
+
+
+async def extract_audio(video_path, audio_path, work_dir):
+    await run_command(
+        [
+            "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-threads", "1",
+            "-i", str(video_path),
+            "-map", "0:a:0",
+            "-vn",
+            "-ac", "1",
+            "-ar", "16000",
+            "-b:a", "48k",
+            "-t", str(MAX_DURATION),
+            "-c:a", "libmp3lame",
+            str(audio_path),
+        ],
+        timeout=180,
+        cwd=work_dir,
+    )
+
+    if not Path(audio_path).exists() or Path(audio_path).stat().st_size == 0:
+        raise UserError("Не удалось извлечь звук из видео.", 500)
+
+    if Path(audio_path).stat().st_size > GROQ_MAX_AUDIO_SIZE:
+        raise UserError("Аудиофайл превышает установленный лимит Groq.", 413)
+
+
+async def groq_transcribe(client, audio_path, language, prompt, model=None):
+    data = {
+        "model": model or GROQ_MODEL,
+        "response_format": "verbose_json",
+        "temperature": "0",
+        "timestamp_granularities[]": ["word", "segment"],
+    }
+    if language:
+        data["language"] = language
+    if prompt:
+        data["prompt"] = prompt
+
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+    last_status = None
+
+    for attempt in range(1, 4):
+        with open(audio_path, "rb") as audio_file:
+            response = await client.post(
+                GROQ_URL,
+                headers=headers,
+                data=data,
+                files={"file": (Path(audio_path).name, audio_file, "audio/mpeg")},
+            )
+
+        last_status = response.status_code
+
+        if response.status_code == 200:
+            return response.json()
+
+        logger.error(
+            "Groq API error %s (attempt %s): %s",
+            response.status_code, attempt, response.text[:800],
+        )
+
+        if (
+            response.status_code in (400, 404)
+            and data["model"] != GROQ_MODEL
+            and "model" in response.text.lower()
+        ):
+            data["model"] = GROQ_MODEL  # the better model is unavailable
+            continue
+
+        if (
+            response.status_code == 400
+            and "language" in data
+            and "language" in response.text.lower()
+        ):
+            # The language code was rejected: retry with auto-detection.
+            data.pop("language", None)
+            continue
+
+        if response.status_code in (429, 500, 502, 503, 504) and attempt < 3:
+            retry_after = response.headers.get("retry-after", "")
+            try:
+                delay = min(20.0, max(1.0, float(retry_after)))
+            except ValueError:
+                delay = 2.0 * attempt
+            await asyncio.sleep(delay)
+            continue
+
+        break
+
+    if last_status in (401, 403):
+        raise UserError("Ключ Groq API неверный или не имеет доступа.", 502)
+    if last_status == 429:
+        raise UserError("Лимит Groq API исчерпан. Попробуйте через минуту.", 503)
+    raise UserError("Ошибка распознавания речи. Попробуйте позже.", 502)
+
+
+def normalize_words(words):
+    """Sort, drop empty tokens and make timings monotonic."""
+    cleaned = []
+    for item in words:
+        word = str(item.get("word", "")).strip()
+        if not word:
+            continue
+        try:
+            start = max(0.0, float(item.get("start", 0)))
+            end = float(item.get("end", start + 0.2))
+        except (TypeError, ValueError):
+            continue
+        entry = {"word": word, "start": start, "end": max(end, start + 0.04)}
+        if "key" in item:
+            entry["key"] = bool(item["key"])
+        for extra in ("lang", "low", "fixed", "orig"):
+            if extra in item:
+                entry[extra] = item[extra]
+        cleaned.append(entry)
+
+    cleaned.sort(key=lambda w: w["start"])
+
+    for index in range(len(cleaned) - 1):
+        current, following = cleaned[index], cleaned[index + 1]
+        if current["end"] > following["start"]:
+            current["end"] = max(current["start"] + 0.03, following["start"])
+
+    return cleaned
+
+
+def parse_groq_result(result, offset=0.0, prompt=""):
+    segments = result.get("segments") or []
+    silent_ranges = []
+    weighted_logprob = 0.0
+    weighted_time = 0.0
+
+    for segment in segments:
+        try:
+            seg_start = float(segment.get("start", 0))
+            seg_end = float(segment.get("end", seg_start + 0.5))
+        except (TypeError, ValueError):
+            continue
+        span = max(seg_end - seg_start, 0.01)
+        logprob = segment.get("avg_logprob")
+        no_speech = float(segment.get("no_speech_prob") or 0)
+
+        if no_speech > 0.6 and (logprob is None or logprob < -1.0):
+            silent_ranges.append((seg_start, seg_end))
+            continue
+        if logprob is not None:
+            weighted_logprob += float(logprob) * span
+            weighted_time += span
+
+    avg_logprob = weighted_logprob / weighted_time if weighted_time else -5.0
+    seg_scores = []
+    for segment in segments:
+        try:
+            seg_scores.append((
+                float(segment.get("start", 0)), float(segment.get("end", 0)),
+                float(segment.get("avg_logprob")),
+            ))
+        except (TypeError, ValueError):
+            continue
+
+    def in_silence(moment):
+        return any(a <= moment <= b for a, b in silent_ranges)
+
+    words = []
+    raw_words = result.get("words") or []
+
+    if raw_words:
+        for item in raw_words:
+            try:
+                start = float(item.get("start", 0))
+                end = float(item.get("end", start + 0.2))
+            except (TypeError, ValueError):
+                continue
+            if in_silence((start + end) / 2):
+                continue
+            words.append({"word": item.get("word", ""), "start": start, "end": end})
+    else:
+        for segment in segments:
+            try:
+                seg_start = float(segment.get("start", 0))
+                seg_end = float(segment.get("end", seg_start + 1))
+            except (TypeError, ValueError):
+                continue
+            if in_silence((seg_start + seg_end) / 2):
+                continue
+            parts = str(segment.get("text", "")).split()
+            if not parts:
+                continue
+            step = max((seg_end - seg_start) / len(parts), 0.05)
+            for index, part in enumerate(parts):
+                words.append({
+                    "word": part,
+                    "start": seg_start + index * step,
+                    "end": seg_start + (index + 1) * step,
+                })
+
+    words = normalize_words(words)
+    text = " ".join(w["word"] for w in words)
+
+    # Whisper sometimes echoes the prompt when there is no speech.
+    if prompt and text.strip().lower() == prompt.strip().lower():
+        words, text = [], ""
+
+    for item in words:
+        middle = (item["start"] + item["end"]) / 2
+        item["low"] = any(a <= middle <= b and lp < -0.9 for a, b, lp in seg_scores)
+        item["start"] += offset
+        item["end"] += offset
+
+    return {"words": words, "text": text, "avg_logprob": avg_logprob}
+
+
+def script_score(parsed):
+    text = parsed["text"]
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return -9.0
+
+    cyrillic = sum("\u0400" <= c <= "\u04ff" for c in letters) / len(letters)
+    score = parsed["avg_logprob"]
+    if cyrillic < 0.8:
+        score -= 2.0
+    if any(c in TG_LETTERS for c in text):
+        score += 0.25
+    return score
+
+
+async def detect_silences(audio_path, work_dir):
+    stderr = await run_command(
+        [
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info",
+            "-i", str(audio_path),
+            "-af", "silencedetect=noise=-35dB:d=0.3",
+            "-f", "null", "-",
+        ],
+        timeout=60,
+        cwd=work_dir,
+        capture=True,
+    )
+
+    starts = [float(x) for x in re.findall(r"silence_start:\s*(-?[\d.]+)", stderr)]
+    ends = [float(x) for x in re.findall(r"silence_end:\s*(-?[\d.]+)", stderr)]
+    return [
+        (max(0.0, s), e) for s, e in zip(starts, ends) if e > s
+    ]
+
+
+def plan_chunks(duration, silences):
+    """Cut points are placed in silences, chunks are about 8-18 s long."""
+    if duration <= 18:
+        return [(0.0, duration)]
+
+    mids = [(s + e) / 2 for s, e in silences]
+    chunks = []
+    position = 0.0
+
+    while duration - position > 18:
+        candidates = [m for m in mids if position + 8 < m < position + 18]
+        if candidates:
+            cut = min(candidates, key=lambda m: abs(m - (position + 13)))
+        else:
+            cut = position + 14
+        chunks.append((position, cut))
+        position = cut
+
+    chunks.append((position, duration))
+    return chunks
+
+
+# =========================================================
+# TAJIK / RUSSIAN TRANSCRIPT CORRECTOR (stage 1)
+# =========================================================
+#
+# Rules that keep subtitles safe:
+# * only single words are replaced (1:1), so word timings never change;
+# * a fix must look like the original word (similarity check);
+# * every changed word keeps its original in word["orig"] so the user can undo.
+
+CORRECT_LLM = os.getenv("CORRECT_LLM", "1").strip() != "0"
+TG_MAP = str.maketrans({
+    "ғ": "г", "Ғ": "Г", "қ": "к", "Қ": "К", "ҳ": "х", "Ҳ": "Х",
+    "ҷ": "ч", "Ҷ": "Ч", "ӣ": "и", "Ӣ": "И", "ӯ": "у", "Ӯ": "У",
+})
+
+# Common Tajik words that contain the letters ғ ӣ қ ӯ ҳ ҷ. Speech recognition often
+# writes the plain Russian letter (г, к, х, ч, и, у) instead. Words that collide with
+# frequent Russian words (куча, чудо, пуст, гор, ...) are left out on purpose.
+TAJIK_WORDS = """
+ҳам ҳамин ҳамон ҳама ҳамаи ҳамеша ҳамроҳ ҳамчун ҳамчунин ҳамкор ҳамкорӣ ҳамсоя ҳар ҳатто
+ҳанӯз ҳоло ҳозир ҳаст ҳастанд ҳастам ҳастем ҳастед ҳастӣ ҳеҷ ҳаргиз ҳатмӣ ҳаёт ҳақ ҳақиқат
+ҳақиқӣ ҳадаф ҳикоя ҳисоб ҳуқуқ ҳукумат ҳунар ҳунарманд ҳодиса ҳафта ҳафт ҳашт ҳазор ҳаво
+ҳайвон ҳайрон ҳавлӣ ҳудуд ҳиссиёт ҳифз ҳосил ӯро ӯст ӯзбек
+ғоя ғояҳо ғайр ғайриоддӣ ғолиб ғалаба ғамгин ғам ғизо ғазаб ғарб ғурур ғалат ғазал ғайрат
+ғамхорӣ ғанӣ
+қадам қарор қувва қувват қисм қисса қимат қиммат қалам қалб қатор қобилият қонун қариб
+қадимӣ қавӣ қатъӣ қайд қаҳрамон қаҳва қурбон қасам қоида қисмат қарз қулай қавл қаноат
+қудрат қаҳрамонӣ
+ҷаҳон ҷаҳонӣ ҷой ҷои ҷавон ҷавонон ҷавонӣ ҷавоб ҷамъ ҷуфт ҷисм ҷомеа ҷашн ҷанг ҷаҳд ҷаноб
+ҷанобон ҷӯра ҷуръат ҷазо ҷамъият ҷамъиятӣ ҷумҳурӣ ҷумҳурии ҷустуҷӯ ҷон ҷони ҷонам ҷолиб
+ҷиддӣ ҷиддият ҷойгир ҷойгоҳ ҷорӣ ҷаҳиш ҷалб ҷудоӣ
+зиндагӣ оддӣ миллӣ умумӣ расмӣ воқеӣ табиӣ тоҷикӣ тоҷик тоҷикон англисӣ дӯстӣ хушбахтӣ
+хубӣ зебоӣ осонӣ душворӣ кӯтоҳӣ озодӣ бародарӣ касбӣ иқтисодӣ фарҳангӣ сиёсӣ иҷтимоӣ
+молиявӣ донишҷӯ донишҷӯён донишгоҳ донишманд омӯзгор омӯзиш омӯхтан омӯзонидан
+рӯз рӯзи рӯзҳо рӯзона рӯй рӯи рӯйхат рӯзнома рӯзгор рӯшан рӯшноӣ пӯшидан пӯшок пӯшида
+гӯш гӯянда гӯям гӯед гӯӣ гӯем мегӯям мегӯед мегӯянд мегӯӣ мегӯем хӯрок хӯрдан хӯроки
+мӯй мӯҳлат мӯҳр кӯдак кӯдакон кӯшиш кӯмак кӯҳна кӯтоҳ кӯҳ кӯҳҳо сӯҳбат нӯҳ бӯса дӯст
+дӯстон дӯстам дӯкон дӯхтан тӯҳфа тӯй шӯхӣ шӯро шӯр шӯрбо шӯриш ҳӯшёр зӯр нӯшидан
+нӯшокӣ сӯзан
+мекунӣ мебинӣ медонӣ мехоҳӣ мешавӣ мекашӣ мешунавӣ мехонӣ менависӣ мерасӣ мефаҳмӣ мегирӣ
+медиҳӣ мебарӣ меояӣ мешинӣ мехӯрӣ мехоҳам мехоҳем мехоҳед мехоҳанд фаҳмидан фаҳмед фаҳмидам
+роҳ роҳи роҳнамо раҳбар раҳбарӣ раҳо оҳиста оҳанг баҳо баҳор баҳс шаҳр шаҳри шаҳрвандӣ
+шаҳодат саҳифа саҳна саҳар аҳамият аҳолӣ маҳсулот маҳсул маҳз маҳорат маҳдуд муҳим
+муҳимтар муҳаббат муҳандис таҳлил таҳия таҷриба таҳсил таҳқиқ тарҳ тарҷума тиҷорат
+тиҷоратӣ маҷмӯа маҷмӯъ мақсад мақола мақом миқдор маъно маъқул маълумот маълум нақша нақл
+нақд нуқта нуқтаи таъсир таъриф тағйир тақрибан таълим таълиф фақат фарҳанг фурӯш
+фурӯхтан фурӯшанда фурӯшгоҳ ҳуҷҷат ҳуҷҷати иқтидор иқтисод иҷозат иҷро иҷрои
+Тоҷикистон Хуҷанд Ҳисор Кӯлоб Қӯрғонтеппа
+""".split()
+
+
+def core_token(text):
+    return re.sub(r"[\W_]+", "", str(text), flags=re.UNICODE)
+
+
+def tg_key(word):
+    return core_token(word).lower().translate(TG_MAP)
+
+
+def build_tajik_index():
+    index = {}
+    for entry in TAJIK_WORDS:
+        key = tg_key(entry)
+        if len(key) < 3:
+            continue
+        if key in index and index[key] != entry.lower():
+            index[key] = None  # ambiguous, never used
+        else:
+            index[key] = entry.lower()
+    return index
+
+
+TAJIK_INDEX = build_tajik_index()
+
+
+def clean_glossary(text):
+    terms = []
+    for raw in re.split(r"[,;\n]+", str(text or "")):
+        term = raw.strip()[:40]
+        if len(term) >= 2 and term.lower() not in [t.lower() for t in terms]:
+            terms.append(term)
+        if len(terms) >= 40:
+            break
+    return terms
+
+
+def with_glossary(prompt, glossary):
+    if not glossary:
+        return prompt
+    return (prompt + " " + ", ".join(glossary))[:400]
+
+
+def accept_fix(old, new):
+    old_core, new_core = core_token(old).lower(), core_token(new).lower()
+    if not new_core or len(new.strip()) > 40 or len(new.split()) != 1:
+        return False
+    if old_core == new_core:
+        return False
+    a, b = old_core.translate(TG_MAP), new_core.translate(TG_MAP)
+    if difflib.SequenceMatcher(None, a, b).ratio() < 0.6:
+        return False
+    return 0.5 <= len(new_core) / max(1, len(old_core)) <= 2.0
+
+
+def apply_fix(item, new_core):
+    """Replace the word text, keep punctuation and capital letter, remember the original."""
+    old = item["word"]
+    match = re.match(r"^(\W*)(.*?)(\W*)$", old, flags=re.UNICODE)
+    lead, core, trail = match.group(1), match.group(2), match.group(3)
+    if core[:1].isupper() and new_core[:1].islower():
+        new_core = new_core[:1].upper() + new_core[1:]
+    item.setdefault("orig", old)
+    item["word"] = lead + new_core + trail
+    item["fixed"] = True
+
+
+def dictionary_fixes(words):
+    count = 0
+    for item in words:
+        if item.get("lang") != "tg":
+            continue
+        core = core_token(item["word"])
+        key = tg_key(item["word"])
+        target = TAJIK_INDEX.get(key)
+        if not target or len(key) < 3 or core.lower() == target:
+            continue
+        if accept_fix(item["word"], target):
+            apply_fix(item, target)
+            count += 1
+    return count
+
+
+def glossary_fixes(words, glossary):
+    terms = [t for t in glossary if len(t.split()) == 1 and len(t) >= 3]
+    count = 0
+    for item in words:
+        core = core_token(item["word"])
+        if len(core) < 3 or item.get("fixed"):
+            continue
+        for term in terms:
+            same = tg_key(core) == tg_key(term)
+            close = (
+                len(core) >= 4
+                and abs(len(core) - len(term)) <= 2
+                and difflib.SequenceMatcher(
+                    None, tg_key(core), tg_key(term)
+                ).ratio() >= 0.8
+            )
+            if (same or close) and core != term and accept_fix(item["word"], term):
+                apply_fix(item, term)
+                count += 1
+                break
+    return count
+
+
+async def llm_fixes(words, language, glossary):
+    """Ask the LLM for single-word spelling fixes. Returns {index: new_word}."""
+    if not (CORRECT_LLM and GROQ_API_KEY) or len(words) < 3:
+        return {}
+    numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words[:260]))
+    hint = ""
+    if glossary:
+        hint = " Preferred spellings of names and terms: " + ", ".join(glossary) + "."
+    payload = {
+        "model": KEYWORD_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You fix spelling in speech-recognition transcripts of Tajik "
+                    "(Cyrillic, letters ғ ӣ қ ӯ ҳ ҷ) and Russian. The text is numbered "
+                    "word by word. Fix ONLY clear spelling mistakes or wrong Tajik "
+                    "letters inside a single word. Never rewrite sentences, never "
+                    "replace a word by a different word or synonym, never merge, "
+                    "split, add or remove words, keep Russian words as they are unless "
+                    "clearly misspelled." + hint + " Answer only with JSON: "
+                    '{"fixes":[{"i":word index,"w":"corrected word"}]}. '
+                    'Return {"fixes":[]} if nothing is clearly wrong.'
+                ),
+            },
+            {"role": "user", "content": numbered},
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            response = await client.post(
+                GROQ_CHAT_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                json=payload,
+            )
+        if response.status_code != 200:
+            return {}
+        raw = json.loads(response.json()["choices"][0]["message"]["content"])
+        out = {}
+        for fix in raw.get("fixes", []):
+            index = fix.get("i")
+            new = str(fix.get("w", "")).strip()
+            if isinstance(index, int) and 0 <= index < len(words) and new:
+                out[index] = new
+        return out
+    except Exception:
+        logger.warning("Spelling LLM failed", exc_info=True)
+        return {}
+
+
+async def correct_transcript(words, language, glossary):
+    """Dictionary, glossary and LLM spelling fixes. Never changes timings or word count."""
+    changed = dictionary_fixes(words)
+    changed += glossary_fixes(words, glossary or [])
+    fixes = await llm_fixes(words, language, glossary or [])
+    limit = max(3, int(len(words) * 0.25))
+    for index, new in sorted(fixes.items())[:limit]:
+        item = words[index]
+        if item.get("fixed"):
+            continue
+        core = core_token(new)
+        if accept_fix(item["word"], core):
+            apply_fix(item, core)
+            changed += 1
+    logger.info("Spelling fixes applied: %s", changed)
+    return changed
+
+
+
+
+async def transcribe_video(audio_path, work_dir, language, audio_duration, report,
+                           model=None, glossary=None):
+    """Return (words, detected_ranges)."""
+    if not GROQ_API_KEY:
+        raise UserError("GROQ_API_KEY не настроен на сервере.", 503)
+
+    timeout = httpx.Timeout(180.0, connect=20.0, write=60.0, read=180.0)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        if language in ("tg", "ru"):
+            prompt = with_glossary(TG_PROMPT if language == "tg" else RU_PROMPT, glossary)
+            report(30, "Распознаём речь")
+            result = await groq_transcribe(client, audio_path, language, prompt, model)
+            parsed = parse_groq_result(result, 0.0, prompt)
+            words = parsed["words"]
+            for item in words:
+                item["lang"] = language
+            detected = [{"start": 0.0, "end": audio_duration, "lang": language}]
+        else:
+            report(25, "Анализируем паузы")
+            silences = await detect_silences(audio_path, work_dir)
+            chunks = plan_chunks(audio_duration, silences)
+
+            words = []
+            detected = []
+
+            for index, (start, end) in enumerate(chunks):
+                report(
+                    30 + int(55 * index / max(1, len(chunks))),
+                    f"Распознаём речь ({index + 1}/{len(chunks)})",
+                )
+
+                if len(chunks) == 1:
+                    chunk_path = Path(audio_path)
+                else:
+                    chunk_path = Path(work_dir) / f"chunk_{index}.mp3"
+                    await run_command(
+                        [
+                            "ffmpeg", "-y", "-nostdin", "-hide_banner",
+                            "-loglevel", "error", "-threads", "1",
+                            "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}",
+                            "-i", str(audio_path),
+                            "-c:a", "libmp3lame", "-b:a", "48k",
+                            str(chunk_path),
+                        ],
+                        timeout=60,
+                        cwd=work_dir,
+                    )
+
+                tg_prompt = with_glossary(TG_PROMPT, glossary)
+                ru_prompt = with_glossary(RU_PROMPT, glossary)
+                tg_raw, ru_raw = await asyncio.gather(
+                    groq_transcribe(client, chunk_path, "tg", tg_prompt, model),
+                    groq_transcribe(client, chunk_path, "ru", ru_prompt, model),
+                )
+                tg_parsed = parse_groq_result(tg_raw, start, tg_prompt)
+                ru_parsed = parse_groq_result(ru_raw, start, ru_prompt)
+
+                if not tg_parsed["words"] and not ru_parsed["words"]:
+                    continue
+                if not ru_parsed["words"]:
+                    chosen, lang = tg_parsed, "tg"
+                elif not tg_parsed["words"]:
+                    chosen, lang = ru_parsed, "ru"
+                elif script_score(tg_parsed) >= script_score(ru_parsed):
+                    chosen, lang = tg_parsed, "tg"
+                else:
+                    chosen, lang = ru_parsed, "ru"
+
+                for item in chosen["words"]:
+                    item["lang"] = lang
+                words.extend(chosen["words"])
+                detected.append({"start": start, "end": end, "lang": lang})
+
+    words = normalize_words(words)
+    if not words:
+        raise UserError("Не удалось распознать речь в видео.", 422)
+
+    report(85, "Проверяем орфографию")
+    await correct_transcript(words, language, glossary)
+    report(90, "Выбираем ключевые слова")
+    await mark_keywords(words)
+    return words, detected
+
+
+# =========================================================
+# FONTS (only fonts that contain all Tajik letters are offered)
+# =========================================================
+
+def fc_families(pattern, want_file=False):
+    fmt = "%{family}|%{file}\n" if want_file else "%{family}\n"
+    result = subprocess.run(
+        ["fc-list", pattern, "-f", fmt],
+        capture_output=True, text=True, timeout=20,
+    )
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def detect_fonts():
+    found = []
+    seen = set()
+    for family, bold in FONT_CANDIDATES:
+        try:
+            lines = fc_families(f"{family}:charset={TAJIK_CHARSET}")
+        except Exception:
+            continue
+        names = {n.strip().lower() for line in lines for n in line.split(",")}
+        if family.lower() in names and family not in seen:
+            found.append({"family": family, "bold": bold})
+            seen.add(family)
+    try:
+        for line in fc_families(f":charset={TAJIK_CHARSET}", want_file=True):
+            names, _, path = line.partition("|")
+            if path.startswith(CUSTOM_FONTS_DIR):
+                family = names.split(",")[0].strip()
+                if family and family not in seen:
+                    found.append({"family": family, "bold": 0})
+                    seen.add(family)
+    except Exception:
+        pass
+    return found or [{"family": "DejaVu Sans", "bold": 1}]
+
+
+def resolve_font(name):
+    name = (name or "").strip()
+    for item in AVAILABLE_FONTS:
+        if item["family"].lower() == name.lower():
+            return item
+    return None
+
+
+# =========================================================
+# KEYWORDS (emphasis words for the "keyword" style)
+# =========================================================
+
+def clean_token(text):
+    return re.sub(r"[\W_]+", "", str(text), flags=re.UNICODE)
+
+
+def heuristic_keys(words):
+    keys = set()
+    for start in range(0, len(words), 4):
+        window = range(start, min(start + 4, len(words)))
+        best = max(window, key=lambda j: len(clean_token(words[j]["word"])))
+        if len(clean_token(words[best]["word"])) >= 4:
+            keys.add(best)
+    return keys
+
+
+async def llm_keys(words):
+    if not (KEYWORDS_LLM and GROQ_API_KEY) or len(words) < 3:
+        return None
+    numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
+    payload = {
+        "model": KEYWORD_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You choose emphasis words for short-video captions. "
+                    "The text is numbered word by word (Tajik or Russian). "
+                    "Pick the most meaningful words (key nouns, verbs, numbers, "
+                    "strong adjectives): about one per 3-5 words, never "
+                    "prepositions or particles. Answer only with JSON: "
+                    '{"keys":[word indices]}.'
+                ),
+            },
+            {"role": "user", "content": numbered},
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                GROQ_CHAT_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                json=payload,
+            )
+        if response.status_code != 200:
+            logger.warning("Keyword LLM status %s", response.status_code)
+            return None
+        content = response.json()["choices"][0]["message"]["content"]
+        raw = json.loads(content).get("keys", [])
+        keys = {int(i) for i in raw if isinstance(i, int) and 0 <= i < len(words)}
+        return keys or None
+    except Exception:
+        logger.warning("Keyword LLM failed, using heuristic", exc_info=True)
+        return None
+
+
+async def mark_keywords(words):
+    keys = await llm_keys(words)
+    if keys is None:
+        keys = heuristic_keys(words)
+    for index, item in enumerate(words):
+        item["key"] = index in keys
+
+
+# =========================================================
+# MEDIA CARDS (Pexels pictures shown for concrete nouns)
+# =========================================================
+
+async def suggest_cards(words, work_dir):
+    """Up to 3 cards: {id, at, query, thumb, credit, file}. Never raises."""
+    if not (PEXELS_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6:
+        return []
+    numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
+    payload = {
+        "model": KEYWORD_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You pick moments of a short video where a stock photo helps. "
+                    "The text is numbered word by word (Tajik or Russian). Choose at "
+                    "most 3 concrete, visual nouns or objects (not abstract words), "
+                    "at least 12 words apart. Answer only with JSON: "
+                    '{"cards":[{"index":word index,"query":"2-3 word English stock-photo search"}]}.'
+                ),
+            },
+            {"role": "user", "content": numbered},
+        ],
+    }
+    cards = []
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            response = await client.post(
+                GROQ_CHAT_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                json=payload,
+            )
+            if response.status_code != 200:
+                return []
+            raw = json.loads(response.json()["choices"][0]["message"]["content"])
+            last_at = -10.0
+            for item in raw.get("cards", [])[:3]:
+                index = int(item["index"])
+                query = str(item["query"]).strip()[:60]
+                if not (0 <= index < len(words)) or not query:
+                    continue
+                at = max(1.0, words[index]["start"])
+                if at - last_at < 4.0:
+                    continue
+                found = await client.get(
+                    "https://api.pexels.com/v1/search",
+                    params={"query": query, "per_page": 1, "orientation": "square"},
+                    headers={"Authorization": PEXELS_API_KEY},
+                )
+                photos = found.json().get("photos") if found.status_code == 200 else None
+                if not photos:
+                    continue
+                image = await client.get(photos[0]["src"]["large"])
+                if image.status_code != 200 or len(image.content) < 2000:
+                    continue
+                path = Path(work_dir) / f"card_{len(cards)}.jpg"
+                path.write_bytes(image.content)
+                cards.append({
+                    "id": len(cards),
+                    "at": round(at, 2),
+                    "query": query,
+                    "thumb": photos[0]["src"].get("small", ""),
+                    "credit": str(photos[0].get("photographer", ""))[:60],
+                    "file": str(path),
+                })
+                last_at = at
+    except Exception:
+        logger.warning("Card suggestion failed", exc_info=True)
+    return cards
+
+
+# =========================================================
+# LINES (editable transcript) <-> WORDS
+# =========================================================
+
+def make_lines(words, max_words=7, max_chars=42, max_gap=0.8):
+    lines = []
+    current = []
+
+    def flush():
+        if not current:
+            return
+        lines.append({
+            "id": len(lines),
+            "start": round(current[0]["start"], 2),
+            "end": round(current[-1]["end"], 2),
+            "text": " ".join(w["word"] for w in current),
+            "low": any(w.get("low") for w in current),
+            "fixed": any(w.get("fixed") for w in current),
+            "words": [
+                {
+                    "word": w["word"],
+                    "start": round(w["start"], 2),
+                    "end": round(w["end"], 2),
+                    "key": bool(w.get("key", False)),
+                    "orig": w.get("orig"),
+                }
+                for w in current
+            ],
+        })
+        current.clear()
+
+    for index, item in enumerate(words):
+        current.append(item)
+        text_length = sum(len(w["word"]) + 1 for w in current)
+        next_item = words[index + 1] if index + 1 < len(words) else None
+        gap = (next_item["start"] - item["end"]) if next_item else 0
+
+        if (
+            len(current) >= max_words
+            or text_length >= max_chars
+            or gap > max_gap
+            or item["word"].endswith((".", "!", "?", "…"))
+        ):
+            flush()
+
+    flush()
+    return lines
+
+
+def lines_to_words(lines, duration):
+    """Turn edited lines back into timed words."""
+    if not isinstance(lines, list) or not lines:
+        raise UserError("Текст субтитров пуст.")
+    if len(lines) > 500:
+        raise UserError("Слишком много строк субтитров.")
+
+    words = []
+
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        text = str(line.get("text", "")).strip()[:300]
+        tokens = text.split()
+        if not tokens:
+            continue
+
+        try:
+            start = max(0.0, min(float(line.get("start", 0)), duration))
+            end = max(start + 0.1, min(float(line.get("end", start + 1)), duration + 0.5))
+        except (TypeError, ValueError):
+            continue
+
+        original = line.get("words")
+        if isinstance(original, list) and len(original) == len(tokens):
+            try:
+                for token, source in zip(tokens, original):
+                    entry = {
+                        "word": token,
+                        "start": float(source.get("start", start)),
+                        "end": float(source.get("end", end)),
+                    }
+                    if "key" in source:
+                        entry["key"] = bool(source["key"])
+                    words.append(entry)
+                continue
+            except (TypeError, ValueError, AttributeError):
+                pass
+
+        weights = [len(token) + 1 for token in tokens]
+        total = float(sum(weights))
+        cursor = start
+        for token, weight in zip(tokens, weights):
+            span = (end - start) * weight / total
+            words.append({"word": token, "start": cursor, "end": cursor + span})
+            cursor += span
+
+    words = normalize_words(words)
+    if not words:
+        raise UserError("Текст субтитров пуст.")
+    return words
+
+
+# =========================================================
+# SUBTITLE STYLES (ASS)
+# =========================================================
+#
+# Colors are RGB hex here and converted to ASS (BGR) when written.
+
+STYLES = {
+    "viral": {
+        "font": "Noto Sans", "size": 92, "bold": 1, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "FFE500",
+        "outline": "000000", "outline_w": 7, "shadow": 3,
+        "border_style": 1, "box_alpha": 0, "mode": "pop",
+        "max_words": 2, "max_chars": 18, "upper": True, "margin": 0.22,
+    },
+    "creator": {
+        "font": "Noto Sans", "size": 80, "bold": 1, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "5CFFA8",
+        "outline": "000000", "outline_w": 6, "shadow": 2,
+        "border_style": 1, "box_alpha": 0, "mode": "pop",
+        "max_words": 3, "max_chars": 24, "upper": False, "margin": 0.20,
+    },
+    "classic": {
+        "font": "DejaVu Sans", "size": 58, "bold": 0, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "FFFFFF",
+        "outline": "000000", "outline_w": 4, "shadow": 1,
+        "border_style": 1, "box_alpha": 0, "mode": "plain",
+        "max_words": 6, "max_chars": 38, "upper": False, "margin": 0.14,
+    },
+    "cinema": {
+        "font": "Noto Serif", "size": 56, "bold": 0, "spacing": 3,
+        "primary": "F2F2F2", "secondary": "F2F2F2", "active": "F2F2F2",
+        "outline": "101010", "outline_w": 2, "shadow": 2,
+        "border_style": 1, "box_alpha": 0, "mode": "fade",
+        "max_words": 7, "max_chars": 42, "upper": False, "margin": 0.10,
+    },
+    "podcast": {
+        "font": "Noto Sans", "size": 60, "bold": 1, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "F5B937",
+        "outline": "000000", "outline_w": 14, "shadow": 0,
+        "border_style": 3, "box_alpha": 0x50, "mode": "highlight",
+        "max_words": 4, "max_chars": 28, "upper": False, "margin": 0.14,
+    },
+    "keyword": {
+        # Two-tier captions: small white lead words + big accent keyword.
+        "font": "Noto Sans", "size": 96, "bold": 1, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "00FFA3",
+        "outline": "000000", "outline_w": 5, "shadow": 2,
+        "border_style": 1, "box_alpha": 0, "mode": "key",
+        "max_words": 3, "max_chars": 26, "upper": False, "margin": 0.20,
+    },
+    "karaoke": {
+        # In karaoke mode Primary = already sung, Secondary = not yet.
+        "font": "Noto Sans", "size": 78, "bold": 1, "spacing": 0,
+        "primary": "F5B937", "secondary": "FFFFFF", "active": "F5B937",
+        "outline": "000000", "outline_w": 6, "shadow": 2,
+        "border_style": 1, "box_alpha": 0, "mode": "karaoke",
+        "max_words": 4, "max_chars": 26, "upper": False, "margin": 0.18,
+    },
+}
+
+
+def ass_color(rgb, alpha=0):
+    rgb = rgb.strip("#").upper()
+    red, green, blue = rgb[0:2], rgb[2:4], rgb[4:6]
+    return f"&H{alpha:02X}{blue}{green}{red}"
+
+
+def ass_tag_color(rgb):
+    rgb = rgb.strip("#").upper()
+    return f"&H{rgb[4:6]}{rgb[2:4]}{rgb[0:2]}&"
+
+
+def ass_time(seconds):
+    total_cs = int(round(max(0.0, float(seconds)) * 100))
+    hours = total_cs // 360000
+    minutes = (total_cs // 6000) % 60
+    secs = (total_cs // 100) % 60
+    centiseconds = total_cs % 100
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centiseconds:02d}"
+
+
+def escape_ass_text(text):
+    text = str(text or "")
+    text = text.replace("\\", r"\\")
+    text = text.replace("{", r"\{")
+    text = text.replace("}", r"\}")
+    text = text.replace("\r", " ").replace("\n", " ")
+    return text
+
+
+def split_phrases(words, max_words, max_chars, max_gap=0.7):
+    phrases = []
+    current = []
+
+    for index, item in enumerate(words):
+        current.append(item)
+        text_length = sum(len(w["word"]) + 1 for w in current)
+        next_item = words[index + 1] if index + 1 < len(words) else None
+        gap = (next_item["start"] - item["end"]) if next_item else 0
+
+        if (
+            len(current) >= max_words
+            or text_length >= max_chars
+            or gap > max_gap
+            or item["word"].endswith((".", "!", "?", "…"))
+        ):
+            phrases.append(current)
+            current = []
+
+    if current:
+        phrases.append(current)
+    return phrases
+
+
+def build_ass(words, style_name, width, height, output_path,
+              accent=None, size="m", position="auto",
+              font=None, font2=None, mix=False):
+    style = dict(STYLES.get(style_name, STYLES["viral"]))
+    if accent:
+        style["active"] = accent
+        if style["mode"] == "karaoke":
+            style["primary"] = accent
+
+    scale = min(width, height) / 720.0
+    if width > height:
+        scale *= 0.8
+    scale *= {"s": 0.8, "m": 1.0, "l": 1.25}.get(size, 1.0)
+
+    font_size = int(style["size"] * scale)
+    outline_w = max(1, int(round(style["outline_w"] * scale)))
+    shadow = int(round(style["shadow"] * scale))
+    spacing = style["spacing"] * scale
+
+    margin_ratio = style["margin"]
+    if width > height:
+        margin_ratio = min(margin_ratio, 0.09)
+    margin_v = int(height * margin_ratio)
+    alignment = 2
+    if position == "top":
+        alignment, margin_v = 8, int(height * 0.10)
+    elif position == "center":
+        alignment, margin_v = 5, 0
+    margin_h = int(width * 0.07)
+
+    outline_alpha = style["box_alpha"] if style["border_style"] == 3 else 0
+    back_color = ass_color("000000", 0x80)
+
+    main_font = resolve_font(font)
+    base_family = main_font["family"] if main_font else style["font"]
+    base_bold = (
+        style["bold"] and main_font["bold"] if main_font else style["bold"]
+    )
+    cycle = [(base_family, base_bold)]
+    if mix:
+        for item in AVAILABLE_FONTS:
+            if item["family"] != base_family and len(cycle) < 3:
+                cycle.append((item["family"], item["bold"]))
+    accent_font = resolve_font(font2)
+    accent_family = accent_font["family"] if accent_font else None
+    font_tag = f"\\fn{accent_family}" if accent_family else ""
+
+    style_lines = "\n".join(
+        f"Style: F{i},{fam},{font_size},"
+        f"{ass_color(style['primary'])},{ass_color(style['secondary'])},"
+        f"{ass_color(style['outline'], outline_alpha)},{back_color},"
+        f"{bold},0,0,0,100,100,{spacing:.1f},0,"
+        f"{style['border_style']},{outline_w},{shadow},{alignment},"
+        f"{margin_h},{margin_h},{margin_v},1"
+        for i, (fam, bold) in enumerate(cycle)
+    )
+
+    header = (
+        "[Script Info]\n"
+        "Title: GAPCUT AI\n"
+        "ScriptType: v4.00+\n"
+        "WrapStyle: 0\n"
+        "ScaledBorderAndShadow: yes\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"{style_lines}\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
+        "Effect, Text\n"
+    )
+
+    def display(token):
+        text = escape_ass_text(token)
+        return text.upper() if style["upper"] else text
+
+    phrases = split_phrases(words, style["max_words"], style["max_chars"])
+    events = []
+
+    for p_index, phrase in enumerate(phrases):
+        phrase_start = phrase[0]["start"]
+        sname = f"F{p_index % len(cycle)}"
+        phrase_end = phrase[-1]["end"] + 0.15
+        if p_index + 1 < len(phrases):
+            phrase_end = min(phrase_end, phrases[p_index + 1][0]["start"] - 0.02)
+        phrase_end = max(phrase_end, phrase_start + 0.15)
+
+        mode = style["mode"]
+
+        if mode in ("pop", "highlight"):
+            active = ass_tag_color(style["active"])
+            for w_index, token in enumerate(phrase):
+                start = phrase_start if w_index == 0 else token["start"]
+                if w_index + 1 < len(phrase):
+                    end = phrase[w_index + 1]["start"]
+                else:
+                    end = phrase_end
+                if end <= start:
+                    end = start + 0.05
+
+                parts = []
+                for t_index, other in enumerate(phrase):
+                    text = display(other["word"])
+                    if t_index == w_index:
+                        if mode == "pop":
+                            tag = (
+                                "{\\1c" + active + font_tag +
+                                "\\fscx112\\fscy112"
+                                "\\t(0,110,\\fscx100\\fscy100)}"
+                            )
+                        else:
+                            tag = "{\\1c" + active + font_tag + "}"
+                        parts.append(tag + text + "{\\r}")
+                    else:
+                        parts.append(text)
+
+                events.append(
+                    f"Dialogue: 0,{ass_time(start)},{ass_time(end)},{sname},,"
+                    f"0,0,0,,{' '.join(parts)}"
+                )
+
+        elif mode == "key":
+            flagged = [i for i, t in enumerate(phrase) if t.get("key")]
+            pool = flagged or list(range(len(phrase)))
+            key_idx = max(pool, key=lambda i: len(clean_token(phrase[i]["word"])))
+            key_text = display(phrase[key_idx]["word"])
+            key_size = int(font_size * min(1.0, 9.0 / max(len(key_text), 1)))
+            lead_size = int(font_size * 0.52)
+            key_color = ass_tag_color(style["active"])
+
+            for w_index, token in enumerate(phrase):
+                start = phrase_start if w_index == 0 else token["start"]
+                if w_index + 1 < len(phrase):
+                    end = phrase[w_index + 1]["start"]
+                else:
+                    end = phrase_end
+                if end <= start:
+                    end = start + 0.05
+
+                lead = " ".join(
+                    display(t["word"])
+                    for j, t in enumerate(phrase[:w_index + 1])
+                    if j != key_idx
+                )
+                pieces = []
+                if lead:
+                    pieces.append(f"{{\\fs{lead_size}\\1c&HFFFFFF&}}{lead}")
+                if key_idx <= w_index:
+                    pop = ""
+                    if w_index == key_idx:
+                        pop = "\\fscx60\\fscy60\\t(0,140,\\fscx100\\fscy100)"
+                    pieces.append(
+                        f"{{\\fs{key_size}\\1c{key_color}{font_tag}{pop}}}{key_text}"
+                    )
+                events.append(
+                    f"Dialogue: 0,{ass_time(start)},{ass_time(end)},{sname},,"
+                    "0,0,0,," + "\\N".join(pieces)
+                )
+
+        elif mode == "karaoke":
+            parts = []
+            for w_index, token in enumerate(phrase):
+                if w_index + 1 < len(phrase):
+                    span = phrase[w_index + 1]["start"] - token["start"]
+                else:
+                    span = phrase_end - token["start"]
+                centis = max(1, int(round(span * 100)))
+                parts.append(f"{{\\kf{centis}}}{display(token['word'])}")
+            events.append(
+                f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
+                f"{sname},,0,0,0,,{' '.join(parts)}"
+            )
+
+        elif mode == "fade":
+            text = " ".join(display(t["word"]) for t in phrase)
+            events.append(
+                f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
+                f"{sname},,0,0,0,,{{\\fad(250,200)}}{text}"
+            )
+
+        else:
+            text = " ".join(display(t["word"]) for t in phrase)
+            events.append(
+                f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
+                f"{sname},,0,0,0,,{text}"
+            )
+
+    Path(output_path).write_text(header + "\n".join(events) + "\n", encoding="utf-8")
+
+
+# =========================================================
+# RENDER
+# =========================================================
+
+def zoom_expression(starts, amount=0.12):
+    terms = []
+    for index, moment in enumerate(starts[:40]):
+        sign = "+" if index % 2 == 0 else "-"
+        terms.append(f"{sign}clip((t-{moment:.2f})/0.18,0,1)")
+    if not terms:
+        return None
+    body = "".join(terms)
+    if body.startswith("+"):
+        body = body[1:]
+    return f"(1+{amount}*({body}))"
+
+
+def between_expression(moments, length):
+    return "+".join(f"between(t,{m:.2f},{m + length:.2f})" for m in moments)
+
+
+def build_graph(words, base_filter, width, height, duration, options, ass_name,
+                fonts_option, card_inputs):
+    """Return (filtergraph, has_audio_graph, sfx_times)."""
+    steps = [f"[0:v]{base_filter}"]
+
+    lines = make_lines(words)
+    starts = [l["start"] for l in lines[1:] if 1.0 < l["start"] < duration - 0.5]
+
+    zoom = zoom_expression(starts) if options.get("zoom") else None
+    if zoom:
+        steps[0] += (
+            f",scale=w='2*trunc({width}*{zoom}/2)':h='2*trunc({height}*{zoom}/2)'"
+            f":eval=frame:flags=bilinear,crop={width}:{height}"
+        )
+
+    cards = options.get("cards") or []
+    flash_times = [s for i, s in enumerate(starts) if i % 3 == 2] if options.get("fx") else []
+    flash_times += [c["at"] for c in cards] if options.get("fx") else []
+    flash_times = sorted(flash_times)[:12]
+    if flash_times:
+        enable = between_expression(flash_times, 0.10)
+        steps[0] += (
+            f",negate=enable='{enable}',"
+            f"rgbashift=rh=-12:bh=12:enable='{enable}'"
+        )
+
+    label = "v0"
+    steps[0] += f"[{label}]"
+    graph = [steps[0]]
+
+    for number, card in enumerate(cards):
+        start = card["at"]
+        end = min(duration, start + 1.9)
+        input_index = card_inputs[number]
+        card_w, card_h = int(width * 0.78), int(height * 0.46)
+        radius = 30
+        graph.append(
+            f"[{input_index}:v]scale=w={card_w}:h={card_h}:"
+            f"force_original_aspect_ratio=decrease,format=yuva420p,"
+            f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':"
+            f"a='if(gt(abs(W/2-X),W/2-{radius})*gt(abs(H/2-Y),H/2-{radius}),"
+            f"if(lte(hypot(abs(W/2-X)-(W/2-{radius}),abs(H/2-Y)-(H/2-{radius})),{radius}),255,0),255)',"
+            f"setpts=PTS+{start:.2f}/TB[c{number}]"
+        )
+        graph.append(
+            f"[{label}]drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:"
+            f"enable='between(t,{start:.2f},{end:.2f})'[w{number}]"
+        )
+        new_label = f"v{number + 1}"
+        graph.append(
+            f"[w{number}][c{number}]overlay="
+            f"x='(W-w)/2+W*pow(1-min(1,max(0,(t-{start:.2f})/0.28)),3)':"
+            f"y='(H-h)/2':enable='between(t,{start:.2f},{end:.2f})':format=auto"
+            f"[{new_label}]"
+        )
+        label = new_label
+
+    if options.get("subtitles", True):
+        graph.append(f"[{label}]ass={ass_name}{fonts_option}[vout]")
+    else:
+        graph.append(f"[{label}]null[vout]")
+
+    sfx_times = []
+    if options.get("sfx"):
+        sfx_times = sorted(set(starts[:12] + [c["at"] for c in cards]))[:16]
+
+    return ";".join(graph), sfx_times
+
+
+async def render_video(
+    input_path, output_path, work_dir, words, style_name, video_format,
+    info, duration, report, options=None,
+):
+    options = options or {}
+    input_path = Path(input_path).resolve()
+    output_path = Path(output_path).resolve()
+    work_dir = Path(work_dir).resolve()
+
+    _, _, display_width, display_height = probe_summary(info)
+    width, height = get_output_size(video_format, display_width, display_height)
+
+    ass_name = "captions.ass"
+    base_filter = get_video_filter(video_format, width, height)
+    if options.get("subtitles", True):
+        build_ass(
+            words, style_name, width, height, Path(work_dir) / ass_name,
+            accent=options.get("accent"),
+            size=options.get("size", "m"),
+            position=options.get("position", "auto"),
+            font=options.get("font"),
+            font2=options.get("font2"),
+            mix=options.get("fontmix", False),
+        )
+    fonts_option = ""
+    if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
+        fonts_option = f":fontsdir={FONTS_DIR}"
+
+    cards = options.get("cards") or []
+    extra_inputs = []
+    card_inputs = []
+    for card in cards:
+        card_inputs.append(1 + len(card_inputs))
+        extra_inputs += [
+            "-loop", "1", "-framerate", "30", "-t", "2.2", "-i", card["file"],
+        ]
+
+    graph, sfx_times = build_graph(
+        words, base_filter, width, height, duration, options, ass_name,
+        fonts_option, card_inputs,
+    )
+
+    audio_map = ["-map", "0:a:0?"]
+    if sfx_times:
+        whoosh = work_dir / "whoosh.wav"
+        await run_command(
+            [
+                "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "anoisesrc=d=0.45:c=pink:a=0.9",
+                "-af",
+                "highpass=f=350,lowpass=f=6500,afade=t=in:st=0:d=0.16,"
+                "afade=t=out:st=0.2:d=0.25,volume=0.8,aformat=channel_layouts=stereo",
+                str(whoosh),
+            ],
+            timeout=30,
+            cwd=work_dir,
+        )
+        whoosh_index = 1 + len(card_inputs)
+        extra_inputs += ["-i", str(whoosh)]
+        count = len(sfx_times)
+        parts = [f"[{whoosh_index}:a]asplit={count}" + "".join(f"[s{i}]" for i in range(count))]
+        mix_inputs = "[a0]"
+        parts.append("[0:a]aformat=channel_layouts=stereo[a0]")
+        for i, moment in enumerate(sfx_times):
+            ms = int(moment * 1000)
+            parts.append(f"[s{i}]adelay={ms}|{ms},volume=0.35[d{i}]")
+            mix_inputs += f"[d{i}]"
+        parts.append(
+            f"{mix_inputs}amix=inputs={count + 1}:duration=first:normalize=0[aout]"
+        )
+        graph += ";" + ";".join(parts)
+        audio_map = ["-map", "[aout]"]
+
+    command = [
+        "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-progress", "pipe:1", "-nostats",
+        "-threads", "1", "-filter_threads", "1",
+        "-i", str(input_path),
+        *extra_inputs,
+        "-t", str(MAX_DURATION),
+        "-filter_complex", graph,
+        "-map", "[vout]", *audio_map,
+        "-c:v", "libx264", "-preset", FFMPEG_PRESET, "-crf", "27",
+        "-threads", "1",
+        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        "-max_muxing_queue_size", "1024",
+        "-fs", str(MAX_OUTPUT_SIZE),
+        str(output_path),
+    ]
+
+    with tempfile.TemporaryFile(mode="w+b") as error_file:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=error_file,
+            cwd=str(work_dir),
+        )
+
+        async def read_progress():
+            while True:
+                raw = await process.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", errors="ignore").strip()
+                if line.startswith(("out_time_us=", "out_time_ms=")):
+                    try:
+                        seconds = int(line.split("=", 1)[1]) / 1_000_000
+                    except ValueError:
+                        continue
+                    ratio = min(0.99, seconds / max(duration, 0.1))
+                    report(int(ratio * 100), "Монтируем видео")
+            await process.wait()
+
+        try:
+            await asyncio.wait_for(read_progress(), timeout=900)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise UserError(
+                "Время обработки видео истекло. Попробуйте более короткое видео.",
+                504,
+            )
+
+        error_file.seek(0, os.SEEK_END)
+        size = error_file.tell()
+        error_file.seek(max(0, size - 3000))
+        error_text = error_file.read().decode("utf-8", errors="replace")
+
+    if process.returncode != 0:
+        logger.error("Render failed: %s", error_text[-3000:])
+        raise UserError("Ошибка FFmpeg при монтаже. Попробуйте другой файл.", 500)
+
+    output = Path(output_path)
+    if not output.exists() or output.stat().st_size < 1000:
+        raise UserError("Не удалось создать готовое видео.", 500)
+    if output.stat().st_size >= MAX_OUTPUT_SIZE:
+        raise UserError(
+            "Готовое видео достигло лимита размера. Попробуйте видео короче.", 413
+        )
+
+    logger.info("Render complete: %s bytes", output.stat().st_size)
+
+
+# =========================================================
+# UPLOAD + INPUT CHECKS
+# =========================================================
+
+def clean_language(language):
+    language = (language or "tg_ru").strip().lower()
+    language = LANGUAGE_ALIASES.get(language, language)
+    if language not in ALLOWED_LANGUAGES:
+        raise HTTPException(status_code=400, detail="Неверно выбран язык.")
+    return language
+
+
+def clean_style(style):
+    style = (style or "viral").strip().lower()
+    if style not in ALLOWED_STYLES:
+        raise HTTPException(status_code=400, detail="Неверный стиль субтитров.")
+    return style
+
+
+def clean_format(video_format):
+    video_format = (video_format or "9:16").strip().lower()
+    if video_format not in ALLOWED_FORMATS:
+        raise HTTPException(status_code=400, detail="Неверный формат видео.")
+    return video_format
+
+
+def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
+                  font="", font2="", fontmix="0"):
+    accent = (accent or "").strip().lstrip("#").upper()
+    if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
+        raise HTTPException(status_code=400, detail="Неверный цвет.")
+    size = (size or "m").strip().lower()
+    position = (position or "auto").strip().lower()
+    if size not in ("s", "m", "l") or position not in ("auto", "top", "center"):
+        raise HTTPException(status_code=400, detail="Неверные параметры субтитров.")
+    return {
+        "accent": accent or None,
+        "size": size,
+        "position": position,
+        "subtitles": str(subtitles).strip().lower() not in ("0", "false", "off"),
+        "zoom": str(zoom).strip().lower() not in ("0", "false", "off"),
+        "fx": str(fx).strip().lower() not in ("0", "false", "off"),
+        "sfx": str(sfx).strip().lower() not in ("0", "false", "off"),
+        "font": (resolve_font(font) or {}).get("family"),
+        "font2": (resolve_font(font2) or {}).get("family"),
+        "fontmix": str(fontmix).strip().lower() in ("1", "true", "on"),
+    }
+
+
+def new_work_dir():
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    work_dir = BASE_DIR / uuid.uuid4().hex
+    work_dir.mkdir(parents=True, exist_ok=True)
+    return work_dir
+
+
+async def save_upload(file, work_dir):
+    extension = Path((file.filename or "video.mp4").lower()).suffix
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Поддерживаются MP4, MOV, M4V, WEBM и MKV.",
+        )
+
+    input_path = Path(work_dir) / f"input{extension}"
+    total = 0
+
+    with input_path.open("wb") as destination:
+        while True:
+            chunk = await file.read(UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_INPUT_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Размер видео не должен превышать 100 MB.",
+                )
+            destination.write(chunk)
+
+    if total == 0:
+        raise HTTPException(status_code=400, detail="Видеофайл пуст.")
+
+    logger.info("Upload completed: %s bytes", total)
+    return input_path
+
+
+async def inspect_video(input_path):
+    info, duration = await get_video_info(input_path)
+    has_video, has_audio, _, _ = probe_summary(info)
+
+    if not has_video:
+        raise UserError("В файле нет видеодорожки.")
+    if duration > MAX_DURATION:
+        raise UserError(
+            f"Длительность видео не должна превышать {MAX_DURATION} секунд.", 413
+        )
+    if not has_audio:
+        raise UserError("В видео нет звука, поэтому речь распознать нельзя.")
+
+    return info, duration
+
+
+# =========================================================
+# JOBS
+# =========================================================
+
+JOBS = {}
+JOB_TASKS = set()
+ACTIVE_STATES = {"queued", "transcribing", "rendering"}
+
+
+def remove_job(job_id):
+    job = JOBS.pop(job_id, None)
+    if job:
+        shutil.rmtree(job["dir"], ignore_errors=True)
+
+
+def purge_expired_jobs():
+    now = time.time()
+    for job_id, job in list(JOBS.items()):
+        if job["status"] in ACTIVE_STATES and now - job["updated"] < 1800:
+            continue
+        if now - job["updated"] > JOB_TTL_SECONDS:
+            remove_job(job_id)
+
+
+def touch(job, **values):
+    job.update(values)
+    job["updated"] = time.time()
+
+
+def public_job(job):
+    data = {
+        "job_id": job["id"],
+        "status": job["status"],
+        "stage": job["stage"],
+        "progress": job["progress"],
+        "language": job["language"],
+        "duration": round(job["duration"], 2),
+        "error": job["error"],
+    }
+    if job["status"] in ("transcribed", "rendering", "done") or job["lines"]:
+        data["lines"] = job["lines"]
+        data["detected"] = job["detected"]
+        data["cards"] = [
+            {k: v for k, v in c.items() if k != "file"} for c in job["cards"]
+        ]
+    if job["status"] == "done":
+        data["download_url"] = f"/api/jobs/{job['id']}/download"
+    return data
+
+
+def get_job(job_id, user):
+    job = JOBS.get(job_id)
+    if not job or job["user_id"] != user["id"]:
+        raise HTTPException(status_code=404, detail="Задача не найдена или истекла.")
+    return job
+
+
+def spawn(coroutine):
+    task = asyncio.create_task(coroutine)
+    JOB_TASKS.add(task)
+    task.add_done_callback(JOB_TASKS.discard)
+
+
+def fail_job(job, error):
+    if isinstance(error, UserError):
+        touch(job, status="error", stage="Ошибка", error=error.message)
+    else:
+        logger.error("Job %s failed", job["id"], exc_info=error)
+        touch(job, status="error", stage="Ошибка", error="Внутренняя ошибка сервера.")
+
+
+async def run_transcribe_job(job):
+    try:
+        async with PROCESS_LOCK:
+            def report(progress, stage):
+                touch(job, progress=progress, stage=stage)
+
+            touch(job, status="transcribing", progress=10, stage="Извлекаем звук")
+            work_dir = job["dir"]
+            audio_path = work_dir / "audio.mp3"
+
+            await extract_audio(job["input"], audio_path, work_dir)
+            words, detected = await transcribe_video(
+                audio_path, work_dir, job["language"], job["duration"], report,
+                job.get("model"), job.get("glossary"),
+            )
+
+            report(95, "Подбираем карточки")
+            job["cards"] = await suggest_cards(words, work_dir)
+            touch(
+                job,
+                words=words,
+                detected=detected,
+                lines=make_lines(words),
+                status="transcribed",
+                stage="Текст готов",
+                progress=100,
+            )
+    except Exception as error:
+        fail_job(job, error)
+
+
+async def run_render_job(job, style, video_format, lines, options):
+    try:
+        async with PROCESS_LOCK:
+            touch(job, status="rendering", progress=0, stage="Монтируем видео")
+
+            if lines:
+                words = lines_to_words(lines, job["duration"])
+            else:
+                words = job["words"]
+
+            output_path = job["dir"] / "gapcut_ai.mp4"
+            if output_path.exists():
+                output_path.unlink()
+
+            def report(progress, stage):
+                touch(job, progress=progress, stage=stage)
+
+            await render_video(
+                job["input"], output_path, job["dir"], words, style,
+                video_format, job["info"], job["duration"], report, options,
+            )
+
+            touch(
+                job,
+                output=output_path,
+                status="done",
+                stage="Видео готово",
+                progress=100,
+            )
+    except Exception as error:
+        fail_job(job, error)
+
+
+# =========================================================
+# FASTAPI
+# =========================================================
+
+async def cleanup_loop():
+    while True:
+        try:
+            await asyncio.sleep(60)
+            purge_expired_jobs()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Cleanup loop error")
+
+
+@asynccontextmanager
+async def lifespan(app_instance):
+    shutil.rmtree(BASE_DIR, ignore_errors=True)
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+    global AVAILABLE_FONTS
+    AVAILABLE_FONTS = await asyncio.to_thread(detect_fonts)
+    logger.info("Fonts with Tajik letters: %s", [f["family"] for f in AVAILABLE_FONTS])
+
+    polling_task = asyncio.create_task(run_polling_forever())
+    cleanup_task = asyncio.create_task(cleanup_loop())
+
+    logger.info("GAPCUT AI %s starting on port %s", VERSION, PORT)
+    try:
+        yield
+    finally:
+        for task in (polling_task, cleanup_task):
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+        with suppress(Exception):
+            await bot.session.close()
+        shutil.rmtree(BASE_DIR, ignore_errors=True)
+
+
+app = FastAPI(title="GAPCUT AI API", version=VERSION, lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
+)
+
+
+@app.get("/")
+async def home():
+    return {
+        "status": "ok",
+        "service": "GAPCUT AI",
+        "version": VERSION,
+        "languages": sorted(ALLOWED_LANGUAGES),
+        "styles": sorted(ALLOWED_STYLES),
+        "formats": sorted(ALLOWED_FORMATS),
+        "max_input_mb": MAX_INPUT_SIZE // (1024 * 1024),
+        "max_duration_seconds": MAX_DURATION,
+        "processing_concurrency": 1,
+    }
+
+
+@app.get("/api/fonts")
+async def list_fonts():
+    return {"fonts": [f["family"] for f in AVAILABLE_FONTS]}
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health():
+    return {"status": "healthy", "service": "GAPCUT AI", "version": VERSION}
+
+
+# ---------------------------------------------------------
+# One-shot endpoint (compatible with the existing Mini App)
+# ---------------------------------------------------------
+
+@app.post("/api/process")
+async def api_process(
+    file: UploadFile = File(...),
+    style: str = Form("viral"),
+    language: str = Form("tg_ru"),
+    video_format: str = Form("9:16"),
+    init_data: str = Form(""),
+    x_init_data: str = Header(default=""),
+):
+    user = require_user(init_data, x_init_data)
+    style = clean_style(style)
+    language = clean_language(language)
+    video_format = clean_format(video_format)
+
+    if PROCESS_LOCK.locked():
+        raise HTTPException(
+            status_code=429,
+            detail="Сервер сейчас обрабатывает другое видео. Попробуйте позже.",
+            headers={"Retry-After": "30"},
+        )
+
+    work_dir = None
+    try:
+        async with PROCESS_LOCK:
+            work_dir = new_work_dir()
+            logger.info("Upload started. Telegram user ID: %s", user["id"])
+
+            input_path = await save_upload(file, work_dir)
+            info, duration = await inspect_video(input_path)
+
+            audio_path = work_dir / "audio.mp3"
+            await extract_audio(input_path, audio_path, work_dir)
+            words, _ = await transcribe_video(
+                audio_path, work_dir, language, duration, lambda p, s: None
+            )
+
+            output_path = work_dir / "gapcut_ai.mp4"
+            await render_video(
+                input_path, output_path, work_dir, words, style, video_format,
+                info, duration, lambda p, s: None,
+            )
+
+        return FileResponse(
+            path=str(output_path),
+            media_type="video/mp4",
+            filename="GAPCUT_AI.mp4",
+            background=BackgroundTask(shutil.rmtree, str(work_dir), ignore_errors=True),
+        )
+
+    except HTTPException:
+        if work_dir:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        raise
+    except UserError as error:
+        if work_dir:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(status_code=error.status_code, detail=error.message)
+    except Exception:
+        logger.exception("Video processing failed")
+        if work_dir:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера.")
+    finally:
+        await file.close()
+
+
+# ---------------------------------------------------------
+# Job endpoints (progress + editable transcript)
+# ---------------------------------------------------------
+
+@app.post("/api/jobs", status_code=202)
+async def create_job(
+    file: UploadFile = File(...),
+    language: str = Form("tg_ru"),
+    quality: str = Form("fast"),
+    glossary: str = Form(""),
+    init_data: str = Form(""),
+    x_init_data: str = Header(default=""),
+):
+    user = require_user(init_data, x_init_data)
+    language = clean_language(language)
+    model = GROQ_MODEL_BEST if str(quality).strip().lower() == "best" else GROQ_MODEL
+    glossary_terms = clean_glossary(glossary)
+
+    purge_expired_jobs()
+
+    for existing_id, existing in list(JOBS.items()):
+        if existing["user_id"] != user["id"]:
+            continue
+        if existing["status"] in ACTIVE_STATES:
+            raise HTTPException(
+                status_code=429,
+                detail="У вас уже есть задача в обработке. Дождитесь её завершения.",
+            )
+        remove_job(existing_id)
+
+    if len(JOBS) >= MAX_STORED_JOBS:
+        raise HTTPException(
+            status_code=429,
+            detail="Сервер занят. Попробуйте через несколько минут.",
+            headers={"Retry-After": "60"},
+        )
+
+    work_dir = new_work_dir()
+    try:
+        input_path = await save_upload(file, work_dir)
+        info, duration = await inspect_video(input_path)
+    except UserError as error:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(status_code=error.status_code, detail=error.message)
+    except HTTPException:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
+    except Exception:
+        logger.exception("Upload failed")
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера.")
+    finally:
+        await file.close()
+
+    job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id,
+        "user_id": user["id"],
+        "dir": work_dir,
+        "input": input_path,
+        "info": info,
+        "duration": duration,
+        "language": language,
+        "model": model,
+        "glossary": glossary_terms,
+        "status": "queued",
+        "stage": "В очереди",
+        "progress": 5,
+        "error": None,
+        "words": [],
+        "lines": [],
+        "detected": [],
+        "cards": [],
+        "output": None,
+        "updated": time.time(),
+    }
+    JOBS[job_id] = job
+    spawn(run_transcribe_job(job))
+
+    return public_job(job)
+
+
+@app.get("/api/jobs/{job_id}")
+async def job_status(
+    job_id: str,
+    x_init_data: str = Header(default=""),
+    init_data: str = Query(default=""),
+):
+    user = require_user(x_init_data, init_data)
+    return public_job(get_job(job_id, user))
+
+
+@app.post("/api/jobs/{job_id}/render", status_code=202)
+async def start_render(
+    job_id: str,
+    style: str = Form("viral"),
+    video_format: str = Form("9:16"),
+    lines: str = Form(""),
+    accent: str = Form(""),
+    size: str = Form("m"),
+    position: str = Form("auto"),
+    subtitles: str = Form("1"),
+    zoom: str = Form("1"),
+    fx: str = Form("1"),
+    sfx: str = Form("1"),
+    cards: str = Form("[]"),
+    font: str = Form(""),
+    font2: str = Form(""),
+    fontmix: str = Form("0"),
+    init_data: str = Form(""),
+    x_init_data: str = Header(default=""),
+):
+    user = require_user(init_data, x_init_data)
+    job = get_job(job_id, user)
+    options = clean_options(
+        accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix
+    )
+    try:
+        wanted = {int(x) for x in json.loads(cards or "[]")}
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Неверный список карточек.")
+    options["cards"] = [
+        c for c in job["cards"] if c["id"] in wanted and Path(c["file"]).exists()
+    ]
+
+    style = clean_style(style)
+    video_format = clean_format(video_format)
+
+    if job["status"] in ("queued", "transcribing", "rendering"):
+        raise HTTPException(status_code=409, detail="Задача ещё обрабатывается.")
+    if job["status"] == "error" and not job["words"]:
+        raise HTTPException(status_code=409, detail="Распознавание не удалось.")
+    if not job["words"]:
+        raise HTTPException(status_code=409, detail="Текст ещё не готов.")
+
+    parsed_lines = None
+    if lines.strip():
+        try:
+            parsed_lines = json.loads(lines)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Неверный формат текста.")
+        if not isinstance(parsed_lines, list):
+            raise HTTPException(status_code=400, detail="Неверный формат текста.")
+        try:
+            lines_to_words(parsed_lines, job["duration"])
+        except UserError as error:
+            raise HTTPException(status_code=400, detail=error.message)
+
+    touch(job, status="rendering", stage="В очереди", progress=0, error=None)
+    spawn(run_render_job(job, style, video_format, parsed_lines, options))
+    return public_job(job)
+
+
+@app.get("/api/jobs/{job_id}/download")
+async def download_job(
+    job_id: str,
+    x_init_data: str = Header(default=""),
+    init_data: str = Query(default=""),
+):
+    user = require_user(x_init_data, init_data)
+    job = get_job(job_id, user)
+
+    output = job.get("output")
+    if job["status"] != "done" or not output or not Path(output).exists():
+        raise HTTPException(status_code=409, detail="Видео ещё не готово.")
+
+    touch(job)
+    return FileResponse(
+        path=str(output),
+        media_type="video/mp4",
+        filename="GAPCUT_AI.mp4",
+    )
+
+
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(job_id: str, x_init_data: str = Header(default="")):
+    user = require_user(x_init_data)
+    job = get_job(job_id, user)
+    if job["status"] in ACTIVE_STATES:
+        raise HTTPException(status_code=409, detail="Задача ещё обрабатывается.")
+    remove_job(job_id)
+    return {"deleted": True}
+
+
+# =========================================================
+# ENTRY POINT
+# =========================================================
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=PORT,
+        log_level="info",
+        timeout_keep_alive=30,
+        limit_concurrency=20,
+    )
