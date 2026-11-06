@@ -30,6 +30,7 @@ import asyncio
 import difflib
 import hashlib
 import hmac
+import random
 import json
 import logging
 import os
@@ -115,7 +116,7 @@ BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
 FONTS_DIR = Path(os.getenv("FONTS_DIR", str(Path(__file__).resolve().parent / "fonts")))
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
-ALLOWED_STYLES = {"viral", "classic", "cinema", "podcast", "karaoke", "creator", "keyword"}
+ALLOWED_STYLES = {"viral", "classic", "cinema", "podcast", "karaoke", "creator", "keyword", "minimal", "dynamic"}
 ALLOWED_FORMATS = {"9:16", "16:9", "1:1", "original"}
 ALLOWED_LANGUAGES = {"tg", "ru", "tg_ru"}
 LANGUAGE_ALIASES = {"both": "tg_ru", "tg+ru": "tg_ru", "tg-ru": "tg_ru"}
@@ -1353,6 +1354,21 @@ STYLES = {
         "border_style": 1, "box_alpha": 0, "mode": "key",
         "max_words": 3, "max_chars": 26, "upper": False, "margin": 0.20,
     },
+    "minimal": {
+        "font": "Noto Sans", "size": 46, "bold": 0, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "F5B937",
+        "outline": "000000", "outline_w": 2, "shadow": 0,
+        "border_style": 1, "box_alpha": 0, "mode": "plain",
+        "max_words": 7, "max_chars": 44, "upper": False, "margin": 0.12,
+    },
+    "dynamic": {
+        # Rotates between pop, two-tier keyword and highlight phrase by phrase.
+        "font": "Noto Sans", "size": 86, "bold": 1, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "FFE500",
+        "outline": "000000", "outline_w": 6, "shadow": 2,
+        "border_style": 1, "box_alpha": 0, "mode": "dynamic",
+        "max_words": 3, "max_chars": 24, "upper": False, "margin": 0.20,
+    },
     "karaoke": {
         # In karaoke mode Primary = already sung, Secondary = not yet.
         "font": "Noto Sans", "size": 78, "bold": 1, "spacing": 0,
@@ -1417,9 +1433,382 @@ def split_phrases(words, max_words, max_chars, max_gap=0.7):
     return phrases
 
 
+# =========================================================
+# TEXT ANIMATIONS (ASS override tags, rendered by libass)
+# =========================================================
+
+ANIM_IN = [
+    "fade_in", "slide_up", "slide_left", "zoom_in", "pop_up", "bounce",
+    "typewriter", "word_by_word", "letter_by_letter", "glitch", "scramble",
+    "split", "shake", "rotate_3d", "neon_glow", "elastic", "mask_reveal",
+    "light_sweep", "tracking", "blur_reveal", "pop_3d", "liquid", "wave",
+    "flip_in", "roll_in", "spin_in", "stretch", "flash", "flicker",
+    "rotate_in", "swing", "wipe_reveal", "curtain_reveal", "glowing",
+    "floating", "magnetic", "particle", "fire", "smoke", "rgb_split",
+    "pulse", "handwriting",
+]
+ANIM_OUT = ["fade_out", "slide_down", "slide_right", "zoom_out", "blur_out", "flip_out"]
+ANIM_MIX = [
+    "fade_in", "slide_up", "zoom_in", "pop_up", "bounce", "elastic",
+    "blur_reveal", "tracking", "mask_reveal", "wipe_reveal", "spin_in",
+    "flip_in", "rotate_3d", "pop_3d", "stretch", "magnetic", "smoke",
+    "glitch", "roll_in", "curtain_reveal", "liquid",
+]
+ANIM_MIX_OUT = ["fade_out", "slide_down", "zoom_out", "blur_out"]
+SCRAMBLE_ALPHABET = "АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЭЮЯҒҚҲҶ"
+
+
+def _t(a, b, tags):
+    return f"\\t({int(a)},{int(b)},{tags})"
+
+
+def build_entrance(name, c):
+    """Return dict(tags, fi, char, layers, skip_main) for an entrance."""
+    x, y, u, d, dur = c["x"], c["y"], c["u"], c["d"], c["dur"]
+    xl, xr, yt, yb = c["xl"], c["xr"], c["yt"], c["yb"]
+    col = c["col"]
+    r = {"tags": "", "fi": 0, "char": None, "layers": [], "skip_main": False}
+    T = _t
+    mv = lambda x1, y1, x2, y2, a, b: f"\\move({int(x1)},{int(y1)},{int(x2)},{int(y2)},{int(a)},{int(b)})"
+
+    if name == "fade_in":
+        r["fi"] = d
+    elif name == "slide_up":
+        r["tags"] = mv(x, y + 90 * u, x, y, 0, d); r["fi"] = d * 0.7
+    elif name == "slide_left":
+        r["tags"] = mv(x + 300 * u, y, x, y, 0, d); r["fi"] = d * 0.6
+    elif name == "zoom_in":
+        r["tags"] = "\\fscx40\\fscy40" + T(0, d, "\\fscx100\\fscy100"); r["fi"] = d * 0.6
+    elif name == "pop_up":
+        r["tags"] = ("\\fscx0\\fscy0" + T(0, d * 0.6, "\\fscx118\\fscy118")
+                     + T(d * 0.6, d, "\\fscx100\\fscy100"))
+    elif name == "bounce":
+        r["tags"] = (mv(x, y - 160 * u, x, y, 0, d * 0.55) + T(d * 0.55, d * 0.7, "\\fscy78")
+                     + T(d * 0.7, d, "\\fscy100")); r["fi"] = 60
+    elif name == "elastic":
+        r["tags"] = ("\\fscx150\\fscy55" + T(0, d * 0.3, "\\fscx88\\fscy112")
+                     + T(d * 0.3, d * 0.6, "\\fscx106\\fscy96") + T(d * 0.6, d, "\\fscx100\\fscy100"))
+        r["fi"] = 60
+    elif name == "typewriter":
+        r["char"] = "seq"
+    elif name == "word_by_word":
+        r["char"] = "word"
+    elif name == "letter_by_letter":
+        r["char"] = "letter"
+    elif name == "particle":
+        r["char"] = "rand"
+    elif name == "wave":
+        r["char"] = "wave"; r["fi"] = 120
+    elif name == "scramble":
+        r["char"] = "scramble"
+    elif name == "glitch":
+        r["tags"] = ("\\fax0.35\\fscx108\\3c&H0000FF&" + T(0, 60, "\\fax-0.3\\fscx94\\3c&HFFFF00&")
+                     + T(60, 120, "\\fax0.2\\fscx104\\3c&H0000FF&") + T(120, 180, "\\fax0\\fscx100\\3c&H000000&"))
+        r["fi"] = 40
+    elif name == "shake":
+        r["tags"] = ("\\frz3" + T(0, 70, "\\frz-3") + T(70, 140, "\\frz2.5") + T(140, 210, "\\frz-2")
+                     + T(210, 280, "\\frz1") + T(280, 350, "\\frz0")); r["fi"] = 80
+    elif name == "rotate_3d":
+        r["tags"] = "\\frx80" + T(0, d, "\\frx0"); r["fi"] = d * 0.6
+    elif name == "pop_3d":
+        r["tags"] = ("\\fry70\\frx25\\fscx60\\fscy60" + T(0, d * 0.7, "\\fry-8\\frx-4\\fscx112\\fscy112")
+                     + T(d * 0.7, d, "\\fry0\\frx0\\fscx100\\fscy100")); r["fi"] = d * 0.5
+    elif name == "flip_in":
+        r["tags"] = "\\fry90" + T(0, d, "\\fry0"); r["fi"] = d * 0.5
+    elif name == "roll_in":
+        r["tags"] = mv(x + 260 * u, y, x, y, 0, d) + "\\frz-25" + T(0, d, "\\frz0"); r["fi"] = d * 0.5
+    elif name == "spin_in":
+        r["tags"] = "\\frz-360\\fscx30\\fscy30" + T(0, d * 1.2, "\\frz0\\fscx100\\fscy100"); r["fi"] = d * 0.5
+    elif name == "rotate_in":
+        r["tags"] = "\\frz-20" + T(0, d, "\\frz0"); r["fi"] = d
+    elif name == "stretch":
+        r["tags"] = "\\fscx260\\fscy55" + T(0, d, "\\fscx100\\fscy100"); r["fi"] = d * 0.6
+    elif name == "flash":
+        r["tags"] = "\\1c&HFFFFFF&\\3c&HFFFFFF&\\blur9" + T(0, 260, "\\blur0\\3c&H000000&"); r["fi"] = 30
+    elif name == "flicker":
+        steps = ""
+        for k in range(6):
+            steps += T(k * 90, k * 90 + 45, "\\alpha&H" + ("B0" if k % 2 == 0 else "00") + "&")
+        r["tags"] = "\\alpha&HFF&" + steps + T(540, 560, "\\alpha&H00&")
+    elif name == "swing":
+        r["tags"] = (f"\\org({int(x)},{int(y - 220 * u)})\\frz9" + T(0, 200, "\\frz-7") + T(200, 400, "\\frz5")
+                     + T(400, 600, "\\frz-3") + T(600, 800, "\\frz0")); r["fi"] = 120
+    elif name == "pulse":
+        cyc = ""
+        for k in range(max(1, min(10, int(dur // 600)))):
+            cyc += T(k * 600, k * 600 + 300, "\\fscx107\\fscy107") + T(k * 600 + 300, k * 600 + 600, "\\fscx100\\fscy100")
+        r["tags"] = cyc; r["fi"] = d * 0.5
+    elif name == "liquid":
+        r["tags"] = ("\\fscx125\\fscy80\\blur4" + T(0, d * 0.25, "\\fscx86\\fscy116")
+                     + T(d * 0.25, d * 0.5, "\\fscx108\\fscy94") + T(d * 0.5, d * 0.75, "\\fscx96\\fscy104")
+                     + T(d * 0.75, d, "\\fscx100\\fscy100\\blur0")); r["fi"] = 80
+    elif name == "blur_reveal":
+        r["tags"] = "\\blur20" + T(0, d, "\\blur0"); r["fi"] = d
+    elif name == "smoke":
+        r["tags"] = mv(x, y + 45 * u, x, y, 0, d * 1.3) + "\\blur16" + T(0, d * 1.3, "\\blur0"); r["fi"] = d * 1.2
+    elif name == "tracking":
+        r["tags"] = "\\fsp36" + T(0, d * 1.5, "\\fsp0"); r["fi"] = d
+    elif name == "magnetic":
+        r["tags"] = "\\fsp70\\blur5" + T(0, d, "\\fsp0\\blur0"); r["fi"] = d * 0.7
+    elif name == "mask_reveal":
+        r["tags"] = f"\\clip({xl},{yb},{xr},{yb})" + T(0, d * 1.1, f"\\clip({xl},{yt},{xr},{yb})")
+    elif name == "wipe_reveal":
+        r["tags"] = f"\\clip({xl},{yt},{xl},{yb})" + T(0, d * 1.2, f"\\clip({xl},{yt},{xr},{yb})")
+    elif name == "handwriting":
+        r["tags"] = (f"\\clip({xl},{yt},{xl},{yb})\\blur0.6"
+                     + T(0, min(1500, dur * 0.7), f"\\clip({xl},{yt},{xr},{yb})"))
+    elif name == "curtain_reveal":
+        r["tags"] = f"\\clip({int(x)},{yt},{int(x)},{yb})" + T(0, d * 1.1, f"\\clip({xl},{yt},{xr},{yb})")
+    elif name == "split":
+        r["skip_main"] = True
+        r["layers"] = [
+            (5, f"\\clip(0,0,{int(x)},{c['h']})" + mv(x - 220 * u, y, x, y, 0, d) + f"\\fad({int(d * 0.5)},0)"),
+            (5, f"\\clip({int(x)},0,{c['w']},{c['h']})" + mv(x + 220 * u, y, x, y, 0, d) + f"\\fad({int(d * 0.5)},0)"),
+        ]
+    elif name == "neon_glow":
+        r["fi"] = d * 0.6
+        r["layers"] = [(4, f"\\1a&HFF&\\bord{max(6, int(9 * u * 1.5))}\\blur{max(6, int(10 * u * 1.5))}\\3c{col}\\shad0")]
+    elif name == "glowing":
+        b = max(6, int(8 * u * 1.5))
+        pulses = ""
+        for k in range(max(1, min(8, int(dur // 800)))):
+            pulses += T(k * 800, k * 800 + 400, f"\\blur{b * 2}") + T(k * 800 + 400, k * 800 + 800, f"\\blur{b}")
+        r["fi"] = d * 0.6
+        r["layers"] = [(4, f"\\1a&HFF&\\bord{b}\\blur{b}\\3c{col}\\shad0" + pulses)]
+    elif name == "fire":
+        fl = ""
+        for k in range(max(1, min(14, int(dur // 160)))):
+            fl += T(k * 160, k * 160 + 80, "\\1c&H0030FF&") + T(k * 160 + 80, k * 160 + 160, "\\1c&H00C8FF&")
+        r["tags"] = "\\1c&H0090FF&\\3c&H000040&" + fl; r["fi"] = d * 0.5
+        r["layers"] = [(4, "\\1a&HFF&\\bord10\\blur12\\3c&H0040FF&\\shad0")]
+    elif name == "rgb_split":
+        r["fi"] = 60
+        off = max(8, int(16 * u))
+        r["layers"] = [
+            (4, "\\1c&H0000FF&\\3c&H0000FF&\\alpha&H40&" + mv(x - off, y, x - 2, y, 0, d * 1.2)),
+            (3, "\\1c&HFF0000&\\3c&HFF0000&\\alpha&H40&" + mv(x + off, y, x + 2, y, 0, d * 1.2)),
+        ]
+    elif name == "light_sweep":
+        r["fi"] = d * 0.6
+        bw = int((xr - xl) * 0.22)
+        r["layers"] = [(6, f"\\1c&HFFFFFF&\\3c&HFFFFFF&\\bord1\\blur2\\clip({xl - bw},{yt},{xl},{yb})"
+                        + _t(250, 1050, f"\\clip({xr},{yt},{xr + bw},{yb})") + _t(900, 1100, "\\alpha&HFF&"))]
+    return r
+
+
+def build_exit(name, c, ms):
+    x, y, u = c["x"], c["y"], c["u"]
+    fade = f"\\fad(0,{ms})"
+    mv = lambda x1, y1, x2, y2: f"\\move({int(x1)},{int(y1)},{int(x2)},{int(y2)},0,{ms})"
+    if name == "slide_down":
+        return mv(x, y, x, y + 90 * u) + fade
+    if name == "slide_right":
+        return mv(x, y, x + 300 * u, y) + fade
+    if name == "zoom_out":
+        return _t(0, ms, "\\fscx40\\fscy40") + fade
+    if name == "blur_out":
+        return _t(0, ms, "\\blur20") + fade
+    if name == "flip_out":
+        return _t(0, ms, "\\fry90") + fade
+    return fade
+
+
+def _visible_chars(text):
+    """Yield (is_visible, token) over an ASS text (tags and \\N stay intact)."""
+    i = 0
+    while i < len(text):
+        if text[i] == "{":
+            j = text.find("}", i)
+            j = len(text) - 1 if j < 0 else j
+            yield False, text[i:j + 1]
+            i = j + 1
+        elif text.startswith("\\N", i):
+            yield False, "\\N"
+            i += 2
+        elif text[i] == "\\" and i + 1 < len(text):
+            yield True, text[i:i + 2]
+            i += 2
+        else:
+            yield True, text[i]
+            i += 1
+
+
+def wrap_chars(text, kind, total_ms, rng):
+    letters = [tok for vis, tok in _visible_chars(text) if vis and tok != " "]
+    n = max(1, len(letters))
+    out, index, word = [], 0, 0
+    words = max(1, len(text.split(" ")))
+    for vis, tok in _visible_chars(text):
+        if not vis:
+            out.append(tok)
+            continue
+        if tok == " ":
+            word += 1
+            out.append(tok)
+            continue
+        if kind == "seq":
+            a = index * min(total_ms * 0.8, n * 45) / n
+            out.append("{\\alpha&HFF&" + _t(a, a + 1, "\\alpha&H00&") + "}" + tok)
+        elif kind == "letter":
+            a = index * min(total_ms * 0.85, n * 70) / n
+            out.append("{\\alpha&HFF&" + _t(a, a + 140, "\\alpha&H00&") + "}" + tok)
+        elif kind == "word":
+            a = word * min(total_ms * 0.8 / words, 300)
+            out.append("{\\alpha&HFF&" + _t(a, a + 120, "\\alpha&H00&") + "}" + tok)
+        elif kind == "rand":
+            a = rng.random() * min(total_ms * 0.7, 700)
+            out.append("{\\alpha&HFF&\\blur6" + _t(a, a + 260, "\\alpha&H00&\\blur0") + "}" + tok)
+        elif kind == "wave":
+            a = index * 35
+            out.append("{" + _t(a, a + 150, "\\fscy130") + _t(a + 150, a + 320, "\\fscy100") + "}" + tok)
+        else:
+            out.append(tok)
+        index += 1
+    return "".join(out)
+
+
+def scramble_text(text, p, rng):
+    out = []
+    for vis, tok in _visible_chars(text):
+        if vis and tok.isalpha() and rng.random() < p:
+            out.append(rng.choice(SCRAMBLE_ALPHABET))
+        else:
+            out.append(tok)
+    return "".join(out)
+
+
+def animated_phrase_events(text, start, end, sname, in_name, out_name, c, rng):
+    """Dialogue lines for one phrase with an entrance and optional exit."""
+    lines = []
+    exit_ms = 260 if out_name and (end - start) * 1000 > 700 else 0
+    main_end = end - exit_ms / 1000.0
+    main_start = start
+    total_ms = max(120, (main_end - start) * 1000)
+    c = dict(c, dur=total_ms, d=min(450, total_ms * 0.6))
+    an = f"\\an{c['an']}"
+
+    def dialog(layer, s, e, tags, body, style=sname):
+        return (f"Dialogue: {layer},{ass_time(s)},{ass_time(e)},{style},,0,0,0,,"
+                f"{{{an}{tags}}}{body}")
+
+    r = build_entrance(in_name, c) if in_name else {"tags": "", "fi": 0, "char": None, "layers": [], "skip_main": False}
+    fad = f"\\fad({int(r['fi'])},0)" if r["fi"] else ""
+
+    if r["char"] == "scramble" and total_ms > 700:
+        for k, p in enumerate((0.95, 0.75, 0.5, 0.3, 0.15)):
+            s = start + k * 0.07
+            lines.append(dialog(5, s, s + 0.07, "", scramble_text(text, p, rng)))
+        main_start = start + 0.35
+        r["char"] = None
+    elif r["char"] == "scramble":
+        r["char"] = None
+
+    body = text
+    if r["char"]:
+        body = wrap_chars(text, r["char"], total_ms, rng)
+
+    for layer, extra in r["layers"]:
+        lines.append(dialog(layer, main_start, main_end, extra if r["skip_main"] else fad + r["tags"] + extra, text))
+    if not r["skip_main"]:
+        lines.append(dialog(5, main_start, main_end, fad + r["tags"], body))
+
+    if exit_ms:
+        etags = build_exit(out_name, c, exit_ms)
+        for layer, extra in r["layers"]:
+            if not r["skip_main"] and layer < 5:
+                lines.append(dialog(layer, main_end, end, etags + extra.split("\\move")[0].split("\\clip")[0], text))
+        lines.append(dialog(5, main_end, end, etags, text))
+    return lines
+
+
+
+
+def choose_animation(text, index, previous, count):
+    """Pick an entrance by what the phrase says (hook, question, emphasis, number, calm)."""
+    t = text.strip()
+    if index == 0:
+        pool = ["pop_3d", "zoom_in", "pop_up", "slide_up"]
+    elif t.endswith("?"):
+        pool = ["typewriter", "word_by_word", "wipe_reveal"]
+    elif t.endswith("!") or any(ch.isdigit() for ch in t):
+        pool = ["pop_up", "bounce", "zoom_in", "stretch", "shake"]
+    elif count >= 5:
+        pool = ["fade_in", "blur_reveal", "slide_up", "tracking"]
+    else:
+        pool = ANIM_MIX
+    pool = [name for name in pool if name != previous] or ANIM_MIX
+    return pool[index % len(pool)]
+
+
+TRANSITION_KINDS = ["zoom", "whip", "swipe", "motion", "flash", "blur", "glitch"]
+
+
+def plan_transitions(words, duration, mode, cut_points):
+    """List of (time, kind) on the final timeline: at cuts and at new thoughts."""
+    if mode in (None, "", "off"):
+        return []
+    points = [(t, "cut") for t in cut_points if 0.3 < t < duration - 0.3]
+    lines = make_lines(words)
+    for previous, line in zip(lines, lines[1:]):
+        ends_thought = previous["text"].rstrip().endswith((".", "?", "!", "…"))
+        if ends_thought and 0.8 < line["start"] < duration - 0.5:
+            points.append((line["start"], "thought"))
+    points.sort()
+    chosen = []
+    for moment, origin in points:
+        if chosen and moment - chosen[-1][0] < 1.5:
+            continue
+        chosen.append((moment, origin))
+    chosen = chosen[:10]
+    out = []
+    for number, (moment, origin) in enumerate(chosen):
+        if mode in TRANSITION_KINDS:
+            kind = mode
+        elif origin == "cut":
+            kind = ("zoom", "whip", "flash", "motion")[number % 4]
+        else:
+            kind = ("blur", "swipe", "glitch", "zoom", "flash")[number % 5]
+        out.append((moment, kind))
+    return out
+
+
+def transition_filters(points, width):
+    """Return (zoom_terms, shift_terms, filter_string) for the transition points."""
+    zoom_terms, shift_terms, filters = [], [], []
+    for number, (moment, kind) in enumerate(points):
+        tri = f"max(0,1-abs(t-{moment:.2f})/0.14)"
+        win = f"between(t,{moment - 0.1:.2f},{moment + 0.14:.2f})"
+        if kind in ("zoom", "whip", "swipe", "motion"):
+            zoom_terms.append(f"+0.14*{tri}")
+        if kind in ("whip", "swipe"):
+            sign = "+" if number % 2 == 0 else "-"
+            shift_terms.append(f"{sign}{tri}")
+        if kind == "whip":
+            filters.append(f"avgblur=sizeX={max(20, int(width * 0.09))}:sizeY=1:enable='{win}'")
+        elif kind == "swipe":
+            filters.append(f"avgblur=sizeX={max(10, int(width * 0.04))}:sizeY=1:enable='{win}'")
+        elif kind == "motion":
+            filters.append(f"avgblur=sizeX={max(14, int(width * 0.05))}:sizeY=1:enable='{win}'")
+        elif kind == "blur":
+            filters.append(f"gblur=sigma=16:enable='{win}'")
+        elif kind == "flash":
+            filters.append(
+                "drawbox=x=0:y=0:w=iw:h=ih:color=white@0.8:t=fill:"
+                f"enable='between(t,{moment - 0.03:.2f},{moment + 0.07:.2f})'"
+            )
+        elif kind == "glitch":
+            filters.append(
+                f"rgbashift=rh=-20:bh=20:gh=6:enable='{win}',"
+                f"negate=enable='between(t,{moment:.2f},{moment + 0.05:.2f})'"
+            )
+    return zoom_terms, shift_terms, ",".join(filters)
+
+
+
+
 def build_ass(words, style_name, width, height, output_path,
               accent=None, size="m", position="auto",
-              font=None, font2=None, mix=False):
+              font=None, font2=None, mix=False, keys=True, anim=None, anim_out=None):
     style = dict(STYLES.get(style_name, STYLES["viral"]))
     if accent:
         style["active"] = accent
@@ -1497,8 +1886,43 @@ def build_ass(words, style_name, width, height, output_path,
         text = escape_ass_text(token)
         return text.upper() if style["upper"] else text
 
+    def colored(phrase):
+        flagged = [i for i, t in enumerate(phrase) if t.get("key")]
+        if not keys or not flagged:
+            return " ".join(display(t["word"]) for t in phrase)
+        key_col = ass_tag_color(accent or "F5B937")
+        base_col = ass_tag_color(style["primary"])
+        return " ".join(
+            ("{\\1c%s}%s{\\1c%s}" % (key_col, display(t["word"]), base_col))
+            if i in flagged else display(t["word"])
+            for i, t in enumerate(phrase)
+        )
+
     phrases = split_phrases(words, style["max_words"], style["max_chars"])
     events = []
+    anim_on = bool(anim or anim_out)
+    last_anim = None
+    anim_master = random.Random(4242)
+    if anim_on:
+        anchor_x = width // 2
+        if alignment == 8:
+            anchor_y = margin_v
+        elif alignment == 5:
+            anchor_y = height // 2
+        else:
+            anchor_y = height - margin_v
+        reach = int(font_size * 2.8)
+        if alignment == 8:
+            band = (max(0, anchor_y - int(font_size * 0.3)), min(height, anchor_y + reach))
+        elif alignment == 5:
+            band = (max(0, anchor_y - reach // 2), min(height, anchor_y + reach // 2))
+        else:
+            band = (max(0, anchor_y - reach), min(height, anchor_y + int(font_size * 0.3)))
+        base_ctx = dict(
+            x=anchor_x, y=anchor_y, an=alignment, u=height / 1280.0, w=width, h=height,
+            xl=margin_h, xr=width - margin_h, yt=band[0], yb=band[1],
+            col=ass_tag_color(style["active"]), fs=font_size,
+        )
 
     for p_index, phrase in enumerate(phrases):
         phrase_start = phrase[0]["start"]
@@ -1509,6 +1933,60 @@ def build_ass(words, style_name, width, height, output_path,
         phrase_end = max(phrase_end, phrase_start + 0.15)
 
         mode = style["mode"]
+        if mode == "dynamic":
+            mode = ("pop", "key", "highlight", "key")[p_index % 4]
+
+        if anim_on:
+            act = ass_tag_color(style["active"])
+            prim = ass_tag_color(style["primary"])
+            if mode == "key":
+                flagged = [i for i, t in enumerate(phrase) if t.get("key")]
+                pool = flagged or list(range(len(phrase)))
+                kidx = max(pool, key=lambda i: len(core_token(phrase[i]["word"])))
+                ktext = display(phrase[kidx]["word"])
+                ksize = int(font_size * min(1.0, 9.0 / max(len(ktext), 1)))
+                lead = " ".join(display(t["word"]) for j, t in enumerate(phrase) if j != kidx)
+                pieces = []
+                if lead:
+                    pieces.append("{\\fs%d\\1c&HFFFFFF&}%s" % (int(font_size * 0.52), lead))
+                pieces.append("{\\fs%d\\1c%s%s}%s" % (ksize, act, font_tag, ktext))
+                block = "\\N".join(pieces)
+            elif mode in ("pop", "highlight"):
+                flagged = [i for i, t in enumerate(phrase) if t.get("key")]
+                if not flagged:
+                    flagged = [max(range(len(phrase)), key=lambda i: len(core_token(phrase[i]["word"])))]
+                block = " ".join(
+                    ("{\\1c%s}%s{\\1c%s}" % (act, display(t["word"]), prim)) if i in flagged
+                    else display(t["word"])
+                    for i, t in enumerate(phrase)
+                )
+            elif mode == "karaoke":
+                bits = []
+                for w_index, token in enumerate(phrase):
+                    if w_index + 1 < len(phrase):
+                        span = phrase[w_index + 1]["start"] - token["start"]
+                    else:
+                        span = phrase_end - token["start"]
+                    bits.append("{\\kf%d}%s" % (max(1, int(round(span * 100))), display(token["word"])))
+                block = " ".join(bits)
+            else:
+                block = colored(phrase)
+
+            plain = " ".join(t["word"] for t in phrase)
+            in_name = anim if anim in ANIM_IN else None
+            if anim == "auto":
+                in_name = choose_animation(plain, p_index, last_anim, len(phrase))
+            elif anim == "mix":
+                in_name = anim_master.choice([n for n in ANIM_MIX if n != last_anim])
+            last_anim = in_name or last_anim
+            out_name = anim_out if anim_out in ANIM_OUT else None
+            if anim_out == "auto" and p_index % 2 == 1:
+                out_name = ANIM_MIX_OUT[(p_index // 2) % len(ANIM_MIX_OUT)]
+            events.extend(animated_phrase_events(
+                block, phrase_start, phrase_end, sname, in_name, out_name,
+                base_ctx, random.Random(p_index + 11),
+            ))
+            continue
 
         if mode in ("pop", "highlight"):
             active = ass_tag_color(style["active"])
@@ -1595,14 +2073,14 @@ def build_ass(words, style_name, width, height, output_path,
             )
 
         elif mode == "fade":
-            text = " ".join(display(t["word"]) for t in phrase)
+            text = colored(phrase)
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
                 f"{sname},,0,0,0,,{{\\fad(250,200)}}{text}"
             )
 
         else:
-            text = " ".join(display(t["word"]) for t in phrase)
+            text = colored(phrase)
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
                 f"{sname},,0,0,0,,{text}"
@@ -1632,19 +2110,176 @@ def between_expression(moments, length):
     return "+".join(f"between(t,{m:.2f},{m + length:.2f})" for m in moments)
 
 
+# =========================================================
+# SMART AUTO CUT (stage 2): pauses, filler sounds and stutters
+# =========================================================
+#
+# Cuts are made around words: every kept word keeps a small safety pad, so a word is
+# never clipped. Subtitles, zoom and cards are moved onto the new timeline.
+
+CUT_LEVELS = {"light": (0.55, 0.25), "normal": (0.40, 0.18), "tight": (0.28, 0.12)}
+FILLER_RE = re.compile(r"^(?:э+м*|е+м+|м{2,}|гм+|хм+|эх+|ам{2,})$")
+
+
+def is_filler(text):
+    core = core_token(text).lower()
+    return 0 < len(core) <= 6 and bool(FILLER_RE.match(core))
+
+
+def plan_cuts(words, duration, level):
+    """Return a cut plan or None when cutting would not help or is unsafe."""
+    if level not in CUT_LEVELS or len(words) < 3 or duration <= 1.0:
+        return None
+    min_gap, keep = CUT_LEVELS[level]
+    lead, tail = keep * 0.4, keep * 0.6
+
+    speech = []
+    fillers = 0
+    pending_cut = False
+    for item in words:
+        if is_filler(item["word"]):
+            fillers += 1
+            pending_cut = True
+            continue
+        if speech:
+            previous = speech[-1][0]
+            same = core_token(previous["word"]).lower() == core_token(item["word"]).lower()
+            if same and len(core_token(item["word"])) >= 2 and item["start"] - previous["end"] < 0.35:
+                speech.pop()
+                fillers += 1
+                pending_cut = True
+        speech.append((item, pending_cut))
+        pending_cut = False
+    if len(speech) < 3:
+        return None
+
+    groups = []
+    first = speech[0][0]
+    current = [first["start"] - lead, first["end"] + tail]
+    last_end = first["end"]
+    for item, cut in speech[1:]:
+        gap = item["start"] - last_end
+        if cut or gap > min_gap:
+            groups.append(current)
+            current = [item["start"] - lead, item["end"] + tail]
+        else:
+            current[1] = item["end"] + tail
+        last_end = item["end"]
+    groups.append(current)
+
+    groups[0][0] = speech[0][0]["start"] - 0.25
+    groups[-1][1] = speech[-1][0]["end"] + 0.4
+    segments = []
+    for a, b in groups:
+        a, b = max(0.0, a), min(duration, b)
+        if b - a < 0.15:
+            continue
+        if segments and a <= segments[-1][1] + 0.02:
+            segments[-1][1] = max(segments[-1][1], b)
+        else:
+            segments.append([a, b])
+
+    new_duration = sum(b - a for a, b in segments)
+    # Safety is judged against the spoken part, trailing silence may be cut freely.
+    spoken = speech[-1][0]["end"] - speech[0][0]["start"] + 0.65
+    if new_duration < 1.0 or new_duration < 0.4 * spoken:
+        return None
+    if duration - new_duration < 0.25:
+        return None
+
+    offsets = []
+    cursor = 0.0
+    for a, b in segments:
+        offsets.append(cursor)
+        cursor += b - a
+
+    def remap(moment):
+        """Time on the new timeline; moments inside removed parts snap forward."""
+        for (a, b), offset in zip(segments, offsets):
+            if moment < a:
+                return offset
+            if moment <= b:
+                return offset + (moment - a)
+        return new_duration
+
+    new_words = []
+    for item, _ in speech:
+        moved = dict(item)
+        moved["start"] = remap(item["start"])
+        moved["end"] = max(moved["start"] + 0.04, remap(item["end"]))
+        new_words.append(moved)
+
+    return {
+        "segments": [(a, b) for a, b in segments],
+        "words": new_words,
+        "duration": new_duration,
+        "remap": remap,
+        "pauses": len(segments) - 1,
+        "fillers": fillers,
+    }
+
+
+def cut_preview(words, duration):
+    out = {}
+    for level in CUT_LEVELS:
+        plan = plan_cuts(words, duration, level)
+        if plan:
+            out[level] = {
+                "saved": round(duration - plan["duration"], 1),
+                "duration": round(plan["duration"], 1),
+                "pauses": plan["pauses"],
+                "fillers": plan["fillers"],
+            }
+    return out
+
+
+def cut_graph_parts(segments):
+    """Filtergraph pieces that keep only the given segments of input 0."""
+    count = len(segments)
+    parts = []
+    if count > 1:
+        parts.append(f"[0:v]split={count}" + "".join(f"[sv{i}]" for i in range(count)))
+        parts.append(f"[0:a]asplit={count}" + "".join(f"[sa{i}]" for i in range(count)))
+        video_src = [f"[sv{i}]" for i in range(count)]
+        audio_src = [f"[sa{i}]" for i in range(count)]
+    else:
+        video_src, audio_src = ["[0:v]"], ["[0:a]"]
+    joined = ""
+    for i, (a, b) in enumerate(segments):
+        length = b - a
+        parts.append(
+            f"{video_src[i]}trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[cv{i}]"
+        )
+        parts.append(
+            f"{audio_src[i]}atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,"
+            f"afade=t=in:st=0:d=0.02,afade=t=out:st={max(0.0, length - 0.03):.3f}:d=0.03[ca{i}]"
+        )
+        joined += f"[cv{i}][ca{i}]"
+    parts.append(f"{joined}concat=n={count}:v=1:a=1[cvout][caout]")
+    return parts
+
+
+
 def build_graph(words, base_filter, width, height, duration, options, ass_name,
-                fonts_option, card_inputs):
+                fonts_option, card_inputs, segments=None):
     """Return (filtergraph, has_audio_graph, sfx_times)."""
-    steps = [f"[0:v]{base_filter}"]
+    cut_parts = cut_graph_parts(segments) if segments else []
+    steps = [("[cvout]" if segments else "[0:v]") + base_filter]
 
     lines = make_lines(words)
     starts = [l["start"] for l in lines[1:] if 1.0 < l["start"] < duration - 0.5]
 
     zoom = zoom_expression(starts) if options.get("zoom") else None
+    t_zoom, t_shift, t_filters = transition_filters(options.get("trans_points") or [], width)
+    if t_zoom:
+        zoom = (zoom[:-1] if zoom else "(1") + "".join(t_zoom) + ")"
     if zoom:
+        shift = ""
+        if t_shift:
+            shift = f":x='(iw-{width})/2*(1{''.join(t_shift)})'"
         steps[0] += (
             f",scale=w='2*trunc({width}*{zoom}/2)':h='2*trunc({height}*{zoom}/2)'"
-            f":eval=frame:flags=bilinear,crop={width}:{height}"
+            f":eval=frame:flags=bilinear,crop={width}:{height}{shift}"
         )
 
     cards = options.get("cards") or []
@@ -1659,8 +2294,10 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
         )
 
     label = "v0"
+    if t_filters:
+        steps[0] += "," + t_filters
     steps[0] += f"[{label}]"
-    graph = [steps[0]]
+    graph = cut_parts + [steps[0]]
 
     for number, card in enumerate(cards):
         start = card["at"]
@@ -1696,7 +2333,10 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
 
     sfx_times = []
     if options.get("sfx"):
-        sfx_times = sorted(set(starts[:12] + [c["at"] for c in cards]))[:16]
+        sfx_times = sorted(set(
+            starts[:12] + [c["at"] for c in cards]
+            + [m for m, _ in (options.get("trans_points") or [])]
+        ))[:16]
 
     return ";".join(graph), sfx_times
 
@@ -1713,6 +2353,28 @@ async def render_video(
     _, _, display_width, display_height = probe_summary(info)
     width, height = get_output_size(video_format, display_width, display_height)
 
+    segments = None
+    cut_points = []
+    level = options.get("cut", "off")
+    if level in CUT_LEVELS:
+        plan = plan_cuts(words, duration, level)
+        if plan:
+            words = plan["words"]
+            segments = plan["segments"]
+            duration = plan["duration"]
+            cursor = 0.0
+            for a, b in plan["segments"][:-1]:
+                cursor += b - a
+                cut_points.append(cursor)
+            options = dict(options, cards=[
+                dict(c, at=plan["remap"](c["at"])) for c in (options.get("cards") or [])
+            ])
+            logger.info("Auto cut %s: %s segments, %.1fs", level, len(segments), duration)
+
+    options = dict(options, trans_points=plan_transitions(
+        words, duration, options.get("trans", "off"), cut_points
+    ))
+
     ass_name = "captions.ass"
     base_filter = get_video_filter(video_format, width, height)
     if options.get("subtitles", True):
@@ -1724,6 +2386,9 @@ async def render_video(
             font=options.get("font"),
             font2=options.get("font2"),
             mix=options.get("fontmix", False),
+            keys=options.get("keys", True),
+            anim=options.get("anim"),
+            anim_out=options.get("anim_out"),
         )
     fonts_option = ""
     if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
@@ -1740,10 +2405,11 @@ async def render_video(
 
     graph, sfx_times = build_graph(
         words, base_filter, width, height, duration, options, ass_name,
-        fonts_option, card_inputs,
+        fonts_option, card_inputs, segments,
     )
 
-    audio_map = ["-map", "0:a:0?"]
+    audio_map = ["-map", "[caout]"] if segments else ["-map", "0:a:0?"]
+    audio_src = "[caout]" if segments else "[0:a]"
     if sfx_times:
         whoosh = work_dir / "whoosh.wav"
         await run_command(
@@ -1763,7 +2429,7 @@ async def render_video(
         count = len(sfx_times)
         parts = [f"[{whoosh_index}:a]asplit={count}" + "".join(f"[s{i}]" for i in range(count))]
         mix_inputs = "[a0]"
-        parts.append("[0:a]aformat=channel_layouts=stereo[a0]")
+        parts.append(f"{audio_src}aformat=channel_layouts=stereo[a0]")
         for i, moment in enumerate(sfx_times):
             ms = int(moment * 1000)
             parts.append(f"[s{i}]adelay={ms}|{ms},volume=0.35[d{i}]")
@@ -1874,7 +2540,8 @@ def clean_format(video_format):
 
 
 def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
-                  font="", font2="", fontmix="0"):
+                  font="", font2="", fontmix="0", cut="off", keys="1",
+                  anim="", anim_out="", trans="off"):
     accent = (accent or "").strip().lstrip("#").upper()
     if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
         raise HTTPException(status_code=400, detail="Неверный цвет.")
@@ -1893,6 +2560,11 @@ def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
         "font": (resolve_font(font) or {}).get("family"),
         "font2": (resolve_font(font2) or {}).get("family"),
         "fontmix": str(fontmix).strip().lower() in ("1", "true", "on"),
+        "cut": cut if cut in CUT_LEVELS else "off",
+        "keys": str(keys).strip().lower() not in ("0", "false", "off"),
+        "anim": anim if anim in ANIM_IN or anim in ("auto", "mix") else "",
+        "anim_out": anim_out if anim_out in ANIM_OUT or anim_out == "auto" else "",
+        "trans": trans if trans in TRANSITION_KINDS or trans == "auto" else "off",
     }
 
 
@@ -1992,6 +2664,7 @@ def public_job(job):
     if job["status"] in ("transcribed", "rendering", "done") or job["lines"]:
         data["lines"] = job["lines"]
         data["detected"] = job["detected"]
+        data["cut_preview"] = job.get("cut_preview", {})
         data["cards"] = [
             {k: v for k, v in c.items() if k != "file"} for c in job["cards"]
         ]
@@ -2039,6 +2712,7 @@ async def run_transcribe_job(job):
 
             report(95, "Подбираем карточки")
             job["cards"] = await suggest_cards(words, work_dir)
+            job["cut_preview"] = cut_preview(words, job["duration"])
             touch(
                 job,
                 words=words,
@@ -2305,6 +2979,7 @@ async def create_job(
         "lines": [],
         "detected": [],
         "cards": [],
+        "cut_preview": {},
         "output": None,
         "updated": time.time(),
     }
@@ -2341,13 +3016,19 @@ async def start_render(
     font: str = Form(""),
     font2: str = Form(""),
     fontmix: str = Form("0"),
+    cut: str = Form("off"),
+    keys: str = Form("1"),
+    anim: str = Form(""),
+    anim_out: str = Form(""),
+    trans: str = Form("off"),
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
     user = require_user(init_data, x_init_data)
     job = get_job(job_id, user)
     options = clean_options(
-        accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix
+        accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix,
+        cut, keys, anim, anim_out, trans,
     )
     try:
         wanted = {int(x) for x in json.loads(cards or "[]")}
