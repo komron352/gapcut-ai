@@ -56,6 +56,7 @@ h1{font-size:28px;line-height:1.12;margin:0 0 8px;font-weight:900}.sub{color:var
 .sw{width:52px;height:30px;border-radius:99px;background:#2a2540;position:relative;border:0;transition:.2s;flex:none}.sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:.2s}.sw.on{background:linear-gradient(90deg,var(--pu),var(--pu2))}.sw.on::after{left:25px}
 .stp{display:flex;align-items:center;gap:6px;font-weight:800}.stp button{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#0e0b18;color:var(--tx);font-size:16px}.stp span{min-width:84px;text-align:center}
 .cd{display:flex;align-items:center;gap:12px;margin-top:12px}.cd img{width:56px;height:56px;border-radius:12px;object-fit:cover;background:#0e0b18}.cd div{flex:1;font-size:14px;font-weight:700}.cd small{display:block;color:var(--mu);font-weight:400}
+.hs{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:none}.hs::-webkit-scrollbar{display:none}.hs .chip{flex:none}
 .dots{display:flex;gap:10px}.dot{width:34px;height:34px;border-radius:50%;border:2px solid transparent;transition:.15s}.dot.on{border-color:#fff;transform:scale(1.12)}
 details summary{list-style:none;font-weight:800;font-size:16px;display:flex;justify-content:space-between;cursor:pointer}details summary::-webkit-details-marker{display:none}
 .line{display:flex;gap:10px;align-items:flex-start;margin-top:10px}
@@ -100,8 +101,14 @@ details summary{list-style:none;font-weight:800;font-size:16px;display:flex;just
     <div class="row"><b data-i="zoomT"></b><button class="sw on" id="swZoom"></button></div>
     <div class="row"><b data-i="fxT"></b><button class="sw on" id="swFx"></button></div>
     <div class="row"><b data-i="sfxT"></b><button class="sw on" id="swSfx"></button></div>
+    <div class="row"><b data-i="keysT"></b><button class="sw on" id="swKeys"></button></div>
+    <div class="row" style="display:block"><b data-i="cutT"></b><div class="chips" id="cuts" style="margin-top:10px"></div><div class="fx" id="cutInfo" style="margin:8px 0 0"></div></div>
     <div class="row" style="display:block"><b data-i="fmtT"></b><div class="chips" id="fmts" style="margin-top:10px"></div></div>
   </div>
+  <div class="card"><h3 data-i="animT"></h3><div class="hs" id="animIn"></div>
+    <h3 style="margin-top:14px" data-i="animOutT"></h3><div class="hs" id="animOut"></div>
+    <h3 style="margin-top:14px" data-i="transT"></h3><div class="hs" id="trans"></div>
+    <div class="fx" style="margin:10px 0 0" data-i="animNote"></div></div>
   <div class="card" id="cardsBox" hidden><h3 data-i="cardsT"></h3><div id="cards"></div></div>
   <div class="card"><details><summary><span data-i="edT"></span><span>✎</span></summary><div id="lines"></div></details></div>
   <button class="btn gold" id="makeBtn" data-i="make"></button>
@@ -127,25 +134,27 @@ const $=id=>document.getElementById(id);
 
 const T={
 ru:{h1:"Автомонтаж с субтитрами",sub:"Загрузите видео — мы распознаем речь и наложим анимированные субтитры.",limits:"до 100 MB · до 60 секунд",pick:"Выбрать видео",speech:"Язык речи",next:"Далее: оформление",
-step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",qualT:"Точность распознавания",qFast:"Быстро",qBest:"Точнее",glossT:"Имена и термины (через запятую)",fixedT:"Исправлено",lowT:"⚠ Проверьте эту строку",undo:"Вернуть",zoomT:"Зум-акценты",fxT:"Эффекты (глитч)",sfxT:"Звуки (whoosh)",cardsT:"Карточки с фото",fontT:"Шрифты",font1:"Основной шрифт",font2:"Шрифт акцента",fmix:"Микс шрифтов",auto:"Авто",
+step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",animT:"Анимация текста",animOutT:"Исчезновение текста",transT:"Переходы",animNote:"Анимации и переходы видны в готовом видео (не в предпросмотре).",styleDef:"Как в стиле",mix:"Микс",none:"Нет",keysT:"Выделять ключевые слова",cutT:"Умная нарезка (паузы и «э-э»)",cOff:"Без нарезки",cLight:"Лёгкая",cNormal:"Средняя",cTight:"Плотная",saved:"сэкономит",sec:"с",qualT:"Точность распознавания",qFast:"Быстро",qBest:"Точнее",glossT:"Имена и термины (через запятую)",fixedT:"Исправлено",lowT:"⚠ Проверьте эту строку",undo:"Вернуть",zoomT:"Зум-акценты",fxT:"Эффекты (глитч)",sfxT:"Звуки (whoosh)",cardsT:"Карточки с фото",fontT:"Шрифты",font1:"Основной шрифт",font2:"Шрифт акцента",fmix:"Микс шрифтов",auto:"Авто",
 done:"Видео готово",doneS:"Проверьте результат и скачайте.",dl:"Скачать",share:"Поделиться",back:"Изменить оформление",again:"Новое видео",
 langs:{tg:"Таджикский",ru:"Русский",tg_ru:"Таджикский + русский"},sizes:["Малый","Средний","Крупный"],poss:["Авто","Сверху","По центру"],up:"Загрузка",
 eBig:"Файл больше 100 MB.",eLong:"Видео длиннее 60 секунд.",eTg:"Откройте приложение через Telegram-бота.",eNet:"Нет связи с сервером. Подождите минуту и попробуйте снова.",eExp:"Сессия истекла. Загрузите видео заново.",eEmpty:"Текст пуст."},
 tg:{h1:"Монтажи худкор бо субтитр",sub:"Видеоро бор кунед — мо нутқро мешиносем ва субтитри аниматсиягӣ мегузорем.",limits:"то 100 MB · то 60 сония",pick:"Видеоро интихоб кунед",speech:"Забони нутқ",next:"Минбаъд: тарроҳӣ",
-step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",qualT:"Дақиқии шинохт",qFast:"Зуд",qBest:"Дақиқтар",glossT:"Ном ва истилоҳҳо (бо вергул)",fixedT:"Ислоҳ шуд",lowT:"⚠ Ин сатрро санҷед",undo:"Бозгашт",zoomT:"Zoom",fxT:"Эффектҳо (глитч)",sfxT:"Садо (whoosh)",cardsT:"Карточкаҳои сурат",fontT:"Шрифтҳо",font1:"Шрифти асосӣ",font2:"Шрифти таъкид",fmix:"Омехтаи шрифтҳо",auto:"Худкор",
+step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",animT:"Аниматсияи матн",animOutT:"Нопадид шудани матн",transT:"Гузаришҳо",animNote:"Аниматсия ва гузаришҳо дар видеои тайёр намоён мешаванд (дар пешнамоиш не).",styleDef:"Аз услуб",mix:"Омехта",none:"Не",keysT:"Калимаҳои муҳимро ранг кардан",cutT:"Буридани ҳушманд (таваққуф ва «э-э»)",cOff:"Бе буридан",cLight:"Нарм",cNormal:"Миёна",cTight:"Зич",saved:"сарфа мекунад",sec:"сон",qualT:"Дақиқии шинохт",qFast:"Зуд",qBest:"Дақиқтар",glossT:"Ном ва истилоҳҳо (бо вергул)",fixedT:"Ислоҳ шуд",lowT:"⚠ Ин сатрро санҷед",undo:"Бозгашт",zoomT:"Zoom",fxT:"Эффектҳо (глитч)",sfxT:"Садо (whoosh)",cardsT:"Карточкаҳои сурат",fontT:"Шрифтҳо",font1:"Шрифти асосӣ",font2:"Шрифти таъкид",fmix:"Омехтаи шрифтҳо",auto:"Худкор",
 done:"Видео омода шуд",doneS:"Натиҷаро бинед ва зеркашӣ кунед.",dl:"Зеркашӣ",share:"Мубодила",back:"Тағйири тарроҳӣ",again:"Видеои нав",
 langs:{tg:"Тоҷикӣ",ru:"Русӣ",tg_ru:"Тоҷикӣ + русӣ"},sizes:["Хурд","Миёна","Калон"],poss:["Худкор","Боло","Миёна"],up:"Бор шуда истодааст",
 eBig:"Файл аз 100 MB калон аст.",eLong:"Видео аз 60 сония дарозтар аст.",eTg:"Барномаро тавассути боти Telegram кушоед.",eNet:"Бо сервер алоқа нест. Як дақиқа интизор шавед ва дубора кӯшиш кунед.",eExp:"Сессия тамом шуд. Видеоро дубора бор кунед.",eEmpty:"Матн холӣ аст."}
 };
 // style model: mirrors the backend (size, words per phrase, mode)
 const SM={
+minimal:{n:"Minimal",sz:46,w:7,c:44,b:400,m:.12,mode:"plain",ol:2,f:"'Noto Sans',system-ui,sans-serif"},
+dynamic:{n:"Dynamic",sz:86,w:3,c:24,b:800,m:.20,mode:"dynamic",ol:6,acc:"FFE500",f:"'Noto Sans',system-ui,sans-serif"},
 keyword:{n:"Keyword",sz:96,w:3,c:26,b:800,m:.20,mode:"key",ol:5,acc:"00FFA3",f:"'Noto Sans',system-ui,sans-serif"},
 viral:{n:"Viral",sz:92,w:2,c:18,up:1,b:800,m:.22,mode:"pop",ol:7,acc:"FFE500",f:"'Noto Sans',system-ui,sans-serif"},
 classic:{n:"Classic",sz:58,w:6,c:38,b:400,m:.14,mode:"plain",ol:4,f:"'DejaVu Sans',system-ui,sans-serif"},
 cinema:{n:"Cinema",sz:56,w:7,c:42,b:400,m:.10,mode:"fade",ol:2,ls:3,f:"'Noto Serif',Georgia,serif"},
 podcast:{n:"Podcast",sz:60,w:4,c:28,b:800,m:.14,mode:"hl",ol:0,box:1,acc:"F5B937",f:"'Noto Sans',system-ui,sans-serif"},
 karaoke:{n:"Karaoke",sz:78,w:4,c:26,b:800,m:.18,mode:"kara",ol:6,acc:"F5B937",f:"'Noto Sans',system-ui,sans-serif"}};
-const SAMPLE={keyword:'<div style="line-height:1.1"><div style="font-size:10px">самый</div><b style="color:#00ffa3;font-size:19px">ДОРОГОЙ</b></div>',viral:'<b style="color:#ffe500;font-size:21px;text-shadow:0 2px 0 #000">ВИДЕО</b>',classic:'<span style="font-size:15px">Classic</span>',cinema:'<i style="font-family:Georgia,serif;letter-spacing:2px;font-size:16px">Cinema</i>',podcast:'<span style="background:#000;padding:4px 8px;border-radius:6px;font-weight:800;font-size:14px">Pod<b style="color:#f5b937">cast</b></span>',karaoke:'<b style="font-size:18px"><span style="color:#f5b937">Kara</span>oke</b>'};
+const SAMPLE={minimal:'<span style="font-size:13px;font-weight:300">Minimal text</span>',dynamic:'<b style="font-size:17px">Dyn<span style="color:#ffe500">amic</span></b>',keyword:'<div style="line-height:1.1"><div style="font-size:10px">самый</div><b style="color:#00ffa3;font-size:19px">ДОРОГОЙ</b></div>',viral:'<b style="color:#ffe500;font-size:21px;text-shadow:0 2px 0 #000">ВИДЕО</b>',classic:'<span style="font-size:15px">Classic</span>',cinema:'<i style="font-family:Georgia,serif;letter-spacing:2px;font-size:16px">Cinema</i>',podcast:'<span style="background:#000;padding:4px 8px;border-radius:6px;font-weight:800;font-size:14px">Pod<b style="color:#f5b937">cast</b></span>',karaoke:'<b style="font-size:18px"><span style="color:#f5b937">Kara</span>oke</b>'};
 const COLORS=["00FFA3","FFE500","38BDF8","A3E635","F472B6","F5B937"];
 const FMT=[["9:16","9:16"],["16:9","16:9"],["1:1","1:1"],["original","Original"]];
 const AR={"9:16":9/16,"16:9":16/9,"1:1":1};
@@ -154,7 +163,12 @@ const SIZEK=["s","m","l"],SIZEM=[.8,1,1.25],POSK=["auto","top","center"];
 let L=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code==="tg")?"tg":"ru";
 let file=null,objUrl=null,jobId=null,lines=[],words=[],phrases=[],timer=null,blobUrl=null,blobFile=null,vr=.5625,raf=0;
 let cards=[],cardsOn=new Set(),fontsList=[];
-let sel={qual:"fast",font:"",font2:"",mix:false,zoom:true,fx:true,sfx:true,lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
+const AIN=["fade_in","slide_up","slide_left","zoom_in","pop_up","bounce","typewriter","word_by_word","letter_by_letter","glitch","scramble","split","shake","rotate_3d","neon_glow","elastic","mask_reveal","light_sweep","tracking","blur_reveal","pop_3d","liquid","wave","flip_in","roll_in","spin_in","stretch","flash","flicker","rotate_in","swing","wipe_reveal","curtain_reveal","glowing","floating","magnetic","particle","fire","smoke","rgb_split","pulse","handwriting"];
+const AOUT=["fade_out","slide_down","slide_right","zoom_out","blur_out","flip_out"];
+const TRS=["zoom","whip","swipe","motion","flash","blur","glitch"];
+const nm=x=>x.split("_").map(w=>w[0].toUpperCase()+w.slice(1)).join(" ");
+let cutPrev={};
+let sel={anim:"",animOut:"",trans:"off",cut:"off",keys:true,qual:"fast",font:"",font2:"",mix:false,zoom:true,fx:true,sfx:true,lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
 const t=k=>T[L][k];
 
 function render(){
@@ -165,6 +179,12 @@ function render(){
   const on=document.querySelector(".screen.on");$("stepT").textContent=on&&on.id==="s-ed"?t("step2"):(on&&on.id==="s-up"?t("step1"):"");
   chips("langs",["tg","ru","tg_ru"].map(k=>[k,T[L].langs[k]]),"lang");
   chips("fmts",FMT,"fmt");
+  chips("animIn",[["",t("styleDef")],["auto",t("auto")],["mix",t("mix")]].concat(AIN.map(x=>[x,nm(x)])),"anim");
+  chips("animOut",[["",t("none")],["auto",t("auto")]].concat(AOUT.map(x=>[x,nm(x)])),"animOut");
+  chips("trans",[["off",t("none")],["auto",t("auto")]].concat(TRS.map(x=>[x,nm(x)])),"trans");
+  chips("cuts",[["off",t("cOff")],["light",t("cLight")],["normal",t("cNormal")],["tight",t("cTight")]],"cut");
+  const ci=cutPrev[sel.cut];$("cutInfo").textContent=ci?t("saved")+" "+ci.saved+" "+t("sec")+" · "+ci.pauses+" ✂ · "+ci.fillers+" «э»":"";
+  $("swKeys").className="sw"+(sel.keys?" on":"");
   chips("quals",[["fast",t("qFast")],["best",t("qBest")]],"qual");
   $("styles").innerHTML="";
   Object.keys(SM).forEach(k=>{const b=document.createElement("button");b.className="sty"+(sel.style===k?" on":"");b.innerHTML='<div class="smp">'+SAMPLE[k]+'</div><span>'+SM[k].n+'</span>';
@@ -235,6 +255,7 @@ function drawCap(){
   const v=$("ev"),tm=v.currentTime;
   let ph=null;for(const p of phrases){if(tm>=p[0].s-.05&&tm<=p[p.length-1].e+.2){ph=p;break}}
   if(!ph){cap.innerHTML="";return}
+  let md=m.mode;if(md==="dynamic")md=["pop","key","hl","key"][Math.max(0,phrases.indexOf(ph))%4];
   const outW=sel.fmt==="16:9"?1280:720,outH=sel.fmt==="16:9"?720:(sel.fmt==="1:1"?720:1280);
   let bs=Math.min(outW,outH)/720;if(outW>outH)bs*=.8;
   const k=st.clientWidth/outW*bs*SIZEM[sel.size];
@@ -249,9 +270,9 @@ function drawCap(){
   if(sel.pos===1)cap.style.top="10%";else if(sel.pos===2){cap.style.top="50%";cap.style.transform="translateY(-50%)"}else cap.style.bottom=(ratio*100)+"%";
   let ai=-1;ph.forEach((x,i)=>{if(tm>=x.s)ai=i});
   const col="#"+(sel.accent||"FFFFFF");
-  cap.innerHTML=m.mode==="key"?keyHtml(ph,ai,col):ph.map((x,i)=>{let w=x.w.replace(/[<>&]/g,"");if(m.up)w=w.toUpperCase();
-    let c="#fff";if((m.mode==="pop"||m.mode==="hl")&&i===ai)c=col;if(m.mode==="kara"&&i<=ai)c=col;
-    const af=(i===ai&&sel.font2&&(m.mode==="pop"||m.mode==="hl"))?";font-family:'"+sel.font2+"'":"";return '<span style="color:'+c+af+'">'+w+'</span>'}).join(" ");
+  cap.innerHTML=md==="key"?keyHtml(ph,ai,col):ph.map((x,i)=>{let w=x.w.replace(/[<>&]/g,"");if(m.up)w=w.toUpperCase();
+    let c="#fff";if((md==="pop"||md==="hl")&&i===ai)c=col;if(md==="kara"&&i<=ai)c=col;if(sel.keys&&x.k&&(md==="plain"||md==="fade"))c="#"+(SM[sel.style].acc||"F5B937");
+    const af=(i===ai&&sel.font2&&(md==="pop"||md==="hl"))?";font-family:'"+sel.font2+"'":"";return '<span style="color:'+c+af+'">'+w+'</span>'}).join(" ");
   cap.style.background=m.box?"rgba(0,0,0,.72)":"none";cap.style.padding=m.box?".18em .4em":"0";cap.style.borderRadius=m.box?".25em":"0";
   cap.style.left=m.box?"auto":"7%";cap.style.right=m.box?"auto":"7%";
   if(m.box){cap.style.left="50%";cap.style.right="auto";cap.style.width="max-content";cap.style.maxWidth="86%";cap.style.transform=(sel.pos===2?"translate(-50%,-50%)":"translateX(-50%)")}
@@ -284,7 +305,7 @@ function openEditor(j){
       const ub=document.createElement("button");ub.textContent=t("undo");
       ub.onclick=()=>{ta.value=l.words.map(w=>w.orig||w.word).join(" ");lines[i].text=ta.value;buildWords();drawCap();fx.remove()};
       fx.appendChild(ub);box.appendChild(fx)}});
-  cards=j.cards||[];cardsOn=new Set(cards.map(c=>c.id));showCards();
+  cutPrev=j.cut_preview||{};cards=j.cards||[];cardsOn=new Set(cards.map(c=>c.id));showCards();
   buildWords();show("s-ed");
 }
 function showCards(){
@@ -296,6 +317,7 @@ function showCards(){
     sw.onclick=()=>{cardsOn.has(c.id)?cardsOn.delete(c.id):cardsOn.add(c.id);sw.className="sw"+(cardsOn.has(c.id)?" on":"")};
     r.append(im,d,sw);box.appendChild(r)})}
 $("swSubs").onclick=()=>{sel.subs=!sel.subs;render()};
+$("swKeys").onclick=()=>{sel.keys=!sel.keys;render()};
 $("swMix").onclick=()=>{sel.mix=!sel.mix;render()};
 [["swZoom","zoom"],["swFx","fx"],["swSfx","sfx"]].forEach(a=>$(a[0]).onclick=()=>{sel[a[1]]=!sel[a[1]];render()});
 const stp=(id,key,max)=>{$(id+"L").onclick=()=>{sel[key]=(sel[key]+max-1)%max;render()};$(id+"R").onclick=()=>{sel[key]=(sel[key]+1)%max;render()}};
@@ -309,7 +331,7 @@ $("makeBtn").onclick=async()=>{
   fd.append("lines",JSON.stringify(payload));fd.append("subtitles",sel.subs?"1":"0");
   fd.append("size",SIZEK[sel.size]);fd.append("position",POSK[sel.pos]);
   if(SM[sel.style].acc&&sel.accent)fd.append("accent",sel.accent);
-  fd.append("font",sel.font);fd.append("font2",sel.font2);fd.append("fontmix",sel.mix?"1":"0");fd.append("zoom",sel.zoom?"1":"0");fd.append("fx",sel.fx?"1":"0");fd.append("sfx",sel.sfx?"1":"0");fd.append("cards",JSON.stringify([...cardsOn]));
+  fd.append("font",sel.font);fd.append("font2",sel.font2);fd.append("fontmix",sel.mix?"1":"0");fd.append("anim",sel.anim);fd.append("anim_out",sel.animOut);fd.append("trans",sel.trans);fd.append("cut",sel.cut);fd.append("keys",sel.keys?"1":"0");fd.append("zoom",sel.zoom?"1":"0");fd.append("fx",sel.fx?"1":"0");fd.append("sfx",sel.sfx?"1":"0");fd.append("cards",JSON.stringify([...cardsOn]));
   fd.append("init_data",initData);
   show("s-pr");setP(0,"");
   try{await req("POST","/api/jobs/"+jobId+"/render",fd);poll.rendering=true;poll()}catch(e){toast(e.msg);show("s-ed")}};
