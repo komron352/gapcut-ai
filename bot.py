@@ -1808,7 +1808,7 @@ def transition_filters(points, width):
 
 def build_ass(words, style_name, width, height, output_path,
               accent=None, size="m", position="auto",
-              font=None, font2=None, mix=False, keys=True, anim=None, anim_out=None):
+              font=None, font2=None, mix=False, keys=True, anim=None, anim_out=None, anim_log=None):
     style = dict(STYLES.get(style_name, STYLES["viral"]))
     if accent:
         style["active"] = accent
@@ -1979,6 +1979,8 @@ def build_ass(words, style_name, width, height, output_path,
             elif anim == "mix":
                 in_name = anim_master.choice([n for n in ANIM_MIX if n != last_anim])
             last_anim = in_name or last_anim
+            if anim_log is not None and in_name:
+                anim_log.append((phrase_start, in_name))
             out_name = anim_out if anim_out in ANIM_OUT else None
             if anim_out == "auto" and p_index % 2 == 1:
                 out_name = ANIM_MIX_OUT[(p_index // 2) % len(ANIM_MIX_OUT)]
@@ -2260,6 +2262,355 @@ def cut_graph_parts(segments):
 
 
 
+# =========================================================
+# SMART B-ROLL AI (stage 4): relevant stock photos and videos
+# =========================================================
+#
+# 1. the LLM picks concrete, visual moments (with a confidence and a reason);
+# 2. Pexels is searched for videos and photos;
+# 3. a second LLM check (or a keyword check) rejects pictures that do not match;
+# 4. only the chosen file is downloaded, at render time.
+
+def slug_words(url):
+    match = re.search(r"/video/([^/]+?)-\d+/?$", str(url))
+    return (match.group(1) if match else "").replace("-", " ")
+
+
+def keyword_relevant(query, description):
+    text = str(description or "").lower()
+    stems = [w[:5] for w in re.findall(r"[a-z]{3,}", str(query).lower())]
+    return any(stem in text for stem in stems)
+
+
+def pick_video_file(files):
+    mp4 = [
+        f for f in files
+        if str(f.get("file_type", "")).endswith("mp4") and f.get("link") and f.get("width")
+    ]
+    small = [f for f in mp4 if int(f["width"]) <= 1100] or mp4
+    if not small:
+        return None
+    return min(small, key=lambda f: abs(int(f["width"]) - 720))
+
+
+async def llm_json(client, system, user):
+    payload = {
+        "model": KEYWORD_MODEL,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+    try:
+        response = await client.post(
+            GROQ_CHAT_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json=payload,
+        )
+        if response.status_code != 200:
+            return None
+        return json.loads(response.json()["choices"][0]["message"]["content"])
+    except Exception:
+        logger.warning("LLM json call failed", exc_info=True)
+        return None
+
+
+async def find_candidates(client, query):
+    candidates = []
+    headers = {"Authorization": PEXELS_API_KEY}
+    try:
+        found = await client.get(
+            "https://api.pexels.com/videos/search",
+            params={"query": query, "per_page": 4, "orientation": "portrait"},
+            headers=headers,
+        )
+        videos = found.json().get("videos") if found.status_code == 200 else None
+        for video in videos or []:
+            chosen = pick_video_file(video.get("video_files") or [])
+            length = float(video.get("duration") or 0)
+            if chosen and length >= 1.5:
+                candidates.append({
+                    "kind": "video", "url": chosen["link"], "thumb": video.get("image", ""),
+                    "alt": slug_words(video.get("url", "")),
+                    "credit": str((video.get("user") or {}).get("name", ""))[:60],
+                    "dur": length,
+                })
+    except Exception:
+        logger.warning("Pexels video search failed", exc_info=True)
+    try:
+        for orientation in ("portrait", None):
+            params = {"query": query, "per_page": 4}
+            if orientation:
+                params["orientation"] = orientation
+            found = await client.get(
+                "https://api.pexels.com/v1/search", params=params, headers=headers
+            )
+            photos = found.json().get("photos") if found.status_code == 200 else None
+            for photo in photos or []:
+                src = photo.get("src") or {}
+                if src.get("large"):
+                    candidates.append({
+                        "kind": "photo", "url": src["large"], "thumb": src.get("small", ""),
+                        "alt": str(photo.get("alt", ""))[:160],
+                        "credit": str(photo.get("photographer", ""))[:60], "dur": 0.0,
+                    })
+            if photos:
+                break
+    except Exception:
+        logger.warning("Pexels photo search failed", exc_info=True)
+    return candidates[:6]
+
+
+async def verify_candidates(client, phrase, query, candidates):
+    """Indexes of candidates that really match what is being said."""
+    fallback = [i for i, c in enumerate(candidates) if keyword_relevant(query, c["alt"])]
+    listing = "; ".join(
+        f"{i}: {c['alt'] or 'no description'}" for i, c in enumerate(candidates)
+    )
+    raw = await llm_json(
+        client,
+        "You check stock footage. Given a spoken phrase, the search intent and numbered "
+        "candidate descriptions, return the candidates that clearly show what the phrase "
+        "talks about. Reject unrelated, misleading, abstract or unknown ones. Answer only "
+        'with JSON: {"ok":[indexes]}.',
+        f"Spoken phrase: {phrase}\nSearch intent: {query}\nCandidates: {listing}",
+    )
+    if raw and isinstance(raw.get("ok"), list):
+        return [i for i in raw["ok"] if isinstance(i, int) and 0 <= i < len(candidates)]
+    return fallback
+
+
+async def suggest_broll(words, duration, client=None):
+    """Return (moments, info). A moment: id, at, query, reason, conf, thumb, credit, alts."""
+    info = {"suggested": 0, "kept": 0}
+    if not (PEXELS_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6 or duration < 6:
+        return [], info
+    own_client = client is None
+    if own_client:
+        client = httpx.AsyncClient(timeout=25.0)
+    moments = []
+    try:
+        limit = max(1, min(5, int(duration // 9)))
+        numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
+        raw = await llm_json(
+            client,
+            "You are a video editor choosing B-roll. The speech is numbered word by word "
+            f"(Tajik or Russian). Choose at most {limit} moments where a stock photo or video "
+            "of a CONCRETE, clearly visual thing (object, place, activity, animal, food) "
+            "would help. Skip abstract ideas, feelings, greetings and filler. Answer only "
+            'with JSON: {"moments":[{"index":word index,"query":"2-3 word English stock '
+            'search","confidence":0..1,"reason":"short English reason"}]}.',
+            numbered,
+        )
+        last_at = -99.0
+        for item in (raw or {}).get("moments", [])[:8]:
+            try:
+                index = int(item["index"])
+                query = str(item["query"]).strip()[:60]
+                conf = float(item.get("confidence", 0.7))
+                reason = str(item.get("reason", ""))[:70]
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not (0 <= index < len(words)) or not query:
+                continue
+            at = words[index]["start"]
+            if at < 1.0 or at > duration - 2.0 or at - last_at < 8.0 or conf < 0.6:
+                continue
+            info["suggested"] += 1
+            candidates = await find_candidates(client, query)
+            if not candidates:
+                continue
+            phrase = " ".join(w["word"] for w in words[max(0, index - 6):index + 7])
+            good = await verify_candidates(client, phrase, query, candidates)
+            alts = [candidates[i] for i in good][:3]
+            if not alts:
+                continue
+            moments.append({
+                "id": len(moments), "at": round(at, 2), "query": query, "reason": reason,
+                "conf": round(conf, 2), "thumb": alts[0]["thumb"],
+                "credit": alts[0]["credit"], "alts": alts,
+            })
+            last_at = at
+            if len(moments) >= limit:
+                break
+        info["kept"] = len(moments)
+    except Exception:
+        logger.warning("B-roll suggestion failed", exc_info=True)
+    finally:
+        if own_client:
+            await client.aclose()
+    return moments, info
+
+
+def public_card(card):
+    out = {k: card.get(k) for k in ("id", "at", "query", "reason", "conf", "thumb", "credit")}
+    out["alts"] = [
+        {"kind": a.get("kind"), "thumb": a.get("thumb"), "alt": a.get("alt")}
+        for a in card.get("alts", [])
+    ]
+    return out
+
+
+async def fetch_broll_assets(cards, work_dir):
+    """Download the chosen candidate of every selected moment; failures are skipped."""
+    out = []
+    if not cards:
+        return out
+    timeout = httpx.Timeout(60.0, connect=15.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        for card in cards:
+            alts = card.get("alts") or []
+            if not alts:
+                continue
+            cand = alts[max(0, min(int(card.get("alt_index", 0)), len(alts) - 1))]
+            is_video = cand.get("kind") == "video"
+            limit = 30 * 1024 * 1024 if is_video else 8 * 1024 * 1024
+            path = Path(work_dir) / f"broll_{card['id']}{'.mp4' if is_video else '.jpg'}"
+            try:
+                async with client.stream("GET", cand["url"]) as response:
+                    if response.status_code != 200:
+                        continue
+                    size = 0
+                    with path.open("wb") as handle:
+                        async for chunk in response.aiter_bytes(65536):
+                            size += len(chunk)
+                            if size > limit:
+                                raise ValueError("file too large")
+                            handle.write(chunk)
+                if path.stat().st_size < 2000:
+                    continue
+                out.append(dict(card, file=str(path), kind=cand.get("kind", "photo"),
+                                dur=float(cand.get("dur") or 0.0)))
+            except Exception:
+                logger.warning("B-roll download failed", exc_info=True)
+                with suppress(OSError):
+                    path.unlink()
+    return out
+
+
+# =========================================================
+# PRO SOUND DESIGN (stage 4): synthesised effects mixed to the voice level
+# =========================================================
+
+SFX_SPECS = {
+    "whoosh": ("anoisesrc=d=0.5:c=pink:a=0.9",
+               "highpass=f=350,lowpass=f=6500,afade=t=in:st=0:d=0.16,afade=t=out:st=0.2:d=0.3"),
+    "impact": ("aevalsrc='sin(2*PI*(55+80*exp(-t*20))*t)*exp(-t*6)+0.5*(random(0)-0.5)*exp(-t*45)':d=0.8:s=44100",
+               "lowpass=f=1200"),
+    "hit": ("aevalsrc='sin(2*PI*150*t)*exp(-t*16)+0.4*(random(0)-0.5)*exp(-t*38)':d=0.35:s=44100", "anull"),
+    "pop": ("aevalsrc='sin(2*PI*(500+900*exp(-t*60))*t)*exp(-t*38)':d=0.18:s=44100", "anull"),
+    "click": ("aevalsrc='(random(0)-0.5)*exp(-t*160)*1.6':d=0.06:s=44100", "highpass=f=1500"),
+    "riser": ("aevalsrc='(0.15+0.85*t)*(0.5*sin(2*PI*(180+1400*t*t)*t)+0.5*(random(0)-0.5))':d=0.95:s=44100",
+              "lowpass=f=5500,afade=t=out:st=0.9:d=0.05"),
+}
+SFX_BASE = {"whoosh": 0.55, "impact": 0.9, "hit": 0.7, "pop": 0.55, "click": 0.5, "riser": 0.45}
+ANIM_SOUND = {
+    "pop_up": "pop", "bounce": "pop", "elastic": "pop", "pop_3d": "pop", "zoom_in": "pop",
+    "stretch": "pop", "liquid": "pop", "glitch": "click", "scramble": "click",
+    "rgb_split": "click", "flicker": "click", "typewriter": "click",
+    "letter_by_letter": "click", "shake": "hit", "slide_up": "whoosh", "slide_left": "whoosh",
+    "roll_in": "whoosh", "spin_in": "whoosh", "flip_in": "whoosh", "split": "whoosh",
+    "swing": "whoosh", "rotate_3d": "whoosh",
+}
+TRANS_SOUND = {"whip": "whoosh", "swipe": "whoosh", "motion": "whoosh", "zoom": "whoosh",
+               "flash": "hit", "blur": "riser", "glitch": "click"}
+
+
+def plan_sound(duration, words, starts, trans_points, cards, anim_log, zoom_on):
+    """Sound cues (time, kind, strength) tied to what happens on screen."""
+    groups = []
+    if words:
+        groups.append([(max(0.0, words[0]["start"] - 0.02), "impact", 0.8)])
+    group = []
+    for card in cards:
+        group.append((card["at"], "hit" if card.get("mode") == "full" else "pop", 1.0))
+        if card["at"] >= 1.0:
+            group.append((card["at"] - 0.9, "riser", 1.0))
+    groups.append(group)
+    group = []
+    for moment, kind in trans_points:
+        sound = TRANS_SOUND.get(kind, "whoosh")
+        if sound == "riser" and moment < 1.0:
+            group.append((moment, "whoosh", 0.7))
+        elif sound == "riser":
+            group.append((moment - 0.9, "riser", 1.0))
+        else:
+            group.append((moment, sound, 1.0))
+    groups.append(group)
+    groups.append([(t, ANIM_SOUND[n], 0.8) for t, n in anim_log if n in ANIM_SOUND])
+    if zoom_on:
+        groups.append([(s, "whoosh", 0.45) for i, s in enumerate(starts) if i % 2 == 0])
+    cues = []
+    for group in groups:
+        for moment, kind, strength in group:
+            if not 0 <= moment < duration - 0.2:
+                continue
+            if all(abs(moment - other) >= 0.45 for other, _, _ in cues):
+                cues.append((moment, kind, strength))
+    cues.sort()
+    return cues[:24]
+
+
+def sfx_gain(level, mean_db):
+    offset = {"light": 3, "normal": 8, "strong": 12}.get(level, 8)
+    target = min(-3.0, (mean_db if mean_db is not None else -20.0) + offset)
+    return max(0.03, min(0.9, 10 ** (target / 20.0)))
+
+
+async def measure_voice_level(path, work_dir):
+    try:
+        text = await run_command(
+            ["ffmpeg", "-nostdin", "-hide_banner", "-i", str(path), "-vn",
+             "-af", "volumedetect", "-f", "null", "-"],
+            timeout=60, cwd=work_dir, capture=True,
+        )
+        match = re.search(r"mean_volume:\s*(-?[\d.]+)\s*dB", text)
+        return float(match.group(1)) if match else None
+    except Exception:
+        return None
+
+
+async def make_sfx_files(kinds, work_dir):
+    files = {}
+    for kind in kinds:
+        source, chain = SFX_SPECS[kind]
+        path = Path(work_dir).resolve() / f"sfx_{kind}.wav"
+        await run_command(
+            ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", source,
+             "-af", chain + ",aformat=channel_layouts=stereo", str(path)],
+            timeout=30, cwd=work_dir,
+        )
+        files[kind] = str(path)
+    return files
+
+
+def build_audio_graph(cues, kind_inputs, audio_src, gain):
+    kinds = sorted({kind for _, kind, _ in cues})
+    counts = {k: sum(1 for _, kind, _ in cues if kind == k) for k in kinds}
+    used = {k: 0 for k in kinds}
+    parts = []
+    for kind in kinds:
+        index, count = kind_inputs[kind], counts[kind]
+        if count == 1:
+            parts.append(f"[{index}:a]anull[{kind}0]")
+        else:
+            parts.append(f"[{index}:a]asplit={count}" + "".join(f"[{kind}{i}]" for i in range(count)))
+    parts.append(f"{audio_src}aformat=channel_layouts=stereo[a0]")
+    mix = "[a0]"
+    for number, (moment, kind, strength) in enumerate(cues):
+        slot = used[kind]
+        used[kind] += 1
+        ms = int(moment * 1000)
+        volume = gain * SFX_BASE[kind] * strength
+        parts.append(f"[{kind}{slot}]adelay={ms}|{ms},volume={volume:.4f}[d{number}]")
+        mix += f"[d{number}]"
+    parts.append(
+        f"{mix}amix=inputs={len(cues) + 1}:duration=first:normalize=0,alimiter=limit=0.95[aout]"
+    )
+    return ";".join(parts)
+
+
+
 def build_graph(words, base_filter, width, height, duration, options, ass_name,
                 fonts_option, card_inputs, segments=None):
     """Return (filtergraph, has_audio_graph, sfx_times)."""
@@ -2301,23 +2652,38 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
 
     for number, card in enumerate(cards):
         start = card["at"]
-        end = min(duration, start + 1.9)
+        end = min(duration, start + card.get("len", 1.9))
         input_index = card_inputs[number]
+        shift = f"setpts=PTS-STARTPTS+{start:.2f}/TB"
+        new_label = f"v{number + 1}"
+        if card.get("mode") == "full":
+            graph.append(
+                f"[{input_index}:v]fps=30,scale={width}:{height}:"
+                f"force_original_aspect_ratio=increase,crop={width}:{height},"
+                f"setsar=1,format=yuva420p,{shift},"
+                f"fade=t=in:st={start:.2f}:d=0.15:alpha=1,"
+                f"fade=t=out:st={max(start, end - 0.15):.2f}:d=0.15:alpha=1[c{number}]"
+            )
+            graph.append(
+                f"[{label}][c{number}]overlay=x=0:y=0:"
+                f"enable='between(t,{start:.2f},{end:.2f})':format=auto[{new_label}]"
+            )
+            label = new_label
+            continue
         card_w, card_h = int(width * 0.78), int(height * 0.46)
         radius = 30
         graph.append(
-            f"[{input_index}:v]scale=w={card_w}:h={card_h}:"
+            f"[{input_index}:v]fps=30,scale=w={card_w}:h={card_h}:"
             f"force_original_aspect_ratio=decrease,format=yuva420p,"
             f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':"
             f"a='if(gt(abs(W/2-X),W/2-{radius})*gt(abs(H/2-Y),H/2-{radius}),"
             f"if(lte(hypot(abs(W/2-X)-(W/2-{radius}),abs(H/2-Y)-(H/2-{radius})),{radius}),255,0),255)',"
-            f"setpts=PTS+{start:.2f}/TB[c{number}]"
+            f"{shift}[c{number}]"
         )
         graph.append(
             f"[{label}]drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:"
             f"enable='between(t,{start:.2f},{end:.2f})'[w{number}]"
         )
-        new_label = f"v{number + 1}"
         graph.append(
             f"[w{number}][c{number}]overlay="
             f"x='(W-w)/2+W*pow(1-min(1,max(0,(t-{start:.2f})/0.28)),3)':"
@@ -2331,14 +2697,7 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
     else:
         graph.append(f"[{label}]null[vout]")
 
-    sfx_times = []
-    if options.get("sfx"):
-        sfx_times = sorted(set(
-            starts[:12] + [c["at"] for c in cards]
-            + [m for m, _ in (options.get("trans_points") or [])]
-        ))[:16]
-
-    return ";".join(graph), sfx_times
+    return ";".join(graph), starts
 
 
 async def render_video(
@@ -2346,6 +2705,14 @@ async def render_video(
     info, duration, report, options=None,
 ):
     options = options or {}
+    bmode = options.get("broll", "auto")
+    cards0 = [] if bmode == "off" else list(options.get("cards") or [])
+    for card in cards0:
+        card["mode"] = (("full" if card.get("kind") == "video" else "card")
+                        if bmode == "auto" else bmode)
+        card["len"] = (min(3.0, max(1.8, card.get("dur") or 2.5))
+                       if card.get("kind") == "video" else 1.9)
+    options = dict(options, cards=cards0)
     input_path = Path(input_path).resolve()
     output_path = Path(output_path).resolve()
     work_dir = Path(work_dir).resolve()
@@ -2377,6 +2744,7 @@ async def render_video(
 
     ass_name = "captions.ass"
     base_filter = get_video_filter(video_format, width, height)
+    anim_log = []
     if options.get("subtitles", True):
         build_ass(
             words, style_name, width, height, Path(work_dir) / ass_name,
@@ -2389,6 +2757,7 @@ async def render_video(
             keys=options.get("keys", True),
             anim=options.get("anim"),
             anim_out=options.get("anim_out"),
+            anim_log=anim_log,
         )
     fonts_option = ""
     if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
@@ -2399,46 +2768,35 @@ async def render_video(
     card_inputs = []
     for card in cards:
         card_inputs.append(1 + len(card_inputs))
-        extra_inputs += [
-            "-loop", "1", "-framerate", "30", "-t", "2.2", "-i", card["file"],
-        ]
+        span = f"{card.get('len', 1.9) + 0.4:.2f}"
+        if card.get("kind") == "video":
+            extra_inputs += ["-stream_loop", "-1", "-t", span, "-i", card["file"]]
+        else:
+            extra_inputs += ["-loop", "1", "-framerate", "30", "-t", span, "-i", card["file"]]
 
-    graph, sfx_times = build_graph(
+    graph, starts = build_graph(
         words, base_filter, width, height, duration, options, ass_name,
         fonts_option, card_inputs, segments,
     )
 
     audio_map = ["-map", "[caout]"] if segments else ["-map", "0:a:0?"]
     audio_src = "[caout]" if segments else "[0:a]"
-    if sfx_times:
-        whoosh = work_dir / "whoosh.wav"
-        await run_command(
-            [
-                "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
-                "-f", "lavfi", "-i", "anoisesrc=d=0.45:c=pink:a=0.9",
-                "-af",
-                "highpass=f=350,lowpass=f=6500,afade=t=in:st=0:d=0.16,"
-                "afade=t=out:st=0.2:d=0.25,volume=0.8,aformat=channel_layouts=stereo",
-                str(whoosh),
-            ],
-            timeout=30,
-            cwd=work_dir,
+    level = options.get("sound") or ("normal" if options.get("sfx") else "off")
+    if level in ("light", "normal", "strong"):
+        cues = plan_sound(
+            duration, words, starts, options.get("trans_points") or [], cards,
+            anim_log, bool(options.get("zoom")),
         )
-        whoosh_index = 1 + len(card_inputs)
-        extra_inputs += ["-i", str(whoosh)]
-        count = len(sfx_times)
-        parts = [f"[{whoosh_index}:a]asplit={count}" + "".join(f"[s{i}]" for i in range(count))]
-        mix_inputs = "[a0]"
-        parts.append(f"{audio_src}aformat=channel_layouts=stereo[a0]")
-        for i, moment in enumerate(sfx_times):
-            ms = int(moment * 1000)
-            parts.append(f"[s{i}]adelay={ms}|{ms},volume=0.35[d{i}]")
-            mix_inputs += f"[d{i}]"
-        parts.append(
-            f"{mix_inputs}amix=inputs={count + 1}:duration=first:normalize=0[aout]"
-        )
-        graph += ";" + ";".join(parts)
-        audio_map = ["-map", "[aout]"]
+        if cues:
+            mean_db = await measure_voice_level(input_path, work_dir)
+            files = await make_sfx_files(sorted({kind for _, kind, _ in cues}), work_dir)
+            kind_inputs = {}
+            for kind, path in files.items():
+                kind_inputs[kind] = 1 + len(card_inputs) + len(kind_inputs)
+                extra_inputs += ["-i", path]
+            graph += ";" + build_audio_graph(cues, kind_inputs, audio_src, sfx_gain(level, mean_db))
+            audio_map = ["-map", "[aout]"]
+            logger.info("Sound design: %s cues, voice %.1f dB", len(cues), mean_db or 0.0)
 
     command = [
         "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
@@ -2446,7 +2804,7 @@ async def render_video(
         "-threads", "1", "-filter_threads", "1",
         "-i", str(input_path),
         *extra_inputs,
-        "-t", str(MAX_DURATION),
+        "-t", f"{min(float(MAX_DURATION), duration):.3f}",
         "-filter_complex", graph,
         "-map", "[vout]", *audio_map,
         "-c:v", "libx264", "-preset", FFMPEG_PRESET, "-crf", "27",
@@ -2541,7 +2899,7 @@ def clean_format(video_format):
 
 def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
                   font="", font2="", fontmix="0", cut="off", keys="1",
-                  anim="", anim_out="", trans="off"):
+                  anim="", anim_out="", trans="off", broll="auto", sound=""):
     accent = (accent or "").strip().lstrip("#").upper()
     if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
         raise HTTPException(status_code=400, detail="Неверный цвет.")
@@ -2564,6 +2922,8 @@ def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
         "keys": str(keys).strip().lower() not in ("0", "false", "off"),
         "anim": anim if anim in ANIM_IN or anim in ("auto", "mix") else "",
         "anim_out": anim_out if anim_out in ANIM_OUT or anim_out == "auto" else "",
+        "broll": broll if broll in ("off", "card", "full", "auto") else "auto",
+        "sound": sound if sound in ("off", "light", "normal", "strong") else "",
         "trans": trans if trans in TRANSITION_KINDS or trans == "auto" else "off",
     }
 
@@ -2665,9 +3025,8 @@ def public_job(job):
         data["lines"] = job["lines"]
         data["detected"] = job["detected"]
         data["cut_preview"] = job.get("cut_preview", {})
-        data["cards"] = [
-            {k: v for k, v in c.items() if k != "file"} for c in job["cards"]
-        ]
+        data["cards"] = [public_card(c) for c in job["cards"]]
+        data["broll_info"] = job.get("broll_info", {})
     if job["status"] == "done":
         data["download_url"] = f"/api/jobs/{job['id']}/download"
     return data
@@ -2711,7 +3070,7 @@ async def run_transcribe_job(job):
             )
 
             report(95, "Подбираем карточки")
-            job["cards"] = await suggest_cards(words, work_dir)
+            job["cards"], job["broll_info"] = await suggest_broll(words, job["duration"])
             job["cut_preview"] = cut_preview(words, job["duration"])
             touch(
                 job,
@@ -2743,6 +3102,10 @@ async def run_render_job(job, style, video_format, lines, options):
             def report(progress, stage):
                 touch(job, progress=progress, stage=stage)
 
+            if options.get("broll", "auto") != "off":
+                options = dict(options, cards=await fetch_broll_assets(
+                    options.get("cards") or [], job["dir"]
+                ))
             await render_video(
                 job["input"], output_path, job["dir"], words, style,
                 video_format, job["info"], job["duration"], report, options,
@@ -3021,6 +3384,8 @@ async def start_render(
     anim: str = Form(""),
     anim_out: str = Form(""),
     trans: str = Form("off"),
+    broll: str = Form("auto"),
+    sound: str = Form(""),
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
@@ -3028,25 +3393,20 @@ async def start_render(
     job = get_job(job_id, user)
     options = clean_options(
         accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix,
-        cut, keys, anim, anim_out, trans,
+        cut, keys, anim, anim_out, trans, broll, sound,
     )
     try:
-        wanted = {int(x) for x in json.loads(cards or "[]")}
-    except (ValueError, TypeError):
+        wanted = {}
+        for entry in json.loads(cards or "[]"):
+            if isinstance(entry, dict):
+                wanted[int(entry["id"])] = int(entry.get("alt", 0))
+            else:
+                wanted[int(entry)] = 0
+    except (ValueError, TypeError, KeyError):
         raise HTTPException(status_code=400, detail="Неверный список карточек.")
     options["cards"] = [
-        c for c in job["cards"] if c["id"] in wanted and Path(c["file"]).exists()
+        dict(c, alt_index=wanted[c["id"]]) for c in job["cards"] if c["id"] in wanted
     ]
-
-    style = clean_style(style)
-    video_format = clean_format(video_format)
-
-    if job["status"] in ("queued", "transcribing", "rendering"):
-        raise HTTPException(status_code=409, detail="Задача ещё обрабатывается.")
-    if job["status"] == "error" and not job["words"]:
-        raise HTTPException(status_code=409, detail="Распознавание не удалось.")
-    if not job["words"]:
-        raise HTTPException(status_code=409, detail="Текст ещё не готов.")
 
     parsed_lines = None
     if lines.strip():
