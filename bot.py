@@ -1743,16 +1743,21 @@ def choose_animation(text, index, previous, count):
 TRANSITION_KINDS = ["zoom", "whip", "swipe", "motion", "flash", "blur", "glitch"]
 
 
-def plan_transitions(words, duration, mode, cut_points):
+def plan_transitions(words, duration, mode, cut_points, scenes=None):
     """List of (time, kind) on the final timeline: at cuts and at new thoughts."""
     if mode in (None, "", "off"):
         return []
     points = [(t, "cut") for t in cut_points if 0.3 < t < duration - 0.3]
-    lines = make_lines(words)
-    for previous, line in zip(lines, lines[1:]):
-        ends_thought = previous["text"].rstrip().endswith((".", "?", "!", "…"))
-        if ends_thought and 0.8 < line["start"] < duration - 0.5:
-            points.append((line["start"], "thought"))
+    if scenes:
+        for scene in scenes[1:]:
+            if 0.8 < scene["start"] < duration - 0.5:
+                points.append((scene["start"], "scene" if scene.get("importance", 0.5) < 0.8 else "key"))
+    else:
+        lines = make_lines(words)
+        for previous, line in zip(lines, lines[1:]):
+            ends_thought = previous["text"].rstrip().endswith((".", "?", "!", "…"))
+            if ends_thought and 0.8 < line["start"] < duration - 0.5:
+                points.append((line["start"], "thought"))
     points.sort()
     chosen = []
     for moment, origin in points:
@@ -1766,6 +1771,8 @@ def plan_transitions(words, duration, mode, cut_points):
             kind = mode
         elif origin == "cut":
             kind = ("zoom", "whip", "flash", "motion")[number % 4]
+        elif origin == "key":
+            kind = ("zoom", "flash", "glitch")[number % 3]
         else:
             kind = ("blur", "swipe", "glitch", "zoom", "flash")[number % 5]
         out.append((moment, kind))
@@ -2379,7 +2386,7 @@ async def verify_candidates(client, phrase, query, candidates):
     return fallback
 
 
-async def suggest_broll(words, duration, client=None):
+async def suggest_broll(words, duration, client=None, topic=""):
     """Return (moments, info). A moment: id, at, query, reason, conf, thumb, credit, alts."""
     info = {"suggested": 0, "kept": 0}
     if not (PEXELS_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6 or duration < 6:
@@ -2391,6 +2398,8 @@ async def suggest_broll(words, duration, client=None):
     try:
         limit = max(1, min(5, int(duration // 9)))
         numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
+        if topic:
+            numbered = f"Video topic: {topic}\n" + numbered
         raw = await llm_json(
             client,
             "You are a video editor choosing B-roll. The speech is numbered word by word "
@@ -2611,6 +2620,260 @@ def build_audio_graph(cues, kind_inputs, audio_src, gain):
 
 
 
+# =========================================================
+# AI SCENE DETECTION, AUTO CAMERA MOTION, SMART COLOR GRADING (stage 5)
+# =========================================================
+
+SCENE_ROLES = ("hook", "point", "example", "question", "cta", "outro", "emphasis")
+ROLE_IMPORTANCE = {"hook": 1.0, "emphasis": 0.85, "question": 0.7, "cta": 0.8,
+                   "example": 0.55, "point": 0.5, "outro": 0.6}
+
+
+def _scene_times(words, ranges, duration):
+    """Contiguous time ranges: boundaries sit in the middle of the pauses."""
+    bounds = [0.0]
+    for (_, prev_end), (next_start, _) in zip(ranges, ranges[1:]):
+        bounds.append((words[prev_end]["end"] + words[next_start]["start"]) / 2.0)
+    bounds.append(duration)
+    return list(zip(bounds, bounds[1:]))
+
+
+def heuristic_scenes(words, duration):
+    if not words:
+        return []
+    ranges, first = [], 0
+    for index, item in enumerate(words):
+        following = words[index + 1] if index + 1 < len(words) else None
+        pause = following["start"] - item["end"] if following else 99.0
+        sentence_end = item["word"].rstrip().endswith((".", "?", "!", "…"))
+        if following is None or pause >= 0.7 or (sentence_end and index - first >= 3):
+            ranges.append((first, index))
+            first = index + 1
+    merged = []
+    for a, b in ranges:
+        length = words[b]["end"] - words[a]["start"]
+        if merged and length < 2.0:
+            merged[-1] = (merged[-1][0], b)
+        else:
+            merged.append((a, b))
+    if len(merged) > 1 and words[merged[0][1]]["end"] - words[merged[0][0]]["start"] < 2.0:
+        merged[1] = (merged[0][0], merged[1][1])
+        merged.pop(0)
+    scenes = []
+    for number, ((a, b), (t0, t1)) in enumerate(zip(merged, _scene_times(words, merged, duration))):
+        text = " ".join(w["word"] for w in words[a:b + 1]).rstrip()
+        if number == 0:
+            role = "hook"
+        elif number == len(merged) - 1:
+            role = "outro"
+        elif text.endswith("?"):
+            role = "question"
+        elif text.endswith("!"):
+            role = "emphasis"
+        else:
+            role = "point"
+        scenes.append({"start": round(t0, 2), "end": round(t1, 2), "role": role,
+                       "importance": ROLE_IMPORTANCE[role]})
+    return scenes
+
+
+async def analyze_scenes(words, duration, client=None):
+    """Topic and scenes (role, importance). Uses the LLM, falls back to rules."""
+    result = {"topic": "", "scenes": heuristic_scenes(words, duration)}
+    if not (GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 8:
+        return result
+    own = client is None
+    if own:
+        client = httpx.AsyncClient(timeout=25.0)
+    try:
+        numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
+        raw = await llm_json(
+            client,
+            "You analyse a short video transcript (Tajik or Russian), numbered word by "
+            "word. Split it into 2-8 contiguous scenes by meaning (new point, topic change, "
+            "question, example, call to action). Answer only with JSON: "
+            '{"topic":"short English topic","scenes":[{"start":first word index,'
+            '"end":last word index,"role":"hook|point|example|question|cta|outro",'
+            '"importance":0..1}]}. The first scene starts at 0, every next scene starts '
+            "right after the previous one ends, the last one ends at the last word.",
+            numbered,
+        )
+        items = (raw or {}).get("scenes")
+        if isinstance(items, list) and 1 <= len(items) <= 10:
+            ranges, ok, expected = [], True, 0
+            for item in items:
+                a, b = int(item["start"]), int(item["end"])
+                if a != expected or b < a or b >= len(words):
+                    ok = False
+                    break
+                ranges.append((a, b))
+                expected = b + 1
+            if ok and expected == len(words):
+                scenes = []
+                for item, (t0, t1) in zip(items, _scene_times(words, ranges, duration)):
+                    role = item.get("role") if item.get("role") in SCENE_ROLES else "point"
+                    try:
+                        importance = max(0.0, min(1.0, float(item.get("importance"))))
+                    except (TypeError, ValueError):
+                        importance = ROLE_IMPORTANCE[role]
+                    scenes.append({"start": round(t0, 2), "end": round(t1, 2),
+                                   "role": role, "importance": round(importance, 2)})
+                result = {"topic": str(raw.get("topic", ""))[:80], "scenes": scenes}
+    except Exception:
+        logger.warning("Scene analysis failed, using rules", exc_info=True)
+    finally:
+        if own:
+            await client.aclose()
+    return result
+
+
+async def detect_visual_cuts(video_path, work_dir, duration):
+    """Times of real picture changes in the source video (edited footage)."""
+    video_path, work_dir = Path(video_path).resolve(), Path(work_dir).resolve()
+    try:
+        text = await run_command(
+            ["ffmpeg", "-nostdin", "-hide_banner", "-i", str(video_path),
+             "-vf", "scale=160:-2,select='gt(scene,0.35)',showinfo", "-an", "-f", "null", "-"],
+            timeout=90, cwd=work_dir, capture=True,
+        )
+    except Exception:
+        return []
+    times = [float(x) for x in re.findall(r"pts_time:([\d.]+)", text)]
+    return [t for t in times if 0.5 < t < duration - 0.5][:40]
+
+
+def merge_visual_cuts(scenes, cuts):
+    """Split a scene where the picture really changes (>= 1.2 s from the edges)."""
+    out = [dict(s) for s in scenes]
+    for moment in cuts:
+        for index, scene in enumerate(out):
+            if scene["start"] + 1.2 <= moment <= scene["end"] - 1.2:
+                tail = dict(scene, start=round(moment, 2), role="point", importance=0.5)
+                scene["end"] = round(moment, 2)
+                out.insert(index + 1, tail)
+                break
+    return out
+
+
+def _clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def camera_terms(kind, scenes, duration, width, height):
+    """Expression terms (zoom, x shift, y shift) for the camera motion kind."""
+    if kind in (None, "", "off", "dynamic"):
+        return [], [], []
+    scenes = scenes or [{"start": 0.0, "end": duration, "role": "point", "importance": 0.5}]
+    zoom, shift_x, shift_y = [], [], []
+    impact_times = []
+    for number, scene in enumerate(scenes):
+        start, end = float(scene["start"]), float(scene["end"])
+        length = max(end - start, 0.5)
+        gate = f"gte(t,{start:.2f})*lt(t,{end:.2f})"
+        role, importance = scene.get("role", "point"), scene.get("importance", 0.5)
+        if kind == "zoom_in":
+            direction, amount = "in", 0.10
+        elif kind == "zoom_out":
+            direction, amount = "out", 0.10
+        elif kind == "push":
+            direction, amount = ("in" if number % 2 == 0 else "out"), 0.07
+        elif kind == "shake":
+            direction, amount = "in", 0.05
+        else:  # auto: chosen by what the scene is about
+            if role == "hook":
+                direction, amount = "in", 0.12
+            elif role in ("emphasis", "cta") or importance >= 0.8:
+                direction, amount = "in", 0.14
+                impact_times.append(start)
+            elif role == "question":
+                direction, amount = "in", 0.08
+            elif role in ("outro", "example"):
+                direction, amount = "out", 0.07
+            else:
+                direction, amount = ("in" if number % 2 == 0 else "out"), 0.07
+        if direction == "in":
+            zoom.append(f"+{amount}*{gate}*(t-{start:.2f})/{length:.2f}")
+        else:
+            zoom.append(f"+{amount}*{gate}*(1-(t-{start:.2f})/{length:.2f})")
+    if kind == "shake":
+        zoom.append("+0.04")
+        shift_x.append(f"+{0.012 * width:.1f}*sin(2*PI*1.9*t)+{0.006 * width:.1f}*sin(2*PI*4.3*t+1.3)")
+        shift_y.append(f"+{0.010 * height:.1f}*sin(2*PI*2.3*t+0.7)+{0.005 * height:.1f}*sin(2*PI*5.1*t)")
+        impact_times = [s["start"] for s in scenes[1:] if s.get("importance", 0.5) >= 0.8]
+    for moment in impact_times[:6]:
+        local = f"(t-{moment:.2f})"
+        zoom.append(f"+0.05*gte(t,{moment:.2f})*lt(t,{moment + 0.5:.2f})")
+        shift_x.append(f"+{0.03 * width:.1f}*exp(-8*{local})*sin(2*PI*14*{local})*gte(t,{moment:.2f})")
+        shift_y.append(f"+{0.02 * height:.1f}*exp(-8*{local})*cos(2*PI*11*{local})*gte(t,{moment:.2f})")
+    return zoom, shift_x, shift_y
+
+
+async def analyze_color(video_path, work_dir, duration):
+    """Average exposure, range, saturation and colour cast of the footage."""
+    video_path, work_dir = Path(video_path).resolve(), Path(work_dir).resolve()
+    stats_file = work_dir / "color_stats.txt"
+    try:
+        await run_command(
+            ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+             "-i", str(video_path),
+             "-vf", f"fps={10.0 / max(duration, 1.0):.4f},scale=320:-2,signalstats,"
+                    f"metadata=mode=print:file={stats_file.name}",
+             "-an", "-f", "null", "-"],
+            timeout=90, cwd=work_dir,
+        )
+        text = stats_file.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+    out = {}
+    for key in ("YAVG", "YLOW", "YHIGH", "SATAVG", "UAVG", "VAVG"):
+        values = [float(x) for x in re.findall(rf"lavfi\.signalstats\.{key}=([\d.]+)", text)]
+        if not values:
+            return None
+        out[key.lower()] = sum(values) / len(values)
+    return out
+
+
+LOOK_FILTERS = {
+    "cinematic": "curves=preset=medium_contrast,"
+                 "colorbalance=rs=-0.04:bs=0.07:rm=0.02:bm=-0.02:rh=0.08:gh=0.02:bh=-0.07,"
+                 "eq=saturation=1.06,vignette=PI/7",
+    "warm": "colorbalance=rs=0.05:bs=-0.05:rm=0.05:bm=-0.05:rh=0.04:bh=-0.04",
+    "cool": "colorbalance=rs=-0.05:bs=0.05:rm=-0.05:bm=0.05:rh=-0.04:bh=0.04",
+    "vivid": "eq=saturation=1.28:contrast=1.08",
+    "film": "curves=m='0/0.05 0.5/0.5 1/0.95',eq=saturation=0.92,vignette=PI/6",
+}
+
+
+def grade_filter(stats, look, strength=0.8):
+    """Automatic correction from the measured footage, plus an optional look."""
+    if look in (None, "", "off"):
+        return ""
+    parts = []
+    if stats:
+        y, low, high = stats["yavg"], stats["ylow"], stats["yhigh"]
+        bright = _clamp((118 - y) / 255 * 0.55, -0.12, 0.12) * strength
+        gamma = 1 + _clamp((118 - y) / 118 * 0.25, -0.18, 0.25) * strength
+        spread = max(high - low, 20.0)
+        contrast = 1 + (_clamp(185.0 / spread, 0.92, 1.22) - 1) * strength
+        saturation = 1 + (_clamp(48.0 / max(stats["satavg"], 6.0), 0.88, 1.25) - 1) * strength
+        parts.append(
+            f"eq=brightness={bright:.3f}:contrast={contrast:.3f}:"
+            f"saturation={saturation:.3f}:gamma={gamma:.3f}"
+        )
+        du, dv = stats["uavg"] - 128, stats["vavg"] - 128
+        cast_r, cast_b = 1.402 * dv, 1.772 * du
+        cast_g = -(0.344 * du + 0.714 * dv)
+        if max(abs(cast_r), abs(cast_g), abs(cast_b)) > 4:
+            gain = lambda c: 1 - _clamp(c / 255 * 0.7, -0.1, 0.1) * strength
+            parts.append(
+                f"colorchannelmixer=rr={gain(cast_r):.3f}:gg={gain(cast_g):.3f}:bb={gain(cast_b):.3f}"
+            )
+    if look in LOOK_FILTERS:
+        parts.append(LOOK_FILTERS[look])
+    return ",".join(parts)
+
+
+
 def build_graph(words, base_filter, width, height, duration, options, ass_name,
                 fonts_option, card_inputs, segments=None):
     """Return (filtergraph, has_audio_graph, sfx_times)."""
@@ -2620,21 +2883,36 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
     lines = make_lines(words)
     starts = [l["start"] for l in lines[1:] if 1.0 < l["start"] < duration - 0.5]
 
-    zoom = zoom_expression(starts) if options.get("zoom") else None
+    cam_kind = options.get("camera_eff") or ("dynamic" if options.get("zoom") else "off")
+    zoom = zoom_expression(starts) if cam_kind == "dynamic" else None
+    c_zoom, c_sx, c_sy = camera_terms(
+        cam_kind, options.get("scenes_final") or [], duration, width, height
+    )
     t_zoom, t_shift, t_filters = transition_filters(options.get("trans_points") or [], width)
-    if t_zoom:
-        zoom = (zoom[:-1] if zoom else "(1") + "".join(t_zoom) + ")"
+    extra_zoom = c_zoom + t_zoom
+    if extra_zoom:
+        zoom = (zoom[:-1] if zoom else "(1") + "".join(extra_zoom) + ")"
+    if options.get("grade_filter"):
+        steps[0] += "," + options["grade_filter"]
     if zoom:
-        shift = ""
-        if t_shift:
-            shift = f":x='(iw-{width})/2*(1{''.join(t_shift)})'"
+        x_expr = f"(iw-{width})/2*(1{''.join(t_shift)})" + "".join(c_sx)
+        y_expr = f"(ih-{height})/2" + "".join(c_sy)
+        if t_shift or c_sx or c_sy:
+            crop = (f"crop={width}:{height}:x='clip({x_expr},0,iw-{width})'"
+                    f":y='clip({y_expr},0,ih-{height})'")
+        else:
+            crop = f"crop={width}:{height}"
         steps[0] += (
             f",scale=w='2*trunc({width}*{zoom}/2)':h='2*trunc({height}*{zoom}/2)'"
-            f":eval=frame:flags=bilinear,crop={width}:{height}{shift}"
+            f":eval=frame:flags=bilinear,{crop}"
         )
 
     cards = options.get("cards") or []
-    flash_times = [s for i, s in enumerate(starts) if i % 3 == 2] if options.get("fx") else []
+    marks = options.get("scene_marks")
+    if marks is None:
+        flash_times = [s for i, s in enumerate(starts) if i % 3 == 2] if options.get("fx") else []
+    else:
+        flash_times = list(marks) if options.get("fx") else []
     flash_times += [c["at"] for c in cards] if options.get("fx") else []
     flash_times = sorted(flash_times)[:12]
     if flash_times:
@@ -2738,9 +3016,26 @@ async def render_video(
             ])
             logger.info("Auto cut %s: %s segments, %.1fs", level, len(segments), duration)
 
-    options = dict(options, trans_points=plan_transitions(
-        words, duration, options.get("trans", "off"), cut_points
-    ))
+    scenes_final = []
+    for scene in options.get("scenes") or []:
+        a, b = float(scene["start"]), float(scene["end"])
+        if segments:
+            a, b = plan["remap"](a), plan["remap"](b)
+        a, b = max(0.0, a), min(duration, b)
+        if b - a >= 0.6:
+            scenes_final.append(dict(scene, start=a, end=b))
+    camera = options.get("camera") or ""
+    options = dict(
+        options,
+        scenes_final=scenes_final,
+        camera_eff=camera if camera in ("auto", "zoom_in", "zoom_out", "push", "shake", "dynamic", "off") else "",
+        scene_marks=([sc["start"] for sc in scenes_final[1:] if sc.get("importance", 0.5) >= 0.8]
+                     if scenes_final else None),
+        grade_filter=grade_filter(options.get("color"), options.get("grade", "off")),
+        trans_points=plan_transitions(
+            words, duration, options.get("trans", "off"), cut_points, scenes_final or None
+        ),
+    )
 
     ass_name = "captions.ass"
     base_filter = get_video_filter(video_format, width, height)
@@ -2899,7 +3194,8 @@ def clean_format(video_format):
 
 def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
                   font="", font2="", fontmix="0", cut="off", keys="1",
-                  anim="", anim_out="", trans="off", broll="auto", sound=""):
+                  anim="", anim_out="", trans="off", broll="auto", sound="",
+                  camera="", grade="off"):
     accent = (accent or "").strip().lstrip("#").upper()
     if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
         raise HTTPException(status_code=400, detail="Неверный цвет.")
@@ -2923,6 +3219,8 @@ def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
         "anim": anim if anim in ANIM_IN or anim in ("auto", "mix") else "",
         "anim_out": anim_out if anim_out in ANIM_OUT or anim_out == "auto" else "",
         "broll": broll if broll in ("off", "card", "full", "auto") else "auto",
+        "camera": camera if camera in ("auto", "dynamic", "zoom_in", "zoom_out", "push", "shake", "off") else "",
+        "grade": grade if grade in ("off", "auto", "cinematic", "warm", "cool", "vivid", "film") else "off",
         "sound": sound if sound in ("off", "light", "normal", "strong") else "",
         "trans": trans if trans in TRANSITION_KINDS or trans == "auto" else "off",
     }
@@ -3025,6 +3323,11 @@ def public_job(job):
         data["lines"] = job["lines"]
         data["detected"] = job["detected"]
         data["cut_preview"] = job.get("cut_preview", {})
+        data["scenes"] = job.get("scenes", [])
+        data["topic"] = job.get("topic", "")
+        data["visual_cuts"] = job.get("visual_cuts", 0)
+        stats = job.get("color")
+        data["color"] = {k: round(v, 1) for k, v in stats.items()} if stats else None
         data["cards"] = [public_card(c) for c in job["cards"]]
         data["broll_info"] = job.get("broll_info", {})
     if job["status"] == "done":
@@ -3070,7 +3373,16 @@ async def run_transcribe_job(job):
             )
 
             report(95, "Подбираем карточки")
-            job["cards"], job["broll_info"] = await suggest_broll(words, job["duration"])
+            report(96, "Анализируем сцены")
+            analysis = await analyze_scenes(words, job["duration"])
+            cuts = await detect_visual_cuts(job["input"], work_dir, job["duration"])
+            job["scenes"] = merge_visual_cuts(analysis["scenes"], cuts)
+            job["topic"] = analysis["topic"]
+            job["visual_cuts"] = len(cuts)
+            job["color"] = await analyze_color(job["input"], work_dir, job["duration"])
+            job["cards"], job["broll_info"] = await suggest_broll(
+                words, job["duration"], topic=job["topic"]
+            )
             job["cut_preview"] = cut_preview(words, job["duration"])
             touch(
                 job,
@@ -3343,6 +3655,10 @@ async def create_job(
         "detected": [],
         "cards": [],
         "cut_preview": {},
+        "scenes": [],
+        "topic": "",
+        "visual_cuts": 0,
+        "color": None,
         "output": None,
         "updated": time.time(),
     }
@@ -3386,6 +3702,8 @@ async def start_render(
     trans: str = Form("off"),
     broll: str = Form("auto"),
     sound: str = Form(""),
+    camera: str = Form(""),
+    grade: str = Form("off"),
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
@@ -3393,8 +3711,10 @@ async def start_render(
     job = get_job(job_id, user)
     options = clean_options(
         accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix,
-        cut, keys, anim, anim_out, trans, broll, sound,
+        cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
     )
+    options["scenes"] = job.get("scenes", [])
+    options["color"] = job.get("color")
     try:
         wanted = {}
         for entry in json.loads(cards or "[]"):
