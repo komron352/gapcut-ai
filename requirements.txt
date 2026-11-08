@@ -1,6 +1,8 @@
 aiogram==3.22.0
-fastapi
-uvicorn[standard]
-python-multipart
-httpx
-python-dotenv
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+httpx==0.28.1
+python-dotenv==1.1.1
+numpy==2.2.6
+pillow==11.3.0
