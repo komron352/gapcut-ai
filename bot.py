@@ -28,6 +28,8 @@ init_data may be sent as a form field or as the X-Init-Data header
 
 import asyncio
 import difflib
+import base64
+import wave
 import hashlib
 import hmac
 import random
@@ -61,6 +63,15 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFil
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
+
+try:
+    import numpy as np
+except ImportError:  # music and covers are switched off without numpy
+    np = None
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = ImageDraw = ImageFont = None
 
 
 # =========================================================
@@ -2593,33 +2604,6 @@ async def make_sfx_files(kinds, work_dir):
     return files
 
 
-def build_audio_graph(cues, kind_inputs, audio_src, gain):
-    kinds = sorted({kind for _, kind, _ in cues})
-    counts = {k: sum(1 for _, kind, _ in cues if kind == k) for k in kinds}
-    used = {k: 0 for k in kinds}
-    parts = []
-    for kind in kinds:
-        index, count = kind_inputs[kind], counts[kind]
-        if count == 1:
-            parts.append(f"[{index}:a]anull[{kind}0]")
-        else:
-            parts.append(f"[{index}:a]asplit={count}" + "".join(f"[{kind}{i}]" for i in range(count)))
-    parts.append(f"{audio_src}aformat=channel_layouts=stereo[a0]")
-    mix = "[a0]"
-    for number, (moment, kind, strength) in enumerate(cues):
-        slot = used[kind]
-        used[kind] += 1
-        ms = int(moment * 1000)
-        volume = gain * SFX_BASE[kind] * strength
-        parts.append(f"[{kind}{slot}]adelay={ms}|{ms},volume={volume:.4f}[d{number}]")
-        mix += f"[d{number}]"
-    parts.append(
-        f"{mix}amix=inputs={len(cues) + 1}:duration=first:normalize=0,alimiter=limit=0.95[aout]"
-    )
-    return ";".join(parts)
-
-
-
 # =========================================================
 # AI SCENE DETECTION, AUTO CAMERA MOTION, SMART COLOR GRADING (stage 5)
 # =========================================================
@@ -2874,6 +2858,519 @@ def grade_filter(stats, look, strength=0.8):
 
 
 
+# =========================================================
+# AUTO MUSIC (stage 6): original music synthesised per mood, ducked under the voice
+# =========================================================
+#
+# The tracks are generated here (chords, bass, drums, arpeggio), so there are no
+# copyright issues. Edit events are snapped to the beat grid.
+
+MUSIC_SR = 44100
+MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11]
+MINOR_SCALE = [0, 2, 3, 5, 7, 8, 10]
+MOODS = {
+    "upbeat": {"bpm": 124, "minor": False, "root": 261.63, "prog": [0, 4, 5, 3],
+               "drums": "four", "arp": 2, "bass": "eighth", "pad": 0.55},
+    "corporate": {"bpm": 100, "minor": False, "root": 233.08, "prog": [0, 5, 3, 4],
+                  "drums": "light", "arp": 2, "bass": "quarter", "pad": 0.6},
+    "chill": {"bpm": 84, "minor": False, "root": 220.0, "prog": [5, 3, 0, 4],
+              "drums": "soft", "arp": 0, "bass": "half", "pad": 0.8},
+    "lofi": {"bpm": 76, "minor": True, "root": 196.0, "prog": [0, 5, 2, 6],
+             "drums": "lofi", "arp": 1, "bass": "half", "pad": 0.7},
+    "cinematic": {"bpm": 70, "minor": True, "root": 174.61, "prog": [0, 5, 2, 6],
+                  "drums": None, "arp": 0, "bass": "whole", "pad": 1.0},
+}
+MOOD_WORDS = {
+    "upbeat": ("fitness", "sport", "workout", "motivation", "success", "energy", "party", "dance", "challenge"),
+    "corporate": ("business", "money", "marketing", "startup", "tech", "finance", "sales", "product",
+                  "company", "software", "app", "editing"),
+    "chill": ("travel", "food", "cooking", "nature", "lifestyle", "family", "beauty", "fashion", "home", "vlog"),
+    "lofi": ("study", "education", "learning", "tutorial", "school", "university", "language", "book", "course"),
+    "cinematic": ("story", "history", "drama", "mystery", "documentary", "film", "movie", "legend", "journey"),
+}
+MUSIC_LEVEL_DB = {"low": -14.0, "normal": -10.0, "high": -6.0}
+
+
+def chord_freqs(root, scale, degree):
+    notes = []
+    for step in (0, 2, 4):
+        index = degree + step
+        semis = scale[index % 7] + 12 * (index // 7)
+        notes.append(root * 2 ** (semis / 12.0))
+    return notes
+
+
+def synth_music(mood, duration):
+    """Mono float samples of an original track (needs numpy)."""
+    cfg = MOODS[mood]
+    sr = MUSIC_SR
+    total = int(duration * sr)
+    rng = np.random.default_rng(7)
+    beat = 60.0 / cfg["bpm"]
+    bar = beat * 4
+    out = np.zeros(total, dtype=np.float64)
+    scale = MINOR_SCALE if cfg["minor"] else MAJOR_SCALE
+
+    def timeline(length):
+        return np.arange(int(length * sr)) / sr
+
+    def add(signal, moment, gain=1.0):
+        start = int(moment * sr)
+        if start < 0 or start >= total:
+            return
+        chunk = signal[: total - start]
+        out[start:start + len(chunk)] += chunk * gain
+
+    for index in range(int(duration / bar) + 2):
+        freqs = chord_freqs(cfg["root"], scale, cfg["prog"][index % 4])
+        t = timeline(bar + 0.6)
+        env = np.minimum(1.0, t / 0.35) * np.clip((bar + 0.5 - t) / 0.5, 0.0, 1.0)
+        pad = np.zeros_like(t)
+        for f in freqs:
+            for detune in (0.997, 1.003):
+                pad += (np.sin(2 * np.pi * f * detune * t)
+                        + 0.35 * np.sin(4 * np.pi * f * detune * t)
+                        + 0.15 * np.sin(6 * np.pi * f * detune * t))
+        add(pad * env * cfg["pad"] * 0.045, index * bar)
+
+    if cfg["bass"]:
+        step = {"eighth": beat / 2, "quarter": beat, "half": beat * 2, "whole": bar}[cfg["bass"]]
+        moment, count = 0.0, 0
+        while moment < duration:
+            degree = cfg["prog"][int(moment // bar) % 4]
+            f = chord_freqs(cfg["root"] / 2, scale, degree)[0]
+            if cfg["bass"] == "eighth" and count % 2 == 1:
+                f *= 1.5
+            t = timeline(step + 0.1)
+            env = np.exp(-t * (4.0 if step < beat else 1.6)) * np.minimum(1.0, t / 0.01)
+            add((np.sin(2 * np.pi * f * t) + 0.3 * np.sin(4 * np.pi * f * t)) * env * 0.28, moment)
+            moment += step
+            count += 1
+
+    if cfg["drums"]:
+        t = timeline(0.35)
+        kick = np.sin(2 * np.pi * (45 * t + 75 * (1 - np.exp(-30 * t)) / 30)) * np.exp(-t * 11)
+        t = timeline(0.25)
+        snare = (rng.standard_normal(len(t)) * 0.7 + np.sin(2 * np.pi * 190 * t) * 0.5) * np.exp(-t * 22)
+        t = timeline(0.08)
+        hat = np.diff(rng.standard_normal(len(t)), prepend=0.0) * np.exp(-t * 70)
+        for index in range(4, int(duration / beat) + 1):
+            moment, pos = index * beat, index % 4
+            style = cfg["drums"]
+            if style == "four":
+                add(kick, moment, 0.55)
+                add(hat, moment + beat / 2, 0.12)
+                if pos in (1, 3):
+                    add(snare, moment, 0.22)
+            elif style == "light":
+                if pos in (0, 2):
+                    add(kick, moment, 0.5)
+                if pos in (1, 3):
+                    add(snare, moment, 0.16)
+                add(hat, moment + beat / 2, 0.08)
+            elif style == "soft":
+                if pos in (0, 2):
+                    add(kick, moment, 0.4)
+                if pos in (1, 3):
+                    add(snare, moment, 0.10)
+            elif style == "lofi":
+                if pos == 0:
+                    add(kick, moment, 0.45)
+                if pos == 2:
+                    add(kick, moment + beat * 0.5, 0.3)
+                if pos in (1, 3):
+                    add(snare, moment, 0.12)
+                add(hat, moment + beat / 2, 0.1)
+
+    if cfg["arp"]:
+        step = beat / cfg["arp"]
+        moment, count = 0.0, 0
+        while moment < duration:
+            if moment >= bar:
+                degree = cfg["prog"][int(moment // bar) % 4]
+                freqs = chord_freqs(cfg["root"] * 2, scale, degree)
+                f = [freqs[0], freqs[1], freqs[2], freqs[1]][count % 4]
+                t = timeline(0.5)
+                env = np.exp(-t * 8) * np.minimum(1.0, t / 0.004)
+                tone = (np.sin(2 * np.pi * f * t) + 0.4 * np.sin(4 * np.pi * f * t)
+                        + 0.2 * np.sin(6 * np.pi * f * t))
+                add(tone * env * 0.1, moment)
+            moment += step
+            count += 1
+
+    peak = float(np.max(np.abs(out))) or 1.0
+    return out / peak * 0.8
+
+
+def write_wav(path, samples):
+    data = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2")
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(MUSIC_SR)
+        handle.writeframes(data.tobytes())
+
+
+async def make_music(mood, duration, work_dir):
+    """Render the track for the mood; returns the file path or None."""
+    if np is None or mood not in MOODS:
+        return None
+    work = Path(work_dir).resolve()
+    raw, final = work / f"music_{mood}_raw.wav", work / f"music_{mood}.wav"
+    try:
+        samples = await asyncio.to_thread(synth_music, mood, duration)
+        await asyncio.to_thread(write_wav, raw, samples)
+        await run_command(
+            ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+             "-i", str(raw),
+             "-af", "lowpass=f=8500,aecho=0.7:0.6:70|130:0.25|0.15,"
+                    "aformat=channel_layouts=stereo",
+             str(final)],
+            timeout=90, cwd=work,
+        )
+        return str(final)
+    except Exception:
+        logger.warning("Music synthesis failed", exc_info=True)
+        return None
+
+
+def mood_by_rules(topic, words, duration):
+    text = (topic or "").lower()
+    for mood, keys in MOOD_WORDS.items():
+        if any(k in text for k in keys):
+            return mood, "topic"
+    pace = len(words) / max(duration, 1.0)
+    if pace > 3.2:
+        return "upbeat", "pace"
+    if pace < 2.0:
+        return "chill", "pace"
+    return "corporate", "pace"
+
+
+async def choose_mood(words, topic, duration, client=None):
+    """{mood, reason}: the LLM picks by topic and tone, rules are the fallback."""
+    mood, reason = mood_by_rules(topic, words, duration)
+    result = {"mood": mood, "reason": reason, "bpm": MOODS[mood]["bpm"]}
+    if not (GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 8:
+        return result
+    own = client is None
+    if own:
+        client = httpx.AsyncClient(timeout=20.0)
+    try:
+        sample = " ".join(w["word"] for w in words[:60])
+        pace = len(words) / max(duration, 1.0)
+        raw = await llm_json(
+            client,
+            "You choose background music for a short vertical video. Moods: upbeat "
+            "(energetic, motivation, sport), corporate (business, tech, product), chill "
+            "(lifestyle, travel, food, calm), lofi (study, tutorials, relaxed), cinematic "
+            "(story, drama, history). Answer only with JSON: "
+            '{"mood":"one of the five","reason":"short English reason"}.',
+            f"Topic: {topic or 'unknown'}\nSpeaking pace: {pace:.1f} words per second\n"
+            f"Start of the speech: {sample}",
+        )
+        if raw and raw.get("mood") in MOODS:
+            result = {"mood": raw["mood"], "reason": str(raw.get("reason", ""))[:60] or "ai",
+                      "bpm": MOODS[raw["mood"]]["bpm"]}
+    except Exception:
+        logger.warning("Mood choice failed, using rules", exc_info=True)
+    finally:
+        if own:
+            await client.aclose()
+    return result
+
+
+def music_gain(level, voice_db, music_db):
+    """Linear gain that puts the music (before ducking) below the voice level."""
+    voice = voice_db if voice_db is not None else -20.0
+    music = music_db if music_db is not None else -18.0
+    target = voice + MUSIC_LEVEL_DB.get(level, -10.0)
+    return max(0.02, min(2.0, 10 ** ((target - music) / 20.0)))
+
+
+def snap_beat(moment, bpm, window=0.12):
+    beat = 60.0 / bpm
+    nearest = round(moment / beat) * beat
+    return nearest if abs(nearest - moment) <= window else moment
+
+
+def build_audio_graph(cues, kind_inputs, audio_src, gain, music=None):
+    """Voice + sound effects (+ music ducked by the voice) -> [aout]."""
+    kinds = sorted({kind for _, kind, _ in cues})
+    counts = {k: sum(1 for _, kind, _ in cues if kind == k) for k in kinds}
+    used = {k: 0 for k in kinds}
+    parts = []
+    for kind in kinds:
+        index, count = kind_inputs[kind], counts[kind]
+        if count == 1:
+            parts.append(f"[{index}:a]anull[{kind}0]")
+        else:
+            parts.append(f"[{index}:a]asplit={count}" + "".join(f"[{kind}{i}]" for i in range(count)))
+    parts.append(f"{audio_src}aformat=channel_layouts=stereo[a0]")
+    mix, inputs = "[a0]", 1
+    if music:
+        length = music["duration"]
+        parts.append("[a0]asplit=2[v1][vk]")
+        parts.append(
+            f"[{music['index']}:a]aformat=channel_layouts=stereo,atrim=0:{length:.2f},"
+            f"volume={music['gain']:.4f},afade=t=in:st=0:d=1.2,"
+            f"afade=t=out:st={max(0.0, length - 2.5):.2f}:d=2.5[m0]"
+        )
+        parts.append("[m0][vk]sidechaincompress=threshold=0.03:ratio=6:attack=15:release=350[mduck]")
+        mix, inputs = "[v1][mduck]", 2
+    for number, (moment, kind, strength) in enumerate(cues):
+        slot = used[kind]
+        used[kind] += 1
+        ms = int(moment * 1000)
+        volume = gain * SFX_BASE[kind] * strength
+        parts.append(f"[{kind}{slot}]adelay={ms}|{ms},volume={volume:.4f}[d{number}]")
+        mix += f"[d{number}]"
+        inputs += 1
+    parts.append(f"{mix}amix=inputs={inputs}:duration=first:normalize=0,alimiter=limit=0.95[aout]")
+    return ";".join(parts)
+
+
+# =========================================================
+# PRO COVER MAKER (stage 6): best frames + a designed cover with text
+# =========================================================
+
+COVER_TEMPLATES = ("bold", "box", "split", "minimal")
+COVER_SIZES = {"9:16": (1080, 1920), "16:9": (1280, 720), "1:1": (1080, 1080)}
+
+
+def score_frame(path):
+    """(sharpness, exposure, colourfulness) of a frame; needs numpy and Pillow."""
+    image = Image.open(path).convert("RGB")
+    rgb = np.asarray(image, dtype=np.float64)
+    gray = rgb.mean(axis=2)
+    h, w = gray.shape
+    centre = gray[int(h * 0.2):int(h * 0.8), int(w * 0.2):int(w * 0.8)]
+    lap = (4 * centre[1:-1, 1:-1] - centre[:-2, 1:-1] - centre[2:, 1:-1]
+           - centre[1:-1, :-2] - centre[1:-1, 2:])
+    exposure = 1.0 - abs(float(gray.mean()) - 125.0) / 125.0
+    rg = rgb[..., 0] - rgb[..., 1]
+    yb = 0.5 * (rgb[..., 0] + rgb[..., 1]) - rgb[..., 2]
+    colour = float(np.sqrt(rg.std() ** 2 + yb.std() ** 2))
+    return float(lap.var()), exposure, colour
+
+
+def rank_frames(scores, times, limit=6):
+    if not scores:
+        return []
+    sharp_max = max(s[0] for s in scores) or 1.0
+    colour_max = max(s[2] for s in scores) or 1.0
+    order = sorted(
+        range(len(scores)),
+        key=lambda i: -(0.6 * scores[i][0] / sharp_max + 0.25 * max(scores[i][1], 0.0)
+                        + 0.15 * scores[i][2] / colour_max),
+    )
+    chosen = []
+    for index in order:
+        if all(abs(times[index] - times[other]) >= 1.0 for other in chosen):
+            chosen.append(index)
+        if len(chosen) >= limit:
+            break
+    return chosen
+
+
+def fallback_title(scenes_words):
+    words = [clean for clean in (w.strip(".,!?…:;") for w in scenes_words) if clean]
+    return " ".join(words[:5])
+
+
+async def suggest_cover_title(words, topic, client=None):
+    fallback = fallback_title([w["word"] for w in words[:8]])
+    if not (GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6:
+        return fallback
+    own = client is None
+    if own:
+        client = httpx.AsyncClient(timeout=20.0)
+    try:
+        raw = await llm_json(
+            client,
+            "You write a short cover title (2-6 words) for a vertical video. Use the same "
+            "language as the speech (Tajik in Cyrillic or Russian). Make it a strong hook, "
+            'no hashtags, no quotes. Answer only with JSON: {"title":"..."}.',
+            f"Topic: {topic or 'unknown'}\nSpeech: " + " ".join(w["word"] for w in words[:70]),
+        )
+        title = str((raw or {}).get("title", "")).strip().strip("\"'«»")[:70]
+        return title or fallback
+    except Exception:
+        return fallback
+    finally:
+        if own:
+            await client.aclose()
+
+
+async def prepare_cover(video_path, work_dir, duration, words, topic):
+    """Candidate frames (sharp, well exposed) with thumbnails, and a title."""
+    info = {"times": [], "thumbs": [], "title": ""}
+    if np is None or Image is None:
+        return info
+    video_path, work_dir = Path(video_path).resolve(), Path(work_dir).resolve()
+    probe = work_dir / "cover_probe"
+    probe.mkdir(exist_ok=True)
+    try:
+        count = int(min(24, max(6, duration * 2)))
+        rate = count / max(duration, 1.0)
+        await run_command(
+            ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+             "-i", str(video_path), "-vf", f"fps={rate:.4f},scale=360:-2",
+             "-q:v", "4", str(probe / "%03d.jpg")],
+            timeout=90, cwd=work_dir,
+        )
+        files = sorted(probe.glob("*.jpg"))
+        times = [min(duration - 0.1, index / rate + 0.05) for index in range(len(files))]
+        scores = await asyncio.to_thread(lambda: [score_frame(f) for f in files])
+        for index in rank_frames(scores, times):
+            data = files[index].read_bytes()
+            info["times"].append(round(times[index], 2))
+            info["thumbs"].append("data:image/jpeg;base64," + base64.b64encode(data).decode())
+    except Exception:
+        logger.warning("Cover candidates failed", exc_info=True)
+    info["title"] = await suggest_cover_title(words, topic)
+    return info
+
+
+def font_path_for(family):
+    names = [family] if family else []
+    names += ["Noto Sans", "DejaVu Sans"]
+    for name in names:
+        try:
+            result = subprocess.run(
+                ["fc-match", "-f", "%{family}|%{file}", f"{name}:bold"],
+                capture_output=True, text=True, timeout=10,
+            )
+            found, _, path = result.stdout.partition("|")
+            if path and Path(path).exists() and name in [x.strip() for x in found.split(",")]:
+                return path
+        except Exception:
+            continue
+    return "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
+def _rgb(hex_color):
+    hex_color = (hex_color or "FFE500").strip("#")
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _wrap(draw, words, font, max_width):
+    lines, current = [], []
+    for word in words:
+        trial = " ".join(current + [word])
+        if current and draw.textlength(trial, font=font) > max_width:
+            lines.append(current)
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(current)
+    return lines
+
+
+def draw_cover(frame_path, out_path, text, template, accent, font_path, size):
+    width, height = size
+    base = Image.open(frame_path).convert("RGB").resize(size)
+    canvas = base.convert("RGBA")
+    probe = ImageDraw.Draw(canvas)
+    words = text.split() or [""]
+    max_width = int(width * 0.86)
+    max_lines = 4 if height > width else 3
+    start = int(width * (0.105 if height > width else 0.075))
+    size_px = start
+    while True:
+        font = ImageFont.truetype(font_path, size_px)
+        lines = _wrap(probe, words, font, max_width)
+        fits = len(lines) <= max_lines and all(
+            probe.textlength(" ".join(line), font=font) <= max_width for line in lines
+        )
+        if fits or size_px <= 24:
+            break
+        size_px = int(size_px * 0.93)
+    colour = _rgb(accent)
+    key = max((w for w in words if len(w) >= 4), key=len, default=None)
+    spacing = int(size_px * 1.15)
+    block = spacing * len(lines)
+
+    def gradient(top, bottom, y0, y1, alpha_top, alpha_bottom):
+        layer = Image.new("RGBA", size, (0, 0, 0, 0))
+        pixels = layer.load()
+        for y in range(max(0, y0), min(height, y1)):
+            ratio = (y - y0) / max(1, y1 - y0)
+            alpha = int(alpha_top + (alpha_bottom - alpha_top) * ratio)
+            for x in range(width):
+                pixels[x, y] = (0, 0, 0, alpha)
+        return layer
+
+    if template == "split":
+        canvas = Image.alpha_composite(canvas, Image.new("RGBA", size, (0, 0, 0, 40)))
+        panel = Image.new("RGBA", (width, int(block + size_px * 1.4)), (10, 10, 16, 215))
+        canvas.alpha_composite(panel, (0, 0))
+        y_text = int(size_px * 0.6)
+        bar = Image.new("RGBA", (int(width * 0.28), max(6, size_px // 9)), colour + (255,))
+        canvas.alpha_composite(bar, (int(width * 0.07), y_text + block + int(size_px * 0.15)))
+        align = "left"
+    elif template == "minimal":
+        canvas = Image.alpha_composite(canvas, gradient(0, 0, int(height * 0.6), height, 0, 190))
+        y_text = height - block - int(height * 0.07)
+        bar = Image.new("RGBA", (int(width * 0.2), max(5, size_px // 12)), colour + (255,))
+        canvas.alpha_composite(bar, (int(width * 0.07), y_text - int(size_px * 0.35)))
+        align = "left"
+    elif template == "box":
+        y_text = int(height * 0.58 - block / 2)
+        align = "center"
+    else:  # bold
+        canvas = Image.alpha_composite(canvas, gradient(0, 0, int(height * 0.42), height, 0, 235))
+        y_text = int(height * 0.78 - block / 2)
+        align = "center"
+
+    draw = ImageDraw.Draw(canvas)
+    for number, line in enumerate(lines):
+        line_text = " ".join(line)
+        line_width = draw.textlength(line_text, font=font)
+        x = int((width - line_width) / 2) if align == "center" else int(width * 0.07)
+        y = y_text + number * spacing
+        if template == "box":
+            pad = int(size_px * 0.22)
+            draw.rounded_rectangle(
+                [x - pad, y - int(pad * 0.4), x + line_width + pad, y + int(size_px * 1.05) + int(pad * 0.4)],
+                radius=int(size_px * 0.22), fill=colour + (255,),
+            )
+        cursor = x
+        for word in line:
+            is_key = key is not None and word == key
+            if template == "box":
+                fill, stroke = (17, 17, 17, 255), 0
+            else:
+                fill, stroke = (colour + (255,)) if is_key else (255, 255, 255, 255), max(2, size_px // 11)
+            draw.text((cursor, y), word, font=font, fill=fill,
+                      stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
+            cursor += draw.textlength(word + " ", font=font)
+    canvas.convert("RGB").save(out_path, "JPEG", quality=92)
+
+
+async def make_cover(job, moment, template, text, fmt, accent, font_family, grade):
+    width, height = COVER_SIZES[fmt]
+    work = Path(job["dir"]).resolve()
+    frame = work / "cover_frame.png"
+    chain = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
+    if grade:
+        chain += "," + grade
+    await run_command(
+        ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+         "-ss", f"{moment:.2f}", "-i", str(job["input"]), "-frames:v", "1",
+         "-vf", chain, str(frame)],
+        timeout=60, cwd=work,
+    )
+    out = work / f"cover_{uuid.uuid4().hex[:8]}.jpg"
+    await asyncio.to_thread(
+        draw_cover, frame, out, text, template, accent, font_path_for(font_family),
+        (width, height),
+    )
+    return out
+
+
+
 def build_graph(words, base_filter, width, height, duration, options, ass_name,
                 fonts_option, card_inputs, segments=None):
     """Return (filtergraph, has_audio_graph, sfx_times)."""
@@ -2882,6 +3379,8 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
 
     lines = make_lines(words)
     starts = [l["start"] for l in lines[1:] if 1.0 < l["start"] < duration - 0.5]
+    if options.get("beat_bpm"):
+        starts = [snap_beat(moment, options["beat_bpm"]) for moment in starts]
 
     cam_kind = options.get("camera_eff") or ("dynamic" if options.get("zoom") else "off")
     zoom = zoom_expression(starts) if cam_kind == "dynamic" else None
@@ -3037,6 +3536,25 @@ async def render_video(
         ),
     )
 
+    mood = None
+    music_setting = options.get("music") or "off"
+    if np is not None:
+        if music_setting in MOODS:
+            mood = music_setting
+        elif music_setting == "auto":
+            suggested = (options.get("music_mood") or {}).get("mood")
+            mood = suggested if suggested in MOODS else "corporate"
+    if mood and options.get("music_sync", True):
+        bpm = MOODS[mood]["bpm"]
+        options = dict(
+            options,
+            beat_bpm=bpm,
+            trans_points=[(snap_beat(t, bpm), k) for t, k in options.get("trans_points") or []],
+            cards=[dict(c, at=snap_beat(c["at"], bpm)) for c in options.get("cards") or []],
+            scene_marks=([snap_beat(t, bpm) for t in options["scene_marks"]]
+                         if options.get("scene_marks") is not None else None),
+        )
+
     ass_name = "captions.ass"
     base_filter = get_video_filter(video_format, width, height)
     anim_log = []
@@ -3077,21 +3595,41 @@ async def render_video(
     audio_map = ["-map", "[caout]"] if segments else ["-map", "0:a:0?"]
     audio_src = "[caout]" if segments else "[0:a]"
     level = options.get("sound") or ("normal" if options.get("sfx") else "off")
+    cues = []
     if level in ("light", "normal", "strong"):
         cues = plan_sound(
             duration, words, starts, options.get("trans_points") or [], cards,
             anim_log, bool(options.get("zoom")),
         )
-        if cues:
-            mean_db = await measure_voice_level(input_path, work_dir)
-            files = await make_sfx_files(sorted({kind for _, kind, _ in cues}), work_dir)
-            kind_inputs = {}
-            for kind, path in files.items():
-                kind_inputs[kind] = 1 + len(card_inputs) + len(kind_inputs)
-                extra_inputs += ["-i", path]
-            graph += ";" + build_audio_graph(cues, kind_inputs, audio_src, sfx_gain(level, mean_db))
-            audio_map = ["-map", "[aout]"]
-            logger.info("Sound design: %s cues, voice %.1f dB", len(cues), mean_db or 0.0)
+    music_info = None
+    mean_db = None
+    if mood or cues:
+        mean_db = await measure_voice_level(input_path, work_dir)
+    if mood:
+        music_file = await make_music(mood, duration + 1.0, work_dir)
+        if music_file:
+            music_mean = await measure_voice_level(music_file, work_dir)
+            music_info = {
+                "file": music_file, "duration": duration,
+                "gain": music_gain(options.get("music_level", "normal"), mean_db, music_mean),
+            }
+    if cues or music_info:
+        files = await make_sfx_files(sorted({kind for _, kind, _ in cues}), work_dir) if cues else {}
+        kind_inputs = {}
+        for kind, path in files.items():
+            kind_inputs[kind] = 1 + len(card_inputs) + len(kind_inputs)
+            extra_inputs += ["-i", path]
+        if music_info:
+            music_info["index"] = 1 + len(card_inputs) + len(kind_inputs)
+            extra_inputs += ["-i", music_info["file"]]
+        graph += ";" + build_audio_graph(
+            cues, kind_inputs, audio_src, sfx_gain(level, mean_db), music_info
+        )
+        audio_map = ["-map", "[aout]"]
+        logger.info(
+            "Audio design: %s cues, music=%s, voice %.1f dB",
+            len(cues), mood if music_info else "off", mean_db or 0.0,
+        )
 
     command = [
         "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
@@ -3195,7 +3733,7 @@ def clean_format(video_format):
 def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
                   font="", font2="", fontmix="0", cut="off", keys="1",
                   anim="", anim_out="", trans="off", broll="auto", sound="",
-                  camera="", grade="off"):
+                  camera="", grade="off", music="", music_level="normal", music_sync="1"):
     accent = (accent or "").strip().lstrip("#").upper()
     if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
         raise HTTPException(status_code=400, detail="Неверный цвет.")
@@ -3221,6 +3759,9 @@ def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
         "broll": broll if broll in ("off", "card", "full", "auto") else "auto",
         "camera": camera if camera in ("auto", "dynamic", "zoom_in", "zoom_out", "push", "shake", "off") else "",
         "grade": grade if grade in ("off", "auto", "cinematic", "warm", "cool", "vivid", "film") else "off",
+        "music": music if music in MOODS or music in ("auto", "off") else "",
+        "music_level": music_level if music_level in MUSIC_LEVEL_DB else "normal",
+        "music_sync": str(music_sync).strip().lower() not in ("0", "false", "off"),
         "sound": sound if sound in ("off", "light", "normal", "strong") else "",
         "trans": trans if trans in TRANSITION_KINDS or trans == "auto" else "off",
     }
@@ -3328,6 +3869,9 @@ def public_job(job):
         data["visual_cuts"] = job.get("visual_cuts", 0)
         stats = job.get("color")
         data["color"] = {k: round(v, 1) for k, v in stats.items()} if stats else None
+        data["music"] = job.get("music_mood")
+        cover = job.get("cover") or {}
+        data["cover"] = {"times": cover.get("times", []), "title": cover.get("title", "")}
         data["cards"] = [public_card(c) for c in job["cards"]]
         data["broll_info"] = job.get("broll_info", {})
     if job["status"] == "done":
@@ -3380,6 +3924,10 @@ async def run_transcribe_job(job):
             job["topic"] = analysis["topic"]
             job["visual_cuts"] = len(cuts)
             job["color"] = await analyze_color(job["input"], work_dir, job["duration"])
+            job["music_mood"] = await choose_mood(words, job["topic"], job["duration"])
+            job["cover"] = await prepare_cover(
+                job["input"], work_dir, job["duration"], words, job["topic"]
+            )
             job["cards"], job["broll_info"] = await suggest_broll(
                 words, job["duration"], topic=job["topic"]
             )
@@ -3659,6 +4207,8 @@ async def create_job(
         "topic": "",
         "visual_cuts": 0,
         "color": None,
+        "music_mood": None,
+        "cover": None,
         "output": None,
         "updated": time.time(),
     }
@@ -3704,6 +4254,9 @@ async def start_render(
     sound: str = Form(""),
     camera: str = Form(""),
     grade: str = Form("off"),
+    music: str = Form(""),
+    music_level: str = Form("normal"),
+    music_sync: str = Form("1"),
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
@@ -3712,7 +4265,9 @@ async def start_render(
     options = clean_options(
         accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix,
         cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
+        music, music_level, music_sync,
     )
+    options["music_mood"] = job.get("music_mood")
     options["scenes"] = job.get("scenes", [])
     options["color"] = job.get("color")
     try:
@@ -3775,6 +4330,66 @@ async def delete_job(job_id: str, x_init_data: str = Header(default="")):
         raise HTTPException(status_code=409, detail="Задача ещё обрабатывается.")
     remove_job(job_id)
     return {"deleted": True}
+
+
+@app.get("/api/jobs/{job_id}/cover/candidates")
+async def cover_candidates(
+    job_id: str,
+    x_init_data: str = Header(default=""),
+    init_data: str = Query(default=""),
+):
+    user = require_user(x_init_data, init_data)
+    cover = get_job(job_id, user).get("cover") or {}
+    return {
+        "times": cover.get("times", []),
+        "thumbs": cover.get("thumbs", []),
+        "title": cover.get("title", ""),
+    }
+
+
+@app.post("/api/jobs/{job_id}/cover")
+async def create_cover(
+    job_id: str,
+    t: float = Form(0.0),
+    template: str = Form("bold"),
+    text: str = Form(""),
+    fmt: str = Form("9:16"),
+    accent: str = Form(""),
+    font: str = Form(""),
+    grade: str = Form("off"),
+    init_data: str = Form(""),
+    x_init_data: str = Header(default=""),
+):
+    user = require_user(init_data, x_init_data)
+    job = get_job(job_id, user)
+    if np is None or Image is None:
+        raise HTTPException(status_code=503, detail="Создание обложек недоступно на сервере.")
+    if template not in COVER_TEMPLATES or fmt not in COVER_SIZES:
+        raise HTTPException(status_code=400, detail="Неверный шаблон или формат обложки.")
+    text = " ".join(text.split())[:80] or (job.get("cover") or {}).get("title", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="Введите текст обложки.")
+    accent = accent.strip().lstrip("#").upper()
+    if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
+        raise HTTPException(status_code=400, detail="Неверный цвет.")
+    families = {f["family"] if isinstance(f, dict) else f for f in AVAILABLE_FONTS}
+    family = font if font in families else ""
+    grade_expr = grade_filter(job.get("color"), grade if grade in LOOK_FILTERS or grade == "auto" else "off")
+    moment = max(0.0, min(float(t), job["duration"] - 0.1))
+    try:
+        path = await make_cover(job, moment, template, text, fmt, accent, family, grade_expr)
+    except UserError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message)
+    except Exception:
+        logger.exception("Cover failed")
+        raise HTTPException(status_code=500, detail="Не удалось создать обложку.")
+    previous = job.get("cover_file")
+    if previous and previous != str(path):
+        with suppress(OSError):
+            Path(previous).unlink()
+    job["cover_file"] = str(path)
+    touch(job)
+    return FileResponse(str(path), media_type="image/jpeg", filename="GAPCUT_cover.jpg")
 
 
 # =========================================================
