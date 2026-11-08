@@ -106,6 +106,17 @@ details summary{list-style:none;font-weight:800;font-size:16px;display:flex;just
     <div class="row" style="display:block"><b data-i="cutT"></b><div class="chips" id="cuts" style="margin-top:10px"></div><div class="fx" id="cutInfo" style="margin:8px 0 0"></div></div>
     <div class="row" style="display:block"><b data-i="fmtT"></b><div class="chips" id="fmts" style="margin-top:10px"></div></div>
   </div>
+  <div class="card"><h3 data-i="musicT"></h3><div class="hs" id="musics"></div>
+    <div class="fx" style="margin:10px 0 0" id="musicInfo"></div>
+    <h3 style="margin-top:14px" data-i="musicLvl"></h3><div class="chips" id="mlevels"></div>
+    <div class="fx" style="margin:10px 0 0" data-i="musicNote"></div></div>
+  <div class="card" id="coverCard" hidden><h3 data-i="coverT"></h3><div class="hs" id="coverThumbs"></div>
+    <div class="hs" id="coverTpls" style="margin-top:12px"></div>
+    <textarea id="coverText" rows="2" maxlength="80" style="width:100%;margin-top:12px;background:#0e0b18;color:var(--tx);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;resize:none"></textarea>
+    <button class="btn" id="coverBtn" style="margin-top:12px" data-i="coverMake"></button>
+    <img id="coverImg" alt="" style="display:none;width:100%;border-radius:14px;margin-top:12px">
+    <button class="btn ghost" id="coverDl" style="display:none" data-i="coverDl"></button>
+    <div class="fx" style="margin:10px 0 0" data-i="coverHint"></div></div>
   <div class="card" id="scCard" hidden><h3 data-i="scenesT"></h3><div class="fx" style="margin:0 0 10px" id="topicInfo"></div><div class="hs" id="scenes"></div><div class="fx" style="margin:10px 0 0" id="colorInfo"></div></div>
   <div class="card"><h3 data-i="camT"></h3><div class="hs" id="cams"></div>
     <h3 style="margin-top:14px" data-i="gradeT"></h3><div class="hs" id="grades"></div></div>
@@ -138,12 +149,12 @@ const $=id=>document.getElementById(id);
 
 const T={
 ru:{h1:"Автомонтаж с субтитрами",sub:"Загрузите видео — мы распознаем речь и наложим анимированные субтитры.",limits:"до 100 MB · до 60 секунд",pick:"Выбрать видео",speech:"Язык речи",next:"Далее: оформление",
-step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",scenesT:"Сцены видео (ИИ)",camT:"Движение камеры",gradeT:"Цвет и свет",camDef:"Как переключатель Zoom",exposure:"Яркость",dark:"тёмное видео",bright:"светлое видео",okExp:"норма",cast:"оттенок",blueCast:"синеватый",warmCast:"тёплый/красноватый",topicL:"Тема",soundT:"Дизайн звука (уровень)",sLight:"Тихо",sNormal:"Обычно",sStrong:"Сильно",bCard:"Карточка",bFull:"На весь экран",brollNote:"Подбираются фото и видео по смыслу речи. Нажмите ↻ для другого варианта, переключатель убирает вставку.",animT:"Анимация текста",animOutT:"Исчезновение текста",transT:"Переходы",animNote:"Анимации и переходы видны в готовом видео (не в предпросмотре).",styleDef:"Как в стиле",mix:"Микс",none:"Нет",keysT:"Выделять ключевые слова",cutT:"Умная нарезка (паузы и «э-э»)",cOff:"Без нарезки",cLight:"Лёгкая",cNormal:"Средняя",cTight:"Плотная",saved:"сэкономит",sec:"с",qualT:"Точность распознавания",qFast:"Быстро",qBest:"Точнее",glossT:"Имена и термины (через запятую)",fixedT:"Исправлено",lowT:"⚠ Проверьте эту строку",undo:"Вернуть",zoomT:"Зум-акценты",fxT:"Эффекты (глитч)",sfxT:"Звуки (whoosh)",cardsT:"Карточки с фото",fontT:"Шрифты",font1:"Основной шрифт",font2:"Шрифт акцента",fmix:"Микс шрифтов",auto:"Авто",
+step1:"Шаг 1 из 2",step2:"Шаг 2 из 2",live:"Предпросмотр",styleT:"Стиль субтитров",subs:"Субтитры",color:"Цвет акцента",size:"Размер текста",pos:"Расположение",fmtT:"Формат",edT:"Текст субтитров",make:"Создать видео",musicT:"Музыка",musicLvl:"Громкость музыки",mLow:"Тихо",mNormal:"Средне",mHigh:"Громче",musicNote:"Музыка создаётся ИИ-синтезом (без авторских прав), приглушается под голос и совпадает с ритмом переходов.",musicAI:"ИИ выбрал",coverT:"Обложка",coverMake:"Создать обложку",coverDl:"Скачать обложку",coverHint:"Выберите кадр, шаблон и текст. ИИ предложил заголовок, его можно изменить.",coverWait:"Создаём…",scenesT:"Сцены видео (ИИ)",camT:"Движение камеры",gradeT:"Цвет и свет",camDef:"Как переключатель Zoom",exposure:"Яркость",dark:"тёмное видео",bright:"светлое видео",okExp:"норма",cast:"оттенок",blueCast:"синеватый",warmCast:"тёплый/красноватый",topicL:"Тема",soundT:"Дизайн звука (уровень)",sLight:"Тихо",sNormal:"Обычно",sStrong:"Сильно",bCard:"Карточка",bFull:"На весь экран",brollNote:"Подбираются фото и видео по смыслу речи. Нажмите ↻ для другого варианта, переключатель убирает вставку.",animT:"Анимация текста",animOutT:"Исчезновение текста",transT:"Переходы",animNote:"Анимации и переходы видны в готовом видео (не в предпросмотре).",styleDef:"Как в стиле",mix:"Микс",none:"Нет",keysT:"Выделять ключевые слова",cutT:"Умная нарезка (паузы и «э-э»)",cOff:"Без нарезки",cLight:"Лёгкая",cNormal:"Средняя",cTight:"Плотная",saved:"сэкономит",sec:"с",qualT:"Точность распознавания",qFast:"Быстро",qBest:"Точнее",glossT:"Имена и термины (через запятую)",fixedT:"Исправлено",lowT:"⚠ Проверьте эту строку",undo:"Вернуть",zoomT:"Зум-акценты",fxT:"Эффекты (глитч)",sfxT:"Звуки (whoosh)",cardsT:"Карточки с фото",fontT:"Шрифты",font1:"Основной шрифт",font2:"Шрифт акцента",fmix:"Микс шрифтов",auto:"Авто",
 done:"Видео готово",doneS:"Проверьте результат и скачайте.",dl:"Скачать",share:"Поделиться",back:"Изменить оформление",again:"Новое видео",
 langs:{tg:"Таджикский",ru:"Русский",tg_ru:"Таджикский + русский"},sizes:["Малый","Средний","Крупный"],poss:["Авто","Сверху","По центру"],up:"Загрузка",
 eBig:"Файл больше 100 MB.",eLong:"Видео длиннее 60 секунд.",eTg:"Откройте приложение через Telegram-бота.",eNet:"Нет связи с сервером. Подождите минуту и попробуйте снова.",eExp:"Сессия истекла. Загрузите видео заново.",eEmpty:"Текст пуст."},
 tg:{h1:"Монтажи худкор бо субтитр",sub:"Видеоро бор кунед — мо нутқро мешиносем ва субтитри аниматсиягӣ мегузорем.",limits:"то 100 MB · то 60 сония",pick:"Видеоро интихоб кунед",speech:"Забони нутқ",next:"Минбаъд: тарроҳӣ",
-step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",scenesT:"Саҳнаҳои видео (ИИ)",camT:"Ҳаракати камера",gradeT:"Ранг ва равшанӣ",camDef:"Аз тугмаи Zoom",exposure:"Равшанӣ",dark:"видеои торик",bright:"видеои равшан",okExp:"меъёр",cast:"тобиш",blueCast:"кабудтоб",warmCast:"гарм/сурхтоб",topicL:"Мавзӯъ",soundT:"Тарҳи садо (сатҳ)",sLight:"Паст",sNormal:"Миёна",sStrong:"Баланд",bCard:"Карточка",bFull:"Экрани пурра",brollNote:"Акс ва видео аз рӯи мазмуни сухан интихоб мешавад. ↻ барои варианти дигар, тугма иловаро хориҷ мекунад.",animT:"Аниматсияи матн",animOutT:"Нопадид шудани матн",transT:"Гузаришҳо",animNote:"Аниматсия ва гузаришҳо дар видеои тайёр намоён мешаванд (дар пешнамоиш не).",styleDef:"Аз услуб",mix:"Омехта",none:"Не",keysT:"Калимаҳои муҳимро ранг кардан",cutT:"Буридани ҳушманд (таваққуф ва «э-э»)",cOff:"Бе буридан",cLight:"Нарм",cNormal:"Миёна",cTight:"Зич",saved:"сарфа мекунад",sec:"сон",qualT:"Дақиқии шинохт",qFast:"Зуд",qBest:"Дақиқтар",glossT:"Ном ва истилоҳҳо (бо вергул)",fixedT:"Ислоҳ шуд",lowT:"⚠ Ин сатрро санҷед",undo:"Бозгашт",zoomT:"Zoom",fxT:"Эффектҳо (глитч)",sfxT:"Садо (whoosh)",cardsT:"Карточкаҳои сурат",fontT:"Шрифтҳо",font1:"Шрифти асосӣ",font2:"Шрифти таъкид",fmix:"Омехтаи шрифтҳо",auto:"Худкор",
+step1:"Қадами 1 аз 2",step2:"Қадами 2 аз 2",live:"Пешнамоиш",styleT:"Услуби субтитр",subs:"Субтитрҳо",color:"Рангӣ таъкид",size:"Андозаи матн",pos:"Ҷойгиршавӣ",fmtT:"Формат",edT:"Матни субтитр",make:"Сохтани видео",musicT:"Мусиқӣ",musicLvl:"Баландии мусиқӣ",mLow:"Паст",mNormal:"Миёна",mHigh:"Баландтар",musicNote:"Мусиқӣ бо ИИ сохта мешавад (бе ҳуқуқи муаллифӣ), зери овоз паст мешавад ва бо оҳанги гузаришҳо мувофиқ аст.",musicAI:"ИИ интихоб кард",coverT:"Муқова",coverMake:"Сохтани муқова",coverDl:"Зеркашии муқова",coverHint:"Кадр, шаблон ва матнро интихоб кунед. ИИ сарлавҳа пешниҳод кард, онро тағйир додан мумкин.",coverWait:"Сохта истодааст…",scenesT:"Саҳнаҳои видео (ИИ)",camT:"Ҳаракати камера",gradeT:"Ранг ва равшанӣ",camDef:"Аз тугмаи Zoom",exposure:"Равшанӣ",dark:"видеои торик",bright:"видеои равшан",okExp:"меъёр",cast:"тобиш",blueCast:"кабудтоб",warmCast:"гарм/сурхтоб",topicL:"Мавзӯъ",soundT:"Тарҳи садо (сатҳ)",sLight:"Паст",sNormal:"Миёна",sStrong:"Баланд",bCard:"Карточка",bFull:"Экрани пурра",brollNote:"Акс ва видео аз рӯи мазмуни сухан интихоб мешавад. ↻ барои варианти дигар, тугма иловаро хориҷ мекунад.",animT:"Аниматсияи матн",animOutT:"Нопадид шудани матн",transT:"Гузаришҳо",animNote:"Аниматсия ва гузаришҳо дар видеои тайёр намоён мешаванд (дар пешнамоиш не).",styleDef:"Аз услуб",mix:"Омехта",none:"Не",keysT:"Калимаҳои муҳимро ранг кардан",cutT:"Буридани ҳушманд (таваққуф ва «э-э»)",cOff:"Бе буридан",cLight:"Нарм",cNormal:"Миёна",cTight:"Зич",saved:"сарфа мекунад",sec:"сон",qualT:"Дақиқии шинохт",qFast:"Зуд",qBest:"Дақиқтар",glossT:"Ном ва истилоҳҳо (бо вергул)",fixedT:"Ислоҳ шуд",lowT:"⚠ Ин сатрро санҷед",undo:"Бозгашт",zoomT:"Zoom",fxT:"Эффектҳо (глитч)",sfxT:"Садо (whoosh)",cardsT:"Карточкаҳои сурат",fontT:"Шрифтҳо",font1:"Шрифти асосӣ",font2:"Шрифти таъкид",fmix:"Омехтаи шрифтҳо",auto:"Худкор",
 done:"Видео омода шуд",doneS:"Натиҷаро бинед ва зеркашӣ кунед.",dl:"Зеркашӣ",share:"Мубодила",back:"Тағйири тарроҳӣ",again:"Видеои нав",
 langs:{tg:"Тоҷикӣ",ru:"Русӣ",tg_ru:"Тоҷикӣ + русӣ"},sizes:["Хурд","Миёна","Калон"],poss:["Худкор","Боло","Миёна"],up:"Бор шуда истодааст",
 eBig:"Файл аз 100 MB калон аст.",eLong:"Видео аз 60 сония дарозтар аст.",eTg:"Барномаро тавассути боти Telegram кушоед.",eNet:"Бо сервер алоқа нест. Як дақиқа интизор шавед ва дубора кӯшиш кунед.",eExp:"Сессия тамом шуд. Видеоро дубора бор кунед.",eEmpty:"Матн холӣ аст."}
@@ -175,8 +186,11 @@ let altSel={};
 const CAMS=["auto","dynamic","zoom_in","zoom_out","push","shake","off"];
 const GRADES=["off","auto","cinematic","warm","cool","vivid","film"];
 let scenesInfo=[],topicInfo="",colorInfo=null;
+const MOODS_UI=["upbeat","corporate","chill","lofi","cinematic"];
+const CTPL=["bold","box","split","minimal"];
+let musicInfo=null,cover={times:[],thumbs:[],sel:0,tpl:"bold",url:null};
 let cutPrev={};
-let sel={camera:"",grade:"off",broll:"auto",sound:"normal",anim:"",animOut:"",trans:"off",cut:"off",keys:true,qual:"fast",font:"",font2:"",mix:false,zoom:true,fx:true,sfx:true,lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
+let sel={ctpl:"bold",music:"off",mlevel:"normal",camera:"",grade:"off",broll:"auto",sound:"normal",anim:"",animOut:"",trans:"off",cut:"off",keys:true,qual:"fast",font:"",font2:"",mix:false,zoom:true,fx:true,sfx:true,lang:"tg_ru",style:"viral",fmt:"9:16",accent:"FFE500",subs:true,size:1,pos:0};
 const t=k=>T[L][k];
 
 function render(){
@@ -187,6 +201,10 @@ function render(){
   const on=document.querySelector(".screen.on");$("stepT").textContent=on&&on.id==="s-ed"?t("step2"):(on&&on.id==="s-up"?t("step1"):"");
   chips("langs",["tg","ru","tg_ru"].map(k=>[k,T[L].langs[k]]),"lang");
   chips("fmts",FMT,"fmt");
+  chips("musics",[["off",t("none")],["auto",t("auto")]].concat(MOODS_UI.map(x=>[x,nm(x)])),"music");
+  chips("mlevels",[["low",t("mLow")],["normal",t("mNormal")],["high",t("mHigh")]],"mlevel");
+  $("musicInfo").textContent=musicInfo?t("musicAI")+": "+nm(musicInfo.mood)+" · "+musicInfo.bpm+" BPM":"";
+  chips("coverTpls",CTPL.map(x=>[x,nm(x)]),"ctpl");
   chips("cams",[["",t("camDef")]].concat(CAMS.map(x=>[x,nm(x)])),"camera");
   chips("grades",GRADES.map(x=>[x,nm(x)]),"grade");
   chips("sounds",[["light",t("sLight")],["normal",t("sNormal")],["strong",t("sStrong")]],"sound");
@@ -316,7 +334,7 @@ function openEditor(j){
       const ub=document.createElement("button");ub.textContent=t("undo");
       ub.onclick=()=>{ta.value=l.words.map(w=>w.orig||w.word).join(" ");lines[i].text=ta.value;buildWords();drawCap();fx.remove()};
       fx.appendChild(ub);box.appendChild(fx)}});
-  cutPrev=j.cut_preview||{};scenesInfo=j.scenes||[];topicInfo=j.topic||"";colorInfo=j.color||null;showScenes();cards=j.cards||[];altSel={};cardsOn=new Set(cards.map(c=>c.id));showCards();
+  musicInfo=j.music||null;loadCover();cutPrev=j.cut_preview||{};scenesInfo=j.scenes||[];topicInfo=j.topic||"";colorInfo=j.color||null;showScenes();cards=j.cards||[];altSel={};cardsOn=new Set(cards.map(c=>c.id));showCards();
   buildWords();show("s-ed");
 }
 function colorAdvice(c){
@@ -332,6 +350,27 @@ function showScenes(){
   scenesInfo.forEach(sc=>{const b=document.createElement("button");b.className="chip";
     b.textContent=fmtT(sc.start)+" "+sc.role+" "+"●".repeat(Math.max(1,Math.round(sc.importance*3)));
     b.onclick=()=>{const v=$("ev");v.currentTime=sc.start+.05;v.pause()};box.appendChild(b)})}
+function showCover(){
+  $("coverCard").hidden=!cover.thumbs.length;
+  const box=$("coverThumbs");box.innerHTML="";
+  cover.thumbs.forEach((src,i)=>{const im=document.createElement("img");im.src=src;im.alt="";
+    im.style.cssText="height:92px;border-radius:12px;flex:none;border:2px solid "+(i===cover.sel?"var(--gold)":"transparent");
+    im.onclick=()=>{cover.sel=i;showCover()};box.appendChild(im)})}
+async function loadCover(){
+  try{const c=await req("GET","/api/jobs/"+jobId+"/cover/candidates");
+    cover.times=c.times||[];cover.thumbs=c.thumbs||[];cover.sel=0;$("coverText").value=c.title||"";showCover()}catch(e){}}
+$("coverBtn").onclick=async()=>{
+  const fd=new FormData();fd.append("t",cover.times[cover.sel]||0);fd.append("template",sel.ctpl);
+  fd.append("text",$("coverText").value);fd.append("fmt",["9:16","16:9","1:1"].includes(sel.fmt)?sel.fmt:"9:16");
+  fd.append("accent",sel.accent||"");fd.append("font",sel.font||"");fd.append("grade",sel.grade);fd.append("init_data",initData);
+  const b=$("coverBtn");b.disabled=true;const old=b.textContent;b.textContent=t("coverWait");
+  try{const r=await fetch(API+"/api/jobs/"+jobId+"/cover",{method:"POST",body:fd,headers:{"X-Init-Data":initData}});
+    if(!r.ok){let m="";try{m=(await r.json()).detail}catch(e){}throw new Error(m||"HTTP "+r.status)}
+    const blob=await r.blob();if(cover.url)URL.revokeObjectURL(cover.url);cover.url=URL.createObjectURL(blob);
+    $("coverImg").src=cover.url;$("coverImg").style.display="block";$("coverDl").style.display="block"}
+  catch(e){toast(e.message||t("eNet"))}
+  b.disabled=false;b.textContent=old};
+$("coverDl").onclick=()=>{const a=document.createElement("a");a.href=cover.url;a.download="GAPCUT_cover.jpg";document.body.appendChild(a);a.click();a.remove()};
 function showCards(){
   const box=$("cards");box.innerHTML="";$("cardsBox").hidden=!cards.length;
   $("bm").hidden=!cards.length;chips("bm",[["auto",t("auto")],["card",t("bCard")],["full",t("bFull")],["off",t("none")]],"broll");
@@ -360,7 +399,7 @@ $("makeBtn").onclick=async()=>{
   fd.append("lines",JSON.stringify(payload));fd.append("subtitles",sel.subs?"1":"0");
   fd.append("size",SIZEK[sel.size]);fd.append("position",POSK[sel.pos]);
   if(SM[sel.style].acc&&sel.accent)fd.append("accent",sel.accent);
-  fd.append("font",sel.font);fd.append("font2",sel.font2);fd.append("fontmix",sel.mix?"1":"0");fd.append("camera",sel.camera);fd.append("grade",sel.grade);fd.append("anim",sel.anim);fd.append("anim_out",sel.animOut);fd.append("trans",sel.trans);fd.append("cut",sel.cut);fd.append("keys",sel.keys?"1":"0");fd.append("zoom",sel.zoom?"1":"0");fd.append("fx",sel.fx?"1":"0");fd.append("sfx",sel.sfx?"1":"0");fd.append("cards",JSON.stringify([...cardsOn].map(id=>({id:id,alt:altSel[id]||0}))));fd.append("broll",sel.broll);fd.append("sound",sel.sfx?sel.sound:"off");
+  fd.append("font",sel.font);fd.append("font2",sel.font2);fd.append("fontmix",sel.mix?"1":"0");fd.append("music",sel.music);fd.append("music_level",sel.mlevel);fd.append("camera",sel.camera);fd.append("grade",sel.grade);fd.append("anim",sel.anim);fd.append("anim_out",sel.animOut);fd.append("trans",sel.trans);fd.append("cut",sel.cut);fd.append("keys",sel.keys?"1":"0");fd.append("zoom",sel.zoom?"1":"0");fd.append("fx",sel.fx?"1":"0");fd.append("sfx",sel.sfx?"1":"0");fd.append("cards",JSON.stringify([...cardsOn].map(id=>({id:id,alt:altSel[id]||0}))));fd.append("broll",sel.broll);fd.append("sound",sel.sfx?sel.sound:"off");
   fd.append("init_data",initData);
   show("s-pr");setP(0,"");
   try{await req("POST","/api/jobs/"+jobId+"/render",fd);poll.rendering=true;poll()}catch(e){toast(e.msg);show("s-ed")}};
