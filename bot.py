@@ -109,8 +109,8 @@ MAX_DURATION = 60
 UPLOAD_CHUNK_SIZE = 256 * 1024
 GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 
-JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "1800"))
-MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "4"))
+JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "86400"))
+MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "10"))
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 CUSTOM_FONTS_DIR = "/usr/local/share/fonts/gapcut"
 FONT_CANDIDATES = [
@@ -3895,7 +3895,7 @@ def remove_job(job_id):
 def purge_expired_jobs():
     now = time.time()
     for job_id, job in list(JOBS.items()):
-        if job["status"] in ACTIVE_STATES and now - job["updated"] < 1800:
+        if job["status"] in ACTIVE_STATES:
             continue
         if now - job["updated"] > JOB_TTL_SECONDS:
             remove_job(job_id)
@@ -4235,22 +4235,23 @@ async def create_job(
 
     purge_expired_jobs()
 
-    for existing_id, existing in list(JOBS.items()):
-        if existing["user_id"] != user["id"]:
-            continue
-        if existing["status"] in ACTIVE_STATES:
+    for existing in JOBS.values():
+        if existing["user_id"] == user["id"] and existing["status"] in ACTIVE_STATES:
             raise HTTPException(
                 status_code=429,
                 detail="У вас уже есть задача в обработке. Дождитесь её завершения.",
             )
-        remove_job(existing_id)
 
-    if len(JOBS) >= MAX_STORED_JOBS:
-        raise HTTPException(
-            status_code=429,
-            detail="Сервер занят. Попробуйте через несколько минут.",
-            headers={"Retry-After": "60"},
-        )
+    while len(JOBS) >= MAX_STORED_JOBS:
+        completed = [job for job in JOBS.values() if job["status"] not in ACTIVE_STATES]
+        if not completed:
+            raise HTTPException(
+                status_code=429,
+                detail="Сервер занят. Попробуйте через несколько минут.",
+                headers={"Retry-After": "60"},
+            )
+        oldest = min(completed, key=lambda item: item.get("updated", 0))
+        remove_job(oldest["id"])
 
     work_dir = new_work_dir()
     try:
