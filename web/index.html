@@ -39,6 +39,7 @@ nav i{display:block;font-style:normal;font-size:21px;margin-bottom:3px}
 nav .on{color:var(--tx)}
 nav .big{margin-top:-34px;color:var(--tx);transition:transform .1s}
 nav .big i{width:62px;height:62px;margin:0 auto 4px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:26px;background:var(--g);box-shadow:0 10px 22px rgba(255,61,127,.45),0 0 0 5px #fff}
+.job-card{background:var(--soft);border-radius:18px;padding:15px;margin:0 0 12px}.job-head{display:flex;align-items:center;gap:10px}.job-head b{flex:1;overflow-wrap:anywhere}.job-meta{font-size:12px;color:var(--mu);margin-top:7px}.job-actions{display:flex;gap:8px;margin-top:12px}.job-actions button{border:0;border-radius:12px;padding:11px 14px;font-weight:800;background:#17141f;color:#fff}.job-actions button:disabled{opacity:.5}
 button:focus-visible,a:focus-visible{outline:3px solid #8b3dff;outline-offset:2px}
 @media (prefers-reduced-motion:no-preference){.tab.on{animation:in .25s ease both}@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}}
 </style>
@@ -55,7 +56,8 @@ button:focus-visible,a:focus-visible{outline:3px solid #8b3dff;outline-offset:2p
 
   <section class="tab" id="t-res">
     <h2 id="resT"></h2>
-    <div class="empty"><span id="resE"></span><br><button class="btn" data-go id="resB"></button></div>
+    <div id="jobList"></div>
+    <div class="empty" id="resEmpty"><span id="resE"></span><br><button class="btn" data-go id="resB"></button></div>
   </section>
 
   <section class="tab" id="t-prof">
@@ -84,7 +86,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #8b3dff;outline-offset:2p
 <script>
 const tg=window.Telegram&&Telegram.WebApp;
 if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#ffffff");tg.setBackgroundColor("#ffffff")}catch(e){}}
-const EDITOR="editor.html",SUPPORT="https://t.me/aikomron",CHANNEL="https://t.me/gapcutai";
+const EDITOR="editor.html",SUPPORT="https://t.me/aikomron",CHANNEL="https://t.me/gapcutai",API="https://gapcut-ai.onrender.com";
 const $=id=>document.getElementById(id);
 const T={
 ru:{newT:"Новый ролик",newS:"Загрузите видео — смонтируем за пару минут",lastT:"Последнее",lastE:"Здесь появятся ваши ролики. Пока пусто.",lastB:"Создать ролик",resT:"Результаты",resE:"Готовое видео вы скачиваете сразу после создания.",resB:"Создать ролик",n1:"Главная",n2:"Результаты",n3:"Монтаж",n4:"Поддержка",n5:"Профиль",profT:"Профиль",langL:"Язык интерфейса",langV:"Русский",supL:"Поддержка",chL:"Наш канал",aboutL:"О приложении",guest:"Гость",tgId:"Telegram ID",prem:"Premium"},
@@ -111,8 +113,55 @@ document.querySelectorAll("[data-go]").forEach(b=>b.onclick=go);$("newBtn").oncl
 document.querySelectorAll("nav [data-tab]").forEach(b=>b.onclick=()=>{
   document.querySelectorAll("nav [data-tab]").forEach(x=>x.classList.toggle("on",x===b));
   document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="t-"+b.dataset.tab));
-  window.scrollTo(0,0)});
+  window.scrollTo(0,0);
+  if(b.dataset.tab==="res")loadJobs();
+});
 $("langRow").onclick=()=>{L=L==="ru"?"tg":"ru";try{localStorage.setItem("gc_ui",L)}catch(e){}render()};
+async function loadJobs(){
+  const list=$("jobList"),empty=$("resEmpty");
+  list.innerHTML="";
+  empty.style.display="none";
+  if(!tg||!tg.initData){empty.style.display="block";$("resE").textContent="Откройте Mini App через Telegram, чтобы увидеть ваши ролики.";return;}
+  try{
+    const response=await fetch(API+"/api/jobs",{headers:{"X-Init-Data":tg.initData}});
+    if(!response.ok)throw new Error("Не удалось загрузить список роликов.");
+    const data=await response.json();
+    const jobs=Array.isArray(data.jobs)?data.jobs:[];
+    if(!jobs.length){empty.style.display="block";return;}
+    const labels={queued:"⏳ В очереди",transcribing:"🎧 Распознавание речи",transcribed:"✍️ Текст готов",rendering:"🎬 Монтаж",done:"✅ Готово",error:"❌ Ошибка"};
+    jobs.forEach(job=>{
+      const card=document.createElement("div");card.className="job-card";
+      const head=document.createElement("div");head.className="job-head";
+      const name=document.createElement("b");name.textContent=job.filename||"Видео GAPCUT AI";
+      const status=document.createElement("span");status.textContent=labels[job.status]||job.status;
+      head.append(name,status);card.append(head);
+      const meta=document.createElement("div");meta.className="job-meta";
+      meta.textContent=(job.stage||"")+(job.progress!=null?" · "+job.progress+"%":"");
+      card.append(meta);
+      if(job.error){const err=document.createElement("div");err.className="job-meta";err.textContent=job.error;card.append(err);}
+      if(job.status==="done"){
+        const actions=document.createElement("div");actions.className="job-actions";
+        const btn=document.createElement("button");btn.textContent="⬇️ Скачать видео";
+        btn.onclick=async()=>{
+          btn.disabled=true;
+          try{
+            const r=await fetch(API+"/api/jobs/"+encodeURIComponent(job.job_id)+"/download",{headers:{"X-Init-Data":tg.initData}});
+            if(!r.ok)throw new Error("Ссылка на видео истекла или видео недоступно.");
+            const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");
+            a.href=url;a.download="GAPCUT_AI.mp4";document.body.appendChild(a);a.click();a.remove();
+            setTimeout(()=>URL.revokeObjectURL(url),60000);
+          }catch(err){alert(err.message||"Ошибка скачивания");}
+          finally{btn.disabled=false;}
+        };
+        actions.append(btn);card.append(actions);
+      }
+      list.append(card);
+    });
+  }catch(error){
+    empty.style.display="block";
+    $("resE").textContent=error.message||"Ошибка загрузки роликов.";
+  }
+}
 render();
 </script>
 </body>
