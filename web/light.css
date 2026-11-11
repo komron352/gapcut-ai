@@ -1,0 +1,21 @@
+/* Light theme for editor.html (same look as index.html). Loaded after the editor's own <style>. */
+:root{--bg:#fff;--card:#f3f3f6;--line:#e7e7ee;--tx:#14131a;--mu:#85829a;--pu:#ff3d7f;--pu2:#8b3dff;--gold:#14131a}
+body{background:#fff;color:#14131a}
+.bg{display:none}
+.logo b{background:linear-gradient(135deg,#ffa31a,#ff3d7f 50%,#8b3dff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.pill,.card{background:#f3f3f6;border-color:transparent;color:#14131a}
+.drop{background:#fafafc;border-color:#d4d1e6}
+.chip,.sty,.stp button,.line textarea,.cd img{background:#fff;border-color:#e7e7ee;color:#14131a}
+.chip.on,.sty.on{background:#14131a;color:#fff;border-color:#14131a;box-shadow:none}
+.sty.on span{color:#d6d3e8}
+textarea{background:#fff!important;color:#14131a!important;border-color:#e7e7ee!important}
+.sw{background:#d9d9e3}.sw.on{background:#14131a}
+.btn,.btn.gold{background:linear-gradient(135deg,#ffa31a,#ff3d7f 50%,#8b3dff);color:#fff;box-shadow:0 10px 22px rgba(255,61,127,.3)}
+.btn.ghost{background:#f3f3f6;color:#14131a;box-shadow:none;border:0}
+.bar{background:#e7e7ee}.bar i{background:linear-gradient(90deg,#ffa31a,#ff3d7f,#8b3dff);background-size:200% 100%}
+.pct{background:linear-gradient(135deg,#ffa31a,#ff3d7f 50%,#8b3dff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.pvbox{background:linear-gradient(#fff 82%,transparent)}
+.plus{background:linear-gradient(135deg,#ffa31a,#ff3d7f 55%,#8b3dff)}
+.row{border-color:#e7e7ee}
+details summary,h1,.row b{color:#14131a}
+.line time{color:#ff3d7f}
