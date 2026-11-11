@@ -133,7 +133,7 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
   <div class="drop" id="drop">
     <div class="upload-icon">🎬</div>
     <b>Выберите видео</b>
-    <p>MP4, MOV • До 19 MB</p>
+    <p>MP4, MOV • До 100 MB</p>
     <button class="btn" id="choose">Выбрать видео</button>
     <input type="file" id="file" accept="video/*" hidden>
   </div>
@@ -212,74 +212,138 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 <script>
 const tg=window.Telegram?.WebApp;
 if(tg){tg.ready();tg.expand();}
-
+const API="https://gapcut-ai.onrender.com";
 const $=id=>document.getElementById(id);
 let selectedFile=null;
 let settings={
-  style:"Viral",
-  language:"ru",
-  pauses:true,
-  fillers:true,
-  captions:true,
-  images:false,
-  format:"9:16"
+  style:"Viral", language:"ru", pauses:true, fillers:true,
+  captions:true, images:false, format:"9:16"
 };
+let busy=false;
 
+function setStatus(message,progress){
+  $("status").textContent=message;
+  if(progress!==undefined) $("bar").style.width=Math.max(0,Math.min(100,progress))+"%";
+}
+function getInitData(){
+  return tg && typeof tg.initData==="string" ? tg.initData : "";
+}
+function getError(data,fallback){
+  if(data && data.detail) return typeof data.detail==="string" ? data.detail : JSON.stringify(data.detail);
+  return fallback;
+}
+async function apiFetch(path,options={}){
+  const response=await fetch(API+path,options);
+  if(!response.ok){
+    let data={};
+    try{data=await response.json()}catch(e){}
+    throw new Error(getError(data,"Ошибка сервера ("+response.status+")"));
+  }
+  return response;
+}
+async function waitForJob(jobId,onUpdate){
+  const started=Date.now();
+  while(Date.now()-started<10*60*1000){
+    const response=await apiFetch("/api/jobs/"+encodeURIComponent(jobId),{
+      headers:{"X-Init-Data":getInitData()}
+    });
+    const job=await response.json();
+    onUpdate(job);
+    if(job.status==="error") throw new Error(job.error||"Не удалось обработать видео.");
+    if(job.status==="transcribed") return job;
+    if(job.status==="done") return job;
+    await new Promise(resolve=>setTimeout(resolve,2500));
+  }
+  throw new Error("Обработка заняла слишком много времени. Попробуйте ещё раз.");
+}
+async function downloadJob(jobId){
+  const response=await apiFetch("/api/jobs/"+encodeURIComponent(jobId)+"/download",{
+    headers:{"X-Init-Data":getInitData()}
+  });
+  const blob=await response.blob();
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download="GAPCUT_AI.mp4";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
 $("choose").onclick=()=>$("file").click();
-
 $("file").onchange=e=>{
-  const f=e.target.files[0];
-  if(!f)return;
-  if(!f.type.startsWith("video/")){
-    alert("Выберите видеофайл");
-    return;
-  }
-  if(f.size>19*1024*1024){
-    alert("Максимальный размер видео — 19 MB");
-    return;
-  }
+  const f=e.target.files[0];if(!f)return;
+  if(!f.type.startsWith("video/")){alert("Выберите видеофайл");return;}
+  if(f.size>100*1024*1024){alert("Максимальный размер видео — 100 MB");return;}
   selectedFile=f;
   $("videoPreview").src=URL.createObjectURL(f);
   $("videoPreview").classList.remove("hidden");
   $("fileName").textContent=f.name;
-  $("status").textContent="Видео выбрано";
+  setStatus("Видео выбрано. Можно начинать монтаж.",0);
 };
-
-document.querySelectorAll(".sty").forEach(b=>{
-  b.onclick=()=>{
-    document.querySelectorAll(".sty").forEach(x=>x.classList.remove("on"));
-    b.classList.add("on");
-    settings.style=b.dataset.style;
-  };
+document.querySelectorAll(".sty").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(".sty").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");settings.style=b.dataset.style;
 });
-
-document.querySelectorAll(".chip").forEach(b=>{
-  b.onclick=()=>{
-    document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));
-    b.classList.add("on");
-    settings.language=b.dataset.lang;
-  };
+document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");settings.language=b.dataset.lang;
 });
-
-document.querySelectorAll(".sw").forEach(b=>{
-  b.onclick=()=>{
-    b.classList.toggle("on");
-    settings[b.dataset.setting]=b.classList.contains("on");
-  };
+document.querySelectorAll(".sw").forEach(b=>b.onclick=()=>{
+  b.classList.toggle("on");
+  settings[b.dataset.setting]=b.classList.contains("on");
 });
-
 $("format").onchange=e=>settings.format=e.target.value;
 
-$("start").onclick=()=>{
-  if(!selectedFile){
-    alert("Сначала выберите видео");
+$("start").onclick=async()=>{
+  if(busy)return;
+  if(!selectedFile){alert("Сначала выберите видео");return;}
+  const initData=getInitData();
+  if(!initData){
+    alert("Откройте GAPCUT AI через Telegram-бота, затем снова запустите Mini App.");
     return;
   }
+  busy=true;$("start").disabled=true;
+  try{
+    setStatus("Отправляем видео на сервер GAPCUT AI…",3);
+    const upload=new FormData();
+    upload.append("file",selectedFile,selectedFile.name);
+    upload.append("language",settings.language);
+    upload.append("quality","fast");
+    upload.append("init_data",initData);
+    const created=await apiFetch("/api/jobs",{method:"POST",body:upload});
+    const first=await created.json();
+    const jobId=first.job_id;
+    if(!jobId)throw new Error("Сервер не вернул номер задачи.");
 
-  $("status").textContent=
-    "Интерфейс готов. Требуется подключение API монтажа.";
-  $("bar").style.width="0%";
-  alert("Настройки сохранены в интерфейсе. Для реального AI-монтажа необходимо подключить backend GAPCUT AI.");
+    const transcript=await waitForJob(jobId,job=>{
+      const p=job.progress||0;
+      setStatus((job.stage||"Распознаём речь")+" · "+p+"%",Math.max(5,Math.min(75,p*.75)));
+    });
+    if(transcript.status!=="transcribed" && transcript.status!=="done"){
+      throw new Error("Не удалось подготовить текст видео.");
+    }
+    if(transcript.status!=="done"){
+      setStatus("Речь распознана. Начинаем AI-монтаж…",78);
+      const render=new FormData();
+      render.append("style",settings.style.toLowerCase());
+      render.append("video_format",settings.format);
+      render.append("subtitles",settings.captions?"1":"0");
+      render.append("broll",settings.images?"auto":"off");
+      render.append("init_data",initData);
+      await apiFetch("/api/jobs/"+encodeURIComponent(jobId)+"/render",{method:"POST",body:render});
+      const finished=await waitForJob(jobId,job=>{
+        setStatus((job.stage||"Монтируем видео")+" · "+(job.progress||0)+"%",78+(job.progress||0)*.22);
+      });
+      if(finished.status!=="done")throw new Error("Видео не удалось смонтировать.");
+    }
+    setStatus("Видео готово! Начинаем скачивание…",100);
+    await downloadJob(jobId);
+    setStatus("Готово! Видео GAPCUT AI скачано.",100);
+  }catch(error){
+    console.error("GAPCUT AI processing error:",error);
+    setStatus("Ошибка: "+(error.message||"Неизвестная ошибка"),0);
+    alert("Не удалось смонтировать видео.\n\n"+(error.message||"Проверьте соединение и попробуйте ещё раз."));
+  }finally{
+    busy=false;$("start").disabled=false;
+  }
 };
 </script>
 </body>
