@@ -59,6 +59,7 @@ from aiogram.types import (
     Message,
     CallbackQuery,
     WebAppInfo,
+    FSInputFile,
 )
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -533,7 +534,7 @@ async def groq_transcribe(client, audio_path, language, prompt, model=None):
         "temperature": "0",
         "timestamp_granularities[]": ["word", "segment"],
     }
-    if language:
+    if language and language != "tg":
         data["language"] = language
     if prompt:
         data["prompt"] = prompt
@@ -3912,6 +3913,8 @@ def public_job(job):
         "stage": job["stage"],
         "progress": job["progress"],
         "language": job["language"],
+        "filename": job.get("filename", "Видео"),
+        "updated": int(job.get("updated", time.time())),
         "duration": round(job["duration"], 2),
         "error": job["error"],
     }
@@ -4033,6 +4036,22 @@ async def run_render_job(job, style, video_format, lines, options):
                 stage="Видео готово",
                 progress=100,
             )
+            try:
+                chat_id = int(job["user_id"])
+                if output_path.stat().st_size <= 49 * 1024 * 1024:
+                    await bot.send_video(
+                        chat_id=chat_id,
+                        video=FSInputFile(str(output_path)),
+                        caption="✅ Ваш ролик GAPCUT AI готов!",
+                    )
+                else:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text="✅ Ваш ролик GAPCUT AI готов! Откройте Mini App → «Мои ролики», чтобы скачать его.",
+                        reply_markup=main_keyboard(),
+                    )
+            except Exception:
+                logger.exception("Could not notify Telegram user for job %s", job["id"])
     except Exception as error:
         fail_job(job, error)
 
@@ -4188,6 +4207,18 @@ async def api_process(
 # Job endpoints (progress + editable transcript)
 # ---------------------------------------------------------
 
+@app.get("/api/jobs")
+async def list_jobs(
+    x_init_data: str = Header(default=""),
+    init_data: str = Query(default=""),
+):
+    user = require_user(x_init_data, init_data)
+    purge_expired_jobs()
+    user_jobs = [job for job in JOBS.values() if job["user_id"] == user["id"]]
+    user_jobs.sort(key=lambda job: job.get("updated", 0), reverse=True)
+    return {"jobs": [public_job(job) for job in user_jobs[:20]]}
+
+
 @app.post("/api/jobs", status_code=202)
 async def create_job(
     file: UploadFile = File(...),
@@ -4242,6 +4273,7 @@ async def create_job(
     job = {
         "id": job_id,
         "user_id": user["id"],
+        "filename": Path(file.filename or "video").name[:120],
         "dir": work_dir,
         "input": input_path,
         "info": info,
