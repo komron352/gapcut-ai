@@ -1,0 +1,286 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>GAPCUT AI — Editor</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+<style>
+:root {
+  --bg:#fff;
+  --card:#f3f3f6;
+  --line:#e7e7ee;
+  --tx:#14131a;
+  --mu:#85829a;
+  --gradient:linear-gradient(135deg,#ffa31a,#ff3d7f 50%,#8b3dff);
+}
+* {box-sizing:border-box}
+body {
+  margin:0;
+  padding:calc(env(safe-area-inset-top) + 16px) 16px 40px;
+  background:var(--bg);
+  color:var(--tx);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+main {max-width:520px;margin:auto}
+header {
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:25px;
+}
+.logo {font-size:23px;font-weight:900}
+.logo span {
+  background:var(--gradient);
+  -webkit-background-clip:text;
+  color:transparent;
+}
+.back {
+  border:0;background:var(--card);border-radius:12px;
+  padding:11px 16px;color:var(--tx);font-weight:700;
+}
+h1 {font-size:27px;margin:10px 0 5px}
+.sub {color:var(--mu);font-size:14px;margin-bottom:22px}
+.card {
+  background:var(--card);border-radius:20px;
+  padding:17px;margin-bottom:16px;
+}
+.heading {font-size:16px;font-weight:800;margin-bottom:13px}
+.drop {
+  background:#fafafc;border:1.5px dashed #d4d1e6;
+  border-radius:17px;padding:27px 15px;text-align:center;
+}
+.upload-icon {font-size:36px;margin-bottom:10px}
+.drop p {color:var(--mu);font-size:13px}
+.btn {
+  border:0;border-radius:15px;padding:15px;
+  background:var(--gradient);color:white;
+  font-weight:800;font-size:15px;width:100%;
+}
+.btn:disabled {opacity:.45}
+.hidden {display:none}
+#videoPreview {
+  width:100%;max-height:300px;
+  border-radius:14px;margin-top:14px;background:#111;
+}
+.file-name {font-size:13px;color:var(--mu);margin-top:8px;word-break:break-all}
+.chips,.styles {
+  display:flex;flex-wrap:wrap;gap:9px;
+}
+.chip,.sty {
+  border:1px solid var(--line);border-radius:12px;
+  background:white;padding:11px 14px;
+  font-weight:700;color:var(--tx);
+}
+.chip.on,.sty.on {
+  background:#14131a;color:white;border-color:#14131a;
+}
+.sty {flex:1;min-width:105px;text-align:center}
+.sty span {display:block;font-size:12px;margin-top:5px}
+textarea,select {
+  width:100%;padding:13px;border:1px solid var(--line);
+  border-radius:12px;background:white;color:var(--tx);
+  font:inherit;outline:none;
+}
+textarea {min-height:75px;resize:vertical}
+.setting {
+  display:flex;align-items:center;justify-content:space-between;
+  padding:13px 0;border-bottom:1px solid var(--line);
+}
+.setting:last-child {border:0}
+.setting small {display:block;color:var(--mu);margin-top:4px}
+.sw {
+  width:46px;height:26px;border-radius:30px;
+  background:#d9d9e3;position:relative;border:0;
+}
+.sw:after {
+  content:"";position:absolute;width:20px;height:20px;
+  border-radius:50%;background:white;left:3px;top:3px;
+  transition:.2s;
+}
+.sw.on {background:#14131a}
+.sw.on:after {left:23px}
+.progress {
+  height:7px;border-radius:10px;background:#e7e7ee;
+  overflow:hidden;margin:15px 0;
+}
+.progress i {
+  display:block;width:0;height:100%;
+  background:var(--gradient);transition:.3s;
+}
+.status {font-size:13px;color:var(--mu);text-align:center}
+footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
+</style>
+
+<link rel="stylesheet" href="light.css">
+</head>
+
+<body>
+<main>
+
+<header>
+  <button class="back" onclick="history.back()">←</button>
+  <div class="logo">GAPCUT<span>.</span></div>
+  <div>✦ AI</div>
+</header>
+
+<h1>Новый монтаж</h1>
+<div class="sub">Загрузите видео — GAPCUT AI подготовит его к публикации</div>
+
+<section class="card">
+  <div class="heading">1. Загрузите видео</div>
+  <div class="drop" id="drop">
+    <div class="upload-icon">🎬</div>
+    <b>Выберите видео</b>
+    <p>MP4, MOV • До 19 MB</p>
+    <button class="btn" id="choose">Выбрать видео</button>
+    <input type="file" id="file" accept="video/*" hidden>
+  </div>
+  <video id="videoPreview" controls class="hidden"></video>
+  <div class="file-name" id="fileName"></div>
+</section>
+
+<section class="card">
+  <div class="heading">2. Стиль монтажа</div>
+  <div class="styles" id="styles">
+    <button class="sty on" data-style="Viral">🔥 Viral<span>Динамичный</span></button>
+    <button class="sty" data-style="Classic">✨ Classic<span>Классический</span></button>
+    <button class="sty" data-style="Cinema">🎬 Cinema<span>Кинематографичный</span></button>
+    <button class="sty" data-style="Podcast">🎙 Podcast<span>Подкаст</span></button>
+    <button class="sty" data-style="Karaoke">🎤 Karaoke<span>Караоке</span></button>
+    <button class="sty" data-style="Creator">🚀 Creator<span>Для блогеров</span></button>
+  </div>
+</section>
+
+<section class="card">
+  <div class="heading">3. Субтитры</div>
+  <div class="chips" id="languages">
+    <button class="chip on" data-lang="ru">Русский</button>
+    <button class="chip" data-lang="tg">Тоҷикӣ</button>
+    <button class="chip" data-lang="both">Оба языка</button>
+  </div>
+  <br>
+  <div class="heading">Текст субтитров</div>
+  <textarea id="subtitle" placeholder="Текст субтитров появится после распознавания речи..."></textarea>
+</section>
+
+<section class="card">
+  <div class="heading">4. Настройки монтажа</div>
+
+  <div class="setting">
+    <div><b>Удалить паузы</b><small>Автоматически убрать тишину</small></div>
+    <button class="sw on" data-setting="pauses"></button>
+  </div>
+
+  <div class="setting">
+    <div><b>Убрать слова-паразиты</b><small>Удалить лишние «эээ» и повторы</small></div>
+    <button class="sw on" data-setting="fillers"></button>
+  </div>
+
+  <div class="setting">
+    <div><b>Автосубтитры</b><small>Распознавание речи AI</small></div>
+    <button class="sw on" data-setting="captions"></button>
+  </div>
+
+  <div class="setting">
+    <div><b>Вставлять изображения</b><small>По смыслу видео</small></div>
+    <button class="sw" data-setting="images"></button>
+  </div>
+</section>
+
+<section class="card">
+  <div class="heading">5. Формат видео</div>
+  <select id="format">
+    <option value="9:16">9:16 — Reels / TikTok / Shorts</option>
+    <option value="16:9">16:9 — YouTube</option>
+    <option value="1:1">1:1 — Instagram</option>
+  </select>
+</section>
+
+<section class="card">
+  <div class="heading">Обработка видео</div>
+  <button class="btn" id="start">✦ Начать AI-монтаж</button>
+  <div class="progress"><i id="bar"></i></div>
+  <div class="status" id="status">Видео готово к настройке</div>
+</section>
+
+<footer>GAPCUT AI · Intelligent Video Editing</footer>
+
+</main>
+
+<script>
+const tg=window.Telegram?.WebApp;
+if(tg){tg.ready();tg.expand();}
+
+const $=id=>document.getElementById(id);
+let selectedFile=null;
+let settings={
+  style:"Viral",
+  language:"ru",
+  pauses:true,
+  fillers:true,
+  captions:true,
+  images:false,
+  format:"9:16"
+};
+
+$("choose").onclick=()=>$("file").click();
+
+$("file").onchange=e=>{
+  const f=e.target.files[0];
+  if(!f)return;
+  if(!f.type.startsWith("video/")){
+    alert("Выберите видеофайл");
+    return;
+  }
+  if(f.size>19*1024*1024){
+    alert("Максимальный размер видео — 19 MB");
+    return;
+  }
+  selectedFile=f;
+  $("videoPreview").src=URL.createObjectURL(f);
+  $("videoPreview").classList.remove("hidden");
+  $("fileName").textContent=f.name;
+  $("status").textContent="Видео выбрано";
+};
+
+document.querySelectorAll(".sty").forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll(".sty").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on");
+    settings.style=b.dataset.style;
+  };
+});
+
+document.querySelectorAll(".chip").forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on");
+    settings.language=b.dataset.lang;
+  };
+});
+
+document.querySelectorAll(".sw").forEach(b=>{
+  b.onclick=()=>{
+    b.classList.toggle("on");
+    settings[b.dataset.setting]=b.classList.contains("on");
+  };
+});
+
+$("format").onchange=e=>settings.format=e.target.value;
+
+$("start").onclick=()=>{
+  if(!selectedFile){
+    alert("Сначала выберите видео");
+    return;
+  }
+
+  $("status").textContent=
+    "Интерфейс готов. Требуется подключение API монтажа.";
+  $("bar").style.width="0%";
+  alert("Настройки сохранены в интерфейсе. Для реального AI-монтажа необходимо подключить backend GAPCUT AI.");
+};
+</script>
+</body>
+</html>
