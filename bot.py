@@ -57,6 +57,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    CallbackQuery,
     WebAppInfo,
 )
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
@@ -168,8 +169,14 @@ def main_keyboard():
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🎬 Монтаж",
+                    text="🎬 Начать монтаж",
                     web_app=WebAppInfo(url=MINI_APP_URL),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📁 Мои ролики",
+                    callback_data="my_videos",
                 )
             ],
             [
@@ -190,7 +197,7 @@ async def start_handler(message: Message):
         "📱 Форматы Reels, TikTok и YouTube\n\n"
         "📦 Максимальный размер: 100 MB\n"
         "⏱ Максимальная длительность: 60 секунд\n\n"
-        "Нажмите «Монтаж», чтобы начать."
+        "Нажмите «Начать монтаж», чтобы начать."
     )
     await message.answer(text, reply_markup=main_keyboard())
 
@@ -229,6 +236,54 @@ async def video_handler(message: Message):
         "✅ Видео получено.\n\n"
         "Откройте Mini App, чтобы выбрать язык, стиль субтитров "
         "и запустить обработку.",
+        reply_markup=main_keyboard(),
+    )
+
+
+@dp.callback_query(F.data == "my_videos")
+async def my_videos_handler(callback: CallbackQuery):
+    user_id = str(callback.from_user.id)
+    user_jobs = [
+        job for job in JOBS.values()
+        if str(job.get("user_id")) == user_id
+    ]
+    user_jobs.sort(key=lambda job: job.get("updated", 0), reverse=True)
+
+    await callback.answer()
+
+    if not user_jobs:
+        await callback.message.answer(
+            "📁 У вас пока нет роликов.\n\n"
+            "Нажмите «🎬 Начать монтаж», чтобы создать первое видео.",
+            reply_markup=main_keyboard(),
+        )
+        return
+
+    status_labels = {
+        "queued": "⏳ В очереди",
+        "transcribing": "🎧 Распознавание речи",
+        "transcribed": "✍️ Текст готов",
+        "rendering": "🎬 Монтаж",
+        "done": "✅ Готово",
+        "error": "❌ Ошибка",
+    }
+    result_lines = ["📁 <b>Мои ролики</b>", ""]
+    for index, job in enumerate(user_jobs[:10], start=1):
+        status = status_labels.get(
+            job.get("status"),
+            str(job.get("status", "Неизвестно")),
+        )
+        progress = int(job.get("progress") or 0)
+        result_lines.append(
+            f"{index}. {status} — {progress}%\n"
+            f"   ID: <code>{str(job.get('id', ''))[:12]}</code>"
+        )
+        if job.get("status") == "error" and job.get("error"):
+            result_lines.append(f"   {job['error']}")
+        result_lines.append("")
+
+    await callback.message.answer(
+        "\n".join(result_lines),
         reply_markup=main_keyboard(),
     )
 
