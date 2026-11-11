@@ -203,6 +203,7 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
   <button class="btn" id="start">✦ Начать AI-монтаж</button>
   <div class="progress"><i id="bar"></i></div>
   <div class="status" id="status">Видео готово к настройке</div>
+  <button class="btn hidden" id="downloadBtn" style="margin-top:14px">⬇️ Скачать видео</button>
 </section>
 
 <footer>GAPCUT AI · Intelligent Video Editing</footer>
@@ -215,6 +216,8 @@ if(tg){tg.ready();tg.expand();}
 const API="https://gapcut-ai.onrender.com";
 const $=id=>document.getElementById(id);
 let selectedFile=null;
+let completedJobId=null;
+let transcriptLines=[];
 let settings={
   style:"Viral", language:"ru", pauses:true, fillers:true,
   captions:true, images:false, format:"9:16"
@@ -320,6 +323,8 @@ $("start").onclick=async()=>{
     if(transcript.status!=="transcribed" && transcript.status!=="done"){
       throw new Error("Не удалось подготовить текст видео.");
     }
+    transcriptLines=Array.isArray(transcript.lines)?transcript.lines:[];
+    $("subtitle").value=transcriptLines.map(line=>line.text||"").join("\n");
     if(transcript.status!=="done"){
       setStatus("Речь распознана. Начинаем AI-монтаж…",78);
       const render=new FormData();
@@ -327,6 +332,9 @@ $("start").onclick=async()=>{
       render.append("video_format",settings.format);
       render.append("subtitles",settings.captions?"1":"0");
       render.append("broll",settings.images?"auto":"off");
+      const editedText=$("subtitle").value.split(/\r?\n/);
+      const editedLines=transcriptLines.map((line,index)=>({...line,text:(editedText[index]??line.text??"").trim()}));
+      render.append("lines",JSON.stringify(editedLines));
       render.append("init_data",initData);
       await apiFetch("/api/jobs/"+encodeURIComponent(jobId)+"/render",{method:"POST",body:render});
       const finished=await waitForJob(jobId,job=>{
@@ -334,9 +342,9 @@ $("start").onclick=async()=>{
       });
       if(finished.status!=="done")throw new Error("Видео не удалось смонтировать.");
     }
-    setStatus("Видео готово! Начинаем скачивание…",100);
-    await downloadJob(jobId);
-    setStatus("Готово! Видео GAPCUT AI скачано.",100);
+    completedJobId=jobId;
+    $("downloadBtn").classList.remove("hidden");
+    setStatus("Видео готов! Нажмите «Скачать видео» или откройте чат с ботом — он отправит готовый ролик.",100);
   }catch(error){
     console.error("GAPCUT AI processing error:",error);
     setStatus("Ошибка: "+(error.message||"Неизвестная ошибка"),0);
@@ -344,6 +352,13 @@ $("start").onclick=async()=>{
   }finally{
     busy=false;$("start").disabled=false;
   }
+};
+$("downloadBtn").onclick=async()=>{
+  if(!completedJobId)return;
+  $("downloadBtn").disabled=true;
+  try{await downloadJob(completedJobId);setStatus("Загрузка видео началась.",100);}
+  catch(error){alert("Не удалось скачать видео: "+(error.message||"Ошибка"));}
+  finally{$("downloadBtn").disabled=false;}
 };
 </script>
 </body>
