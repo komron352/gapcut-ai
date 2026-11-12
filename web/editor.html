@@ -111,6 +111,18 @@ textarea {min-height:75px;resize:vertical}
 }
 .status {font-size:13px;color:var(--mu);text-align:center}
 footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
+.brandly-preview{min-height:235px;border-radius:17px;padding:15px;background:radial-gradient(circle at 80% 10%,#174c85 0,#111827 36%,#05070c 100%);color:#fff;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+.brandly-top,.brandly-bottom{display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:900;letter-spacing:1.3px;color:#aab7ca}
+.brandly-top span:last-child{color:#4AA8FF}
+.brandly-hook{font-size:25px;line-height:1.15;font-weight:900;max-width:290px;text-align:center;align-self:center;text-shadow:0 4px 20px #000}
+.brandly-hook strong,.brandly-caption b{color:#4AA8FF}
+.brandly-caption{text-align:center;font-size:18px;font-weight:800}
+.brandly-caption span{font-size:14px;color:white;font-weight:600}
+.brandly-bottom i{display:block;width:38px;height:4px;border-radius:8px;background:#4AA8FF}
+.auto-note{font-size:13px;color:var(--mu);line-height:1.5;margin:12px 0 0}
+.auto-row{display:flex;gap:11px;align-items:center;padding:11px 0}
+.auto-row small{display:block;color:var(--mu);font-size:12px;margin-top:4px}
+.auto-check{width:25px;height:25px;flex:none;border-radius:50%;background:#e4f2ff;color:#1676ca;display:grid;place-items:center;font-weight:900}
 </style>
 
 <link rel="stylesheet" href="light.css">
@@ -142,63 +154,16 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 </section>
 
 <section class="card">
-  <div class="heading">2. Стиль монтажа</div>
-  <div class="styles" id="styles">
-    <button class="sty on" data-style="Auto">✦ AUTO PRO<span>Полный AI-монтаж</span></button>
-    <button class="sty" data-style="Viral">🔥 Viral<span>Динамичный</span></button>
-    <button class="sty" data-style="Classic">✨ Classic<span>Классический</span></button>
-    <button class="sty" data-style="Cinema">🎬 Cinema<span>Кинематографичный</span></button>
-    <button class="sty" data-style="Podcast">🎙 Podcast<span>Подкаст</span></button>
-    <button class="sty" data-style="Karaoke">🎤 Karaoke<span>Караоке</span></button>
-    <button class="sty" data-style="Creator">🚀 Creator<span>Для блогеров</span></button>
-  </div>
+  <div class="heading">2. Услуби монтаж — BRANDLY AI</div>
+  <div class="brandly-preview"><div class="brandly-top"><span>GAPCUT AI</span><span>✦ BRANDLY STYLE</span></div><div class="brandly-hook">ЧӢ ТАВР <strong>МУВАФФАҚ</strong> ШУДАН?</div><div class="brandly-caption"><b>МУВАФФАҚ</b> <span>шавӣ имрӯз</span></div><div class="brandly-bottom"><i></i><span>AI AUTO EDIT</span></div></div>
+  <p class="auto-note">Шрифт, анимация, эффектҳои садоӣ ва B-roll — ИИ худкор интихоб мекунад. Танзимоти дастӣ нест.</p>
 </section>
 
-<section class="card">
-  <div class="heading">3. Субтитры</div>
-  <div class="chips" id="languages">
-    <button class="chip on" data-lang="ru">Русский</button>
-    <button class="chip" data-lang="tg">Тоҷикӣ</button>
-    <button class="chip" data-lang="both">Оба языка</button>
-  </div>
-  <br>
-  <div class="heading">Текст субтитров</div>
-  <textarea id="subtitle" placeholder="Текст субтитров появится после распознавания речи..."></textarea>
-</section>
+<section class="card"><div class="heading">3. Субтитрҳои автоматӣ</div><div class="auto-row"><span class="auto-check">✓</span><div><b>Забонро ИИ худаш муайян мекунад</b><small>Тоҷикӣ · Русӣ · Омехтаи тоҷикӣ ва русӣ</small></div></div><div class="auto-row"><span class="auto-check">✓</span><div><b>Матн аз рӯйи овози видео</b><small>Маъно ва калимаҳои гуфташуда нигоҳ дошта мешаванд</small></div></div></section>
 
-<section class="card">
-  <div class="heading">4. Шрифт субтитров</div>
-  <label for="fontSelect" style="display:block;font-size:13px;color:var(--mu);margin-bottom:8px">
-    Выберите шрифт — пример ниже покажет его вид
-  </label>
-  <select id="fontSelect">
-    <option value="">Автоматический шрифт</option>
-  </select>
-  <div id="fontSample" style="margin-top:12px;padding:15px;border-radius:13px;background:#fff;text-align:center;font-size:21px;font-weight:700">
-    ҒУРӮҲИ ТОҶИКӢ · GAPCUT AI
-  </div>
-  <small id="fontStatus" style="display:block;color:var(--mu);margin-top:8px">
-    Загружаем доступные шрифты…
-  </small>
-</section>
 
-<section class="card">
-  <div class="heading">5. AI-анимация и звуки текста</div>
-  <p style="font-size:13px;color:var(--mu);line-height:1.5;margin:0 0 12px">
-    GAPCUT AI сам подберёт эффект для каждой фразы по смыслу и интонации.
-  </p>
-  <div class="chips" style="margin-bottom:12px">
-    <span class="chip">✨ Pop-up</span>
-    <span class="chip">🌀 Bounce</span>
-    <span class="chip">⌨️ Typewriter</span>
-    <span class="chip">🎬 Fade / Zoom</span>
-    <span class="chip">⚡ Glitch</span>
-    <span class="chip">💫 3D / Slide</span>
-  </div>
-  <p style="font-size:12px;color:var(--mu);line-height:1.5;margin:0">
-    Звуки текста: Pop · Click · Whoosh · Impact. AI автоматически подберёт фоновую музыку по теме и темпу видео.
-  </p>
-</section>
+
+<section class="card"><div class="heading">4. Анимация ва садо</div><div class="auto-row"><span class="auto-check">✓</span><div><b>Анимацияи матн — автоматӣ</b><small>Pop-in · Fade · Zoom · мувофиқи саҳна</small></div></div><div class="auto-row"><span class="auto-check">✓</span><div><b>Эффектҳои садоӣ — автоматӣ</b><small>Pop · Whoosh · Ding · мусиқӣ хомӯш ё хеле паст</small></div></div></section>
 
 <section class="card">
   <div class="heading">6. Настройки монтажа</div>
@@ -234,29 +199,7 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
   </div>
 </section>
 
-<section class="card">
-  <div class="heading">7. Дизайн субтитров</div>
-  <div class="setting">
-    <div><b>Размер текста</b><small>Размер субтитров в ролике</small></div>
-    <select id="captionSize" style="max-width:130px">
-      <option value="s">Маленький</option>
-      <option value="m" selected>Средний</option>
-      <option value="l">Крупный</option>
-    </select>
-  </div>
-  <div class="setting">
-    <div><b>Положение текста</b><small>Расположение субтитров</small></div>
-    <select id="captionPosition" style="max-width:130px">
-      <option value="auto">Авто</option>
-      <option value="center">По центру</option>
-      <option value="top">Сверху</option>
-    </select>
-  </div>
-  <div class="setting">
-    <div><b>Акцентный цвет</b><small>Цвет выделения важных слов</small></div>
-    <input id="captionAccent" type="color" value="#FF3D7F" style="width:55px;height:38px;border:0;background:transparent">
-  </div>
-</section>
+
 
 <section class="card">
   <div class="heading">8. Формат видео</div>
@@ -268,8 +211,8 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 </section>
 
 <section class="card">
-  <div class="heading">Обработка видео</div>
-  <button class="btn" id="start">✦ Начать AI-монтаж</button>
+  <div class="heading">5. Обработка видео</div>
+  <button class="btn" id="start">✦ Начать ИИ-монтаж</button>
   <div class="progress"><i id="bar"></i></div>
   <div class="status" id="status">Видео готово к настройке</div>
   <button class="btn hidden" id="downloadBtn" style="margin-top:14px">⬇️ Скачать видео</button>
@@ -288,9 +231,9 @@ let selectedFile=null;
 let completedJobId=null;
 let transcriptLines=[];
 let settings={
-  style:"Auto", language:"ru", pauses:true, fillers:true,
+  style:"Brandly", language:"tg_ru", pauses:true, fillers:true,
   captions:true, images:true, format:"9:16", textSounds:true, font:"",
-  cutMode:"light", captionSize:"m", captionPosition:"auto", captionAccent:"#FF3D7F"
+  cutMode:"light", captionSize:"l", captionPosition:"center", captionAccent:"#4AA8FF"
 };
 let busy=false;
 
@@ -352,14 +295,7 @@ $("file").onchange=e=>{
   $("fileName").textContent=f.name;
   setStatus("Видео выбрано. Можно начинать монтаж.",0);
 };
-document.querySelectorAll(".sty").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll(".sty").forEach(x=>x.classList.remove("on"));
-  b.classList.add("on");settings.style=b.dataset.style;
-});
-document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{
-  document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));
-  b.classList.add("on");settings.language=b.dataset.lang;
-});
+
 document.querySelectorAll(".sw").forEach(b=>b.onclick=()=>{
   b.classList.toggle("on");
   settings[b.dataset.setting]=b.classList.contains("on");
@@ -369,30 +305,6 @@ $("cutMode").onchange=e=>settings.cutMode=e.target.value;
 $("captionSize").onchange=e=>settings.captionSize=e.target.value;
 $("captionPosition").onchange=e=>settings.captionPosition=e.target.value;
 $("captionAccent").onchange=e=>settings.captionAccent=e.target.value;
-
-async function loadFonts(){
-  try{
-    const response=await apiFetch("/api/fonts");
-    const data=await response.json();
-    const fonts=Array.isArray(data.fonts)?data.fonts:[];
-    const select=$("fontSelect");
-    fonts.forEach(name=>{
-      const option=document.createElement("option");
-      option.value=name;option.textContent=name;
-      select.appendChild(option);
-    });
-    $("fontStatus").textContent=fonts.length
-      ? fonts.length+" шрифтов доступны на сервере и проверены для букв тоҷикӣ."
-      : "Пока доступен только системный шрифт.";
-    select.onchange=()=>{
-      settings.font=select.value;
-      $("fontSample").style.fontFamily=select.value ? '"'+select.value+'",sans-serif' : 'sans-serif';
-    };
-  }catch(error){
-    $("fontStatus").textContent="Не удалось загрузить список шрифтов. Будет использован системный.";
-  }
-}
-loadFonts();
 
 $("start").onclick=async()=>{
   if(busy)return;
@@ -408,21 +320,20 @@ $("start").onclick=async()=>{
   busy=true;$("start").disabled=true;
   setStatus("Подготавливаем отправку видео на сервер…",2);
   try{
-    const autoPro=settings.style==="Auto";
     const renderSettings={
-      style:autoPro?"dynamic":settings.style.toLowerCase(),
+      style:"viral",
       video_format:settings.format,
       subtitles:settings.captions?"1":"0",
       broll:settings.images?"auto":"off",
       cut:(settings.pauses||settings.fillers)?settings.cutMode:"off",
-      size:settings.captionSize,
-      position:settings.captionPosition,
-      accent:settings.captionAccent.replace("#",""),
+      size:"l",
+      position:"center",
+      accent:"4AA8FF",
       sfx:settings.textSounds?"1":"0",
       sound:settings.textSounds?"normal":"off",
-      camera:autoPro?"auto":"",
-      grade:autoPro?"auto":"off",
-      music:autoPro?"lofi":"auto",
+      camera:"dynamic",
+      grade:"cinematic",
+      music:"off",
       music_level:"low",
       music_sync:"1",
       zoom:"1",
@@ -430,8 +341,8 @@ $("start").onclick=async()=>{
       anim:settings.captions?"auto":"",
       anim_out:settings.captions?"auto":"",
       trans:"auto",
-      font:settings.font,
-      fontmix:autoPro?"1":"0"
+      font:"",
+      fontmix:"1"
     };
     const upload=new FormData();
     upload.append("file",selectedFile,selectedFile.name);
@@ -446,20 +357,20 @@ $("start").onclick=async()=>{
     const jobId=first.job_id;
     if(!jobId)throw new Error("Сервер рақами вазифаро барнагардонд.");
 
-    setStatus("Видео қабул шуд. Акнун сервер мустақилона монтаж мекунад — метавонед Telegram-ро пӯшед.",10);
+    setStatus("ИИ монтажро оғоз кард…",10);
     const finished=await waitForJob(jobId,job=>{
       const p=job.progress||0;
       if(job.status==="transcribed"||job.status==="rendering"){
-        setStatus("Матн тайёр шуд — монтаж дар сервер идома дорад · "+p+"%",Math.max(15,Math.min(95,15+p*.8)));
+        setStatus("Монтажи ИИ · "+p+"%",Math.max(15,Math.min(95,15+p*.8)));
       }else{
-        setStatus((job.stage||"Коркард") +" · "+p+"%",Math.max(5,Math.min(90,p)));
+        setStatus("ИИ кор карда истодааст · "+p+"%",Math.max(5,Math.min(90,p)));
       }
     });
     transcriptLines=Array.isArray(finished.lines)?finished.lines:[];
-    $("subtitle").value=transcriptLines.map(line=>line.text||"").join("\n");
+    /* Subtitles are generated automatically; no manual language or font selection. */
     completedJobId=jobId;
     $("downloadBtn").classList.remove("hidden");
-    setStatus("Видео тайёр шуд! Бот ҳам бояд ролики тайёрро ба Telegram фиристад.",100);
+    setStatus("Видео тайёр шуд! Онро дар Telegram санҷед.",100);
   }catch(error){
     console.error("GAPCUT AI processing error:",error);
     setStatus("Ошибка: "+(error.message||"Неизвестная ошибка"),0);
