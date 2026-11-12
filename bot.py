@@ -111,7 +111,7 @@ GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 
 JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "86400"))
 MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "10"))
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "").strip()
 CUSTOM_FONTS_DIR = "/usr/local/share/fonts/gapcut"
 FONT_CANDIDATES = [
     # Sans-serif / modern
@@ -1212,12 +1212,12 @@ async def mark_keywords(words):
 
 
 # =========================================================
-# MEDIA CARDS (Pexels pictures shown for concrete nouns)
+# MEDIA CARDS (Pixabay pictures shown for concrete nouns)
 # =========================================================
 
 async def suggest_cards(words, work_dir):
     """Up to 3 cards: {id, at, query, thumb, credit, file}. Never raises."""
-    if not (PEXELS_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6:
+    if not (PIXABAY_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6:
         return []
     numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
     payload = {
@@ -1259,14 +1259,14 @@ async def suggest_cards(words, work_dir):
                 if at - last_at < 4.0:
                     continue
                 found = await client.get(
-                    "https://api.pexels.com/v1/search",
-                    params={"query": query, "per_page": 1, "orientation": "square"},
-                    headers={"Authorization": PEXELS_API_KEY},
+                    "https://pixabay.com/api/",
+                    params={"key": PIXABAY_API_KEY, "q": query, "per_page": 1,
+                            "image_type": "photo", "orientation": "all", "safesearch": "true"},
                 )
-                photos = found.json().get("photos") if found.status_code == 200 else None
+                photos = found.json().get("hits") if found.status_code == 200 else None
                 if not photos:
                     continue
-                image = await client.get(photos[0]["src"]["large"])
+                image = await client.get(photos[0].get("largeImageURL") or photos[0].get("webformatURL", ""))
                 if image.status_code != 200 or len(image.content) < 2000:
                     continue
                 path = Path(work_dir) / f"card_{len(cards)}.jpg"
@@ -1275,8 +1275,8 @@ async def suggest_cards(words, work_dir):
                     "id": len(cards),
                     "at": round(at, 2),
                     "query": query,
-                    "thumb": photos[0]["src"].get("small", ""),
-                    "credit": str(photos[0].get("photographer", ""))[:60],
+                    "thumb": photos[0].get("previewURL", ""),
+                    "credit": str(photos[0].get("user", ""))[:60],
                     "file": str(path),
                 })
                 last_at = at
@@ -2357,7 +2357,7 @@ def cut_graph_parts(segments):
 # =========================================================
 #
 # 1. the LLM picks concrete, visual moments (with a confidence and a reason);
-# 2. Pexels is searched for videos and photos;
+# 2. Pixabay is searched for videos and photos;
 # 3. a second LLM check (or a keyword check) rejects pictures that do not match;
 # 4. only the chosen file is downloaded, at render time.
 
@@ -2405,50 +2405,54 @@ async def llm_json(client, system, user):
 
 
 async def find_candidates(client, query):
+    """Search Pixabay for relevant portrait video clips and photos."""
     candidates = []
-    headers = {"Authorization": PEXELS_API_KEY}
     try:
         found = await client.get(
-            "https://api.pexels.com/videos/search",
-            params={"query": query, "per_page": 4, "orientation": "portrait"},
-            headers=headers,
+            "https://pixabay.com/api/videos/",
+            params={
+                "key": PIXABAY_API_KEY, "q": query, "per_page": 4,
+                "video_type": "all", "safesearch": "true",
+            },
         )
-        videos = found.json().get("videos") if found.status_code == 200 else None
+        videos = found.json().get("hits") if found.status_code == 200 else None
         for video in videos or []:
-            chosen = pick_video_file(video.get("video_files") or [])
+            variants = video.get("videos") or {}
+            chosen = variants.get("medium") or variants.get("large") or variants.get("small")
             length = float(video.get("duration") or 0)
-            if chosen and length >= 1.5:
+            if chosen and chosen.get("url") and length >= 1.5:
                 candidates.append({
-                    "kind": "video", "url": chosen["link"], "thumb": video.get("image", ""),
-                    "alt": slug_words(video.get("url", "")),
-                    "credit": str((video.get("user") or {}).get("name", ""))[:60],
+                    "kind": "video", "url": chosen["url"],
+                    "thumb": chosen.get("thumbnail", ""),
+                    "alt": str(video.get("tags", ""))[:160],
+                    "credit": str(video.get("user", ""))[:60],
                     "dur": length,
                 })
     except Exception:
-        logger.warning("Pexels video search failed", exc_info=True)
+        logger.warning("Pixabay video search failed", exc_info=True)
     try:
-        for orientation in ("portrait", None):
-            params = {"query": query, "per_page": 4}
-            if orientation:
-                params["orientation"] = orientation
-            found = await client.get(
-                "https://api.pexels.com/v1/search", params=params, headers=headers
-            )
-            photos = found.json().get("photos") if found.status_code == 200 else None
-            for photo in photos or []:
-                src = photo.get("src") or {}
-                if src.get("large"):
-                    candidates.append({
-                        "kind": "photo", "url": src["large"], "thumb": src.get("small", ""),
-                        "alt": str(photo.get("alt", ""))[:160],
-                        "credit": str(photo.get("photographer", ""))[:60], "dur": 0.0,
-                    })
-            if photos:
-                break
+        found = await client.get(
+            "https://pixabay.com/api/",
+            params={
+                "key": PIXABAY_API_KEY, "q": query, "per_page": 4,
+                "image_type": "photo", "orientation": "vertical",
+                "safesearch": "true",
+            },
+        )
+        photos = found.json().get("hits") if found.status_code == 200 else None
+        for photo in photos or []:
+            image_url = photo.get("largeImageURL") or photo.get("webformatURL")
+            if image_url:
+                candidates.append({
+                    "kind": "photo", "url": image_url,
+                    "thumb": photo.get("previewURL", ""),
+                    "alt": str(photo.get("tags", ""))[:160],
+                    "credit": str(photo.get("user", ""))[:60],
+                    "dur": 0.0,
+                })
     except Exception:
-        logger.warning("Pexels photo search failed", exc_info=True)
+        logger.warning("Pixabay photo search failed", exc_info=True)
     return candidates[:6]
-
 
 async def verify_candidates(client, phrase, query, candidates):
     """Indexes of candidates that really match what is being said."""
@@ -2472,7 +2476,7 @@ async def verify_candidates(client, phrase, query, candidates):
 async def suggest_broll(words, duration, client=None, topic=""):
     """Return (moments, info). A moment: id, at, query, reason, conf, thumb, credit, alts."""
     info = {"suggested": 0, "kept": 0}
-    if not (PEXELS_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6 or duration < 6:
+    if not (PIXABAY_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6 or duration < 6:
         return [], info
     own_client = client is None
     if own_client:
