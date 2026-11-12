@@ -394,7 +394,7 @@ $("start").onclick=async()=>{
       const autoPro=settings.style==="Auto";
       // Auto Pro uses the existing viral subtitle renderer plus the backend's
       // automatic editing pipeline. Existing named styles remain unchanged.
-      render.append("style",autoPro?"viral":settings.style.toLowerCase());
+      render.append("style",autoPro?"dynamic":settings.style.toLowerCase());
       render.append("video_format",settings.format);
       render.append("subtitles",settings.captions?"1":"0");
       render.append("broll",settings.images?"auto":"off");
