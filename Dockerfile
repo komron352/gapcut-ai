@@ -14,7 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Extra display fonts. A missing package never breaks the build; the app
 # only offers fonts that really contain the Tajik letters.
 RUN apt-get update && \
-    for p in fonts-montserrat fonts-oswald fonts-roboto fonts-inter fonts-open-sans fonts-ubuntu fonts-comfortaa fonts-lobster fonts-bebas-neue; do \
+    for p in \
+      fonts-montserrat fonts-oswald fonts-roboto fonts-inter fonts-open-sans \
+      fonts-ubuntu fonts-comfortaa fonts-lobster fonts-bebas-neue \
+      fonts-lato fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea \
+      fonts-firacode fonts-ibm-plex fonts-noto-extra fonts-noto-cjk \
+      fonts-texgyre fonts-cantarell fonts-dejavu-extra; do \
       apt-get install -y --no-install-recommends "$p" || echo "skip $p"; \
     done && \
     rm -rf /var/lib/apt/lists/*
