@@ -355,13 +355,17 @@ loadFonts();
 
 $("start").onclick=async()=>{
   if(busy)return;
-  if(!selectedFile){alert("Сначала выберите видео");return;}
+  if(!selectedFile){
+    setStatus("Сначала нажмите «Выбрать видео» и загрузите ролик.",0);
+    return;
+  }
   const initData=getInitData();
   if(!initData){
-    alert("Откройте GAPCUT AI через Telegram-бота, затем снова запустите Mini App.");
+    setStatus("Откройте GAPCUT AI через Telegram-бота, затем снова запустите Mini App.",0);
     return;
   }
   busy=true;$("start").disabled=true;
+  setStatus("Кнопка сработала. Подготавливаем отправку видео…",2);
   try{
     setStatus("Отправляем видео на сервер GAPCUT AI…",3);
     const upload=new FormData();
