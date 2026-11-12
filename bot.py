@@ -137,8 +137,10 @@ FONT_CANDIDATES = [
 TAJIK_CHARSET = "493 4e3 49b 4ef 4b3 4b7 492 4e2 49a 4ee 4b2 4b6"
 AVAILABLE_FONTS = [{"family": "DejaVu Sans", "bold": 1}]
 KEYWORDS_LLM = os.getenv("KEYWORDS_LLM", "1").strip() != "0"
-KEYWORD_MODEL = os.getenv("KEYWORD_MODEL", "llama-3.3-70b-versatile").strip()
-GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
+LLM_MODEL = os.getenv("LLM_MODEL", os.getenv("KEYWORD_MODEL", "auto")).strip() or "auto"
+LLM_CHAT_URL = f"{LLM_BASE_URL}/chat/completions" if LLM_BASE_URL else ""
 FFMPEG_PRESET = os.getenv("FFMPEG_PRESET", "ultrafast").strip() or "ultrafast"
 
 BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
@@ -160,6 +162,10 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не указан в Environment Variables.")
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY не указан: распознавание речи работать не будет.")
+if not (LLM_API_KEY and LLM_CHAT_URL):
+    logger.warning("FreeLLMAPI не настроен: AI-анализ будет использовать резервные правила.")
+else:
+    logger.info("FreeLLMAPI configured; model=%s", LLM_MODEL)
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -942,14 +948,14 @@ def glossary_fixes(words, glossary):
 
 async def llm_fixes(words, language, glossary):
     """Ask the LLM for single-word spelling fixes. Returns {index: new_word}."""
-    if not (CORRECT_LLM and GROQ_API_KEY) or len(words) < 3:
+    if not (CORRECT_LLM and LLM_API_KEY and LLM_CHAT_URL) or len(words) < 3:
         return {}
     numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words[:260]))
     hint = ""
     if glossary:
         hint = " Preferred spellings of names and terms: " + ", ".join(glossary) + "."
     payload = {
-        "model": KEYWORD_MODEL,
+        "model": LLM_MODEL,
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
@@ -973,8 +979,8 @@ async def llm_fixes(words, language, glossary):
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
             response = await client.post(
-                GROQ_CHAT_URL,
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                LLM_CHAT_URL,
+                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
                 json=payload,
             )
         if response.status_code != 200:
@@ -1162,11 +1168,11 @@ def heuristic_keys(words):
 
 
 async def llm_keys(words):
-    if not (KEYWORDS_LLM and GROQ_API_KEY) or len(words) < 3:
+    if not (KEYWORDS_LLM and LLM_API_KEY and LLM_CHAT_URL) or len(words) < 3:
         return None
     numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
     payload = {
-        "model": KEYWORD_MODEL,
+        "model": LLM_MODEL,
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
@@ -1187,8 +1193,8 @@ async def llm_keys(words):
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.post(
-                GROQ_CHAT_URL,
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                LLM_CHAT_URL,
+                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
                 json=payload,
             )
         if response.status_code != 200:
@@ -1217,11 +1223,11 @@ async def mark_keywords(words):
 
 async def suggest_cards(words, work_dir):
     """Up to 3 cards: {id, at, query, thumb, credit, file}. Never raises."""
-    if not (PIXABAY_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6:
+    if not (PIXABAY_API_KEY and LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 6:
         return []
     numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
     payload = {
-        "model": KEYWORD_MODEL,
+        "model": LLM_MODEL,
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
@@ -1242,8 +1248,8 @@ async def suggest_cards(words, work_dir):
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
             response = await client.post(
-                GROQ_CHAT_URL,
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                LLM_CHAT_URL,
+                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
                 json=payload,
             )
             if response.status_code != 200:
@@ -2406,15 +2412,15 @@ def pick_video_file(files):
 
 async def llm_json(client, system, user):
     payload = {
-        "model": KEYWORD_MODEL,
+        "model": LLM_MODEL,
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
     }
     try:
         response = await client.post(
-            GROQ_CHAT_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            LLM_CHAT_URL,
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
             json=payload,
         )
         if response.status_code != 200:
@@ -2497,7 +2503,7 @@ async def verify_candidates(client, phrase, query, candidates):
 async def suggest_broll(words, duration, client=None, topic=""):
     """Return (moments, info). A moment: id, at, query, reason, conf, thumb, credit, alts."""
     info = {"suggested": 0, "kept": 0}
-    if not (PIXABAY_API_KEY and GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6 or duration < 6:
+    if not (PIXABAY_API_KEY and LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 6 or duration < 6:
         return [], info
     own_client = client is None
     if own_client:
@@ -2761,7 +2767,7 @@ def heuristic_scenes(words, duration):
 async def analyze_scenes(words, duration, client=None):
     """Topic and scenes (role, importance). Uses the LLM, falls back to rules."""
     result = {"topic": "", "scenes": heuristic_scenes(words, duration)}
-    if not (GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 8:
+    if not (LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 8:
         return result
     own = client is None
     if own:
@@ -3148,7 +3154,7 @@ async def choose_mood(words, topic, duration, client=None):
     """{mood, reason}: the LLM picks by topic and tone, rules are the fallback."""
     mood, reason = mood_by_rules(topic, words, duration)
     result = {"mood": mood, "reason": reason, "bpm": MOODS[mood]["bpm"]}
-    if not (GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 8:
+    if not (LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 8:
         return result
     own = client is None
     if own:
@@ -3277,7 +3283,7 @@ def fallback_title(scenes_words):
 
 async def suggest_cover_title(words, topic, client=None):
     fallback = fallback_title([w["word"] for w in words[:8]])
-    if not (GROQ_API_KEY and KEYWORDS_LLM) or len(words) < 6:
+    if not (LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 6:
         return fallback
     own = client is None
     if own:
