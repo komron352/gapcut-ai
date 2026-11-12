@@ -31,6 +31,7 @@ import difflib
 import base64
 import wave
 import hashlib
+import io
 import hmac
 import random
 import json
@@ -112,8 +113,6 @@ GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "86400"))
 MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "10"))
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "").strip()
-POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY", "").strip()
-POLLINATIONS_IMAGE_MODEL = os.getenv("POLLINATIONS_IMAGE_MODEL", "black-forest-labs/flux.1-schnell").strip() or "black-forest-labs/flux.1-schnell"
 CUSTOM_FONTS_DIR = "/usr/local/share/fonts/gapcut"
 FONT_CANDIDATES = [
     # Sans-serif / modern
@@ -174,6 +173,8 @@ dp = Dispatcher()
 
 # Only one heavy job (transcription or render) at a time on a small server.
 PROCESS_LOCK = asyncio.Lock()
+IMAGE_GENERATION_LOCK = asyncio.Lock()
+IMAGE_GENERATION_LAST_REQUEST = 0.0
 
 
 class UserError(Exception):
@@ -4190,15 +4191,11 @@ async def generate_standalone_image(
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
+    global IMAGE_GENERATION_LAST_REQUEST
     user = require_user(init_data, x_init_data)
     prompt = " ".join(str(prompt).split())[:1200]
     if len(prompt) < 4:
         raise HTTPException(status_code=400, detail="Введите описание изображения.")
-    if not POLLINATIONS_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="Генератор фото ещё не подключён. Добавьте POLLINATIONS_API_KEY в Render Environment.",
-        )
 
     styles = {
         "realistic": "photorealistic, realistic professional photography, natural details",
@@ -4218,405 +4215,114 @@ async def generate_standalone_image(
 
     width, height = dimensions[ratio]
     full_prompt = (
-        f"{prompt}. {styles[style]}. Carefully composed, high detail, professional quality. "
-        "No text, no letters, no captions, no logos, no watermark. "
-        "Avoid extra unrelated objects, distorted anatomy, blurry details, low quality."
+        f"{prompt}. {styles[style]}. Compose the main subject centrally with enough "
+        "visual space around it for a clean crop to the requested aspect ratio. "
+        "High detail, professional quality, natural lighting. No text, no letters, "
+        "no captions, no logos, no watermark. Avoid unrelated extra objects, "
+        "distorted anatomy, blurry details and low quality."
     )
-    url = "https://gen.pollinations.ai/image/" + quote(full_prompt, safe="")
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=20.0)) as client:
-            response = await client.get(
-                url,
-                params={"model": POLLINATIONS_IMAGE_MODEL, "width": width, "height": height},
-                headers={"Authorization": f"Bearer {POLLINATIONS_API_KEY}"},
-            )
-        if response.status_code in (401, 403):
-            logger.error("Pollinations image authorization failed: HTTP %s", response.status_code)
-            raise HTTPException(status_code=503, detail="Ключ генератора фото недействителен или не имеет доступа.")
-        if response.status_code == 402:
-            raise HTTPException(status_code=503, detail="На балансе генератора фото недостаточно средств.")
-        if response.status_code == 429:
-            raise HTTPException(status_code=429, detail="Лимит генератора фото исчерпан. Попробуйте позже.")
-        if response.status_code >= 400:
-            logger.error("Pollinations image error HTTP %s: %s", response.status_code, response.text[:500])
-            raise HTTPException(status_code=502, detail="Сервис генерации фото временно недоступен.")
-        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
-        if not content_type.startswith("image/"):
-            logger.error("Pollinations returned non-image content type: %s", content_type)
-            raise HTTPException(status_code=502, detail="Генератор не вернул изображение.")
-        if not response.content or len(response.content) > 20 * 1024 * 1024:
-            raise HTTPException(status_code=502, detail="Размер созданного изображения недопустим.")
-        logger.info("AI image generated for Telegram user %s (%s, %s)", user["id"], style, ratio)
-        extension = "png" if "png" in content_type else "jpg"
-        return Response(
-            content=response.content,
-            media_type=content_type,
-            headers={
-                "Content-Disposition": f'inline; filename="GAPCUT_AI_photo.{extension}"',
-                "Cache-Control": "no-store",
-            },
-        )
-    except HTTPException:
-        raise
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Генерация фото заняла слишком много времени. Попробуйте ещё раз.")
-    except httpx.HTTPError:
-        logger.exception("Pollinations image request failed")
-        raise HTTPException(status_code=502, detail="Не удалось подключиться к генератору фото.")
-
-
-
-
-@app.api_route("/health", methods=["GET", "HEAD"])
-async def health():
-    return {"status": "healthy", "service": "GAPCUT AI", "version": VERSION}
-
-
-# ---------------------------------------------------------
-# One-shot endpoint (compatible with the existing Mini App)
-# ---------------------------------------------------------
-
-@app.post("/api/process")
-async def api_process(
-    file: UploadFile = File(...),
-    style: str = Form("viral"),
-    language: str = Form("tg_ru"),
-    video_format: str = Form("9:16"),
-    init_data: str = Form(""),
-    x_init_data: str = Header(default=""),
-):
-    user = require_user(init_data, x_init_data)
-    style = clean_style(style)
-    language = clean_language(language)
-    video_format = clean_format(video_format)
-
-    if PROCESS_LOCK.locked():
-        raise HTTPException(
-            status_code=429,
-            detail="Сервер сейчас обрабатывает другое видео. Попробуйте позже.",
-            headers={"Retry-After": "30"},
-        )
-
-    work_dir = None
-    try:
-        async with PROCESS_LOCK:
-            work_dir = new_work_dir()
-            logger.info("Upload started. Telegram user ID: %s", user["id"])
-
-            input_path = await save_upload(file, work_dir)
-            info, duration = await inspect_video(input_path)
-
-            audio_path = work_dir / "audio.mp3"
-            await extract_audio(input_path, audio_path, work_dir)
-            words, _ = await transcribe_video(
-                audio_path, work_dir, language, duration, lambda p, s: None
-            )
-
-            output_path = work_dir / "gapcut_ai.mp4"
-            await render_video(
-                input_path, output_path, work_dir, words, style, video_format,
-                info, duration, lambda p, s: None,
-            )
-
-        return FileResponse(
-            path=str(output_path),
-            media_type="video/mp4",
-            filename="GAPCUT_AI.mp4",
-            background=BackgroundTask(shutil.rmtree, str(work_dir), ignore_errors=True),
-        )
-
-    except HTTPException:
-        if work_dir:
-            shutil.rmtree(work_dir, ignore_errors=True)
-        raise
-    except UserError as error:
-        if work_dir:
-            shutil.rmtree(work_dir, ignore_errors=True)
-        raise HTTPException(status_code=error.status_code, detail=error.message)
-    except Exception:
-        logger.exception("Video processing failed")
-        if work_dir:
-            shutil.rmtree(work_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера.")
-    finally:
-        await file.close()
-
-
-# ---------------------------------------------------------
-# Job endpoints (progress + editable transcript)
-# ---------------------------------------------------------
-
-@app.get("/api/jobs")
-async def list_jobs(
-    x_init_data: str = Header(default=""),
-    init_data: str = Query(default=""),
-):
-    user = require_user(x_init_data, init_data)
-    purge_expired_jobs()
-    user_jobs = [job for job in JOBS.values() if job["user_id"] == user["id"]]
-    user_jobs.sort(key=lambda job: job.get("updated", 0), reverse=True)
-    return {"jobs": [public_job(job) for job in user_jobs[:20]]}
-
-
-@app.post("/api/jobs", status_code=202)
-async def create_job(
-    file: UploadFile = File(...),
-    language: str = Form("tg_ru"),
-    quality: str = Form("fast"),
-    glossary: str = Form(""),
-    init_data: str = Form(""),
-    x_init_data: str = Header(default=""),
-):
-    user = require_user(init_data, x_init_data)
-    language = clean_language(language)
-    model = GROQ_MODEL_BEST if str(quality).strip().lower() == "best" else GROQ_MODEL
-    glossary_terms = clean_glossary(glossary)
-
-    purge_expired_jobs()
-
-    for existing in JOBS.values():
-        if existing["user_id"] == user["id"] and existing["status"] in ACTIVE_STATES:
-            raise HTTPException(
-                status_code=429,
-                detail="У вас уже есть задача в обработке. Дождитесь её завершения.",
-            )
-
-    while len(JOBS) >= MAX_STORED_JOBS:
-        completed = [job for job in JOBS.values() if job["status"] not in ACTIVE_STATES]
-        if not completed:
-            raise HTTPException(
-                status_code=429,
-                detail="Сервер занят. Попробуйте через несколько минут.",
-                headers={"Retry-After": "60"},
-            )
-        oldest = min(completed, key=lambda item: item.get("updated", 0))
-        remove_job(oldest["id"])
-
-    work_dir = new_work_dir()
-    try:
-        input_path = await save_upload(file, work_dir)
-        info, duration = await inspect_video(input_path)
-    except UserError as error:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        raise HTTPException(status_code=error.status_code, detail=error.message)
-    except HTTPException:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        raise
-    except Exception:
-        logger.exception("Upload failed")
-        shutil.rmtree(work_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера.")
-    finally:
-        await file.close()
-
-    job_id = uuid.uuid4().hex
-    job = {
-        "id": job_id,
-        "user_id": user["id"],
-        "filename": Path(file.filename or "video").name[:120],
-        "dir": work_dir,
-        "input": input_path,
-        "info": info,
-        "duration": duration,
-        "language": language,
-        "model": model,
-        "glossary": glossary_terms,
-        "status": "queued",
-        "stage": "В очереди",
-        "progress": 5,
-        "error": None,
-        "words": [],
-        "lines": [],
-        "detected": [],
-        "cards": [],
-        "cut_preview": {},
-        "scenes": [],
-        "topic": "",
-        "visual_cuts": 0,
-        "color": None,
-        "music_mood": None,
-        "cover": None,
-        "output": None,
-        "updated": time.time(),
-    }
-    JOBS[job_id] = job
-    spawn(run_transcribe_job(job))
-
-    return public_job(job)
-
-
-@app.get("/api/jobs/{job_id}")
-async def job_status(
-    job_id: str,
-    x_init_data: str = Header(default=""),
-    init_data: str = Query(default=""),
-):
-    user = require_user(x_init_data, init_data)
-    return public_job(get_job(job_id, user))
-
-
-@app.post("/api/jobs/{job_id}/render", status_code=202)
-async def start_render(
-    job_id: str,
-    style: str = Form("viral"),
-    video_format: str = Form("9:16"),
-    lines: str = Form(""),
-    accent: str = Form(""),
-    size: str = Form("m"),
-    position: str = Form("auto"),
-    subtitles: str = Form("1"),
-    zoom: str = Form("1"),
-    fx: str = Form("1"),
-    sfx: str = Form("1"),
-    cards: str = Form("[]"),
-    font: str = Form(""),
-    font2: str = Form(""),
-    fontmix: str = Form("0"),
-    cut: str = Form("off"),
-    keys: str = Form("1"),
-    anim: str = Form(""),
-    anim_out: str = Form(""),
-    trans: str = Form("off"),
-    broll: str = Form("auto"),
-    sound: str = Form(""),
-    camera: str = Form(""),
-    grade: str = Form("off"),
-    music: str = Form(""),
-    music_level: str = Form("normal"),
-    music_sync: str = Form("1"),
-    init_data: str = Form(""),
-    x_init_data: str = Header(default=""),
-):
-    user = require_user(init_data, x_init_data)
-    job = get_job(job_id, user)
-    options = clean_options(
-        accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix,
-        cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
-        music, music_level, music_sync,
-    )
-    options["music_mood"] = job.get("music_mood")
-    options["scenes"] = job.get("scenes", [])
-    options["color"] = job.get("color")
-    try:
-        wanted = {}
-        for entry in json.loads(cards or "[]"):
-            if isinstance(entry, dict):
-                wanted[int(entry["id"])] = int(entry.get("alt", 0))
-            else:
-                wanted[int(entry)] = 0
-    except (ValueError, TypeError, KeyError):
-        raise HTTPException(status_code=400, detail="Неверный список карточек.")
-    options["cards"] = [
-        dict(c, alt_index=wanted[c["id"]]) for c in job["cards"] if c["id"] in wanted
-    ]
-
-    parsed_lines = None
-    if lines.strip():
-        try:
-            parsed_lines = json.loads(lines)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Неверный формат текста.")
-        if not isinstance(parsed_lines, list):
-            raise HTTPException(status_code=400, detail="Неверный формат текста.")
-        try:
-            lines_to_words(parsed_lines, job["duration"])
-        except UserError as error:
-            raise HTTPException(status_code=400, detail=error.message)
-
-    touch(job, status="rendering", stage="В очереди", progress=0, error=None)
-    spawn(run_render_job(job, style, video_format, parsed_lines, options))
-    return public_job(job)
-
-
-@app.get("/api/jobs/{job_id}/download")
-async def download_job(
-    job_id: str,
-    x_init_data: str = Header(default=""),
-    init_data: str = Query(default=""),
-):
-    user = require_user(x_init_data, init_data)
-    job = get_job(job_id, user)
-
-    output = job.get("output")
-    if job["status"] != "done" or not output or not Path(output).exists():
-        raise HTTPException(status_code=409, detail="Видео ещё не готово.")
-
-    touch(job)
-    return FileResponse(
-        path=str(output),
-        media_type="video/mp4",
-        filename="GAPCUT_AI.mp4",
-    )
-
-
-@app.delete("/api/jobs/{job_id}")
-async def delete_job(job_id: str, x_init_data: str = Header(default="")):
-    user = require_user(x_init_data)
-    job = get_job(job_id, user)
-    if job["status"] in ACTIVE_STATES:
-        raise HTTPException(status_code=409, detail="Задача ещё обрабатывается.")
-    remove_job(job_id)
-    return {"deleted": True}
-
-
-@app.get("/api/jobs/{job_id}/cover/candidates")
-async def cover_candidates(
-    job_id: str,
-    x_init_data: str = Header(default=""),
-    init_data: str = Query(default=""),
-):
-    user = require_user(x_init_data, init_data)
-    cover = get_job(job_id, user).get("cover") or {}
-    return {
-        "times": cover.get("times", []),
-        "thumbs": cover.get("thumbs", []),
-        "title": cover.get("title", ""),
+    url = "https://stable-diffusion-xl.endpoints.kepler.ai.cloud.ovh.net/api/text2image"
+    payload = {
+        "prompt": full_prompt,
+        "negative_prompt": (
+            "text, letters, captions, watermark, logo, blurry, low quality, "
+            "distorted anatomy, extra fingers, unrelated objects"
+        ),
     }
 
+    # OVHcloud's free anonymous SDXL endpoint is limited to 2 requests/minute/IP/model.
+    # Keep a 31-second local cooldown so GAPCUT does not exceed that published limit.
+    async with IMAGE_GENERATION_LOCK:
+        now = time.monotonic()
+        wait = 31.0 - (now - IMAGE_GENERATION_LAST_REQUEST)
+        if IMAGE_GENERATION_LAST_REQUEST and wait > 0:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Лимити ройгони генератор: як аксро ҳар 31 сония сохтан мумкин аст. {int(wait) + 1} сония интизор шавед.",
+                headers={"Retry-After": str(int(wait) + 1)},
+            )
+        IMAGE_GENERATION_LAST_REQUEST = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=20.0)) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers={
+                        "accept": "application/octet-stream",
+                        "content-type": "application/json",
+                    },
+                )
+            if response.status_code == 429:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Сервиси ройгон ҳоло маҳдудият гузошт. Каме баъдтар кӯшиш кунед.",
+                    headers={"Retry-After": response.headers.get("Retry-After", "60")},
+                )
+            if response.status_code >= 400:
+                logger.error(
+                    "OVHcloud SDXL error HTTP %s: %s",
+                    response.status_code,
+                    response.text[:500],
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail="Сервиси ройгони сохтани акс муваққатан дастрас нест.",
+                )
+            if not response.content or len(response.content) > 20 * 1024 * 1024:
+                raise HTTPException(status_code=502, detail="Андозаи акси сохташуда нодуруст аст.")
 
-@app.post("/api/jobs/{job_id}/cover")
-async def create_cover(
-    job_id: str,
-    t: float = Form(0.0),
-    template: str = Form("bold"),
-    text: str = Form(""),
-    fmt: str = Form("9:16"),
-    accent: str = Form(""),
-    font: str = Form(""),
-    grade: str = Form("off"),
-    init_data: str = Form(""),
-    x_init_data: str = Header(default=""),
-):
-    user = require_user(init_data, x_init_data)
-    job = get_job(job_id, user)
-    if np is None or Image is None:
-        raise HTTPException(status_code=503, detail="Создание обложек недоступно на сервере.")
-    if template not in COVER_TEMPLATES or fmt not in COVER_SIZES:
-        raise HTTPException(status_code=400, detail="Неверный шаблон или формат обложки.")
-    text = " ".join(text.split())[:80] or (job.get("cover") or {}).get("title", "")
-    if not text:
-        raise HTTPException(status_code=400, detail="Введите текст обложки.")
-    accent = accent.strip().lstrip("#").upper()
-    if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
-        raise HTTPException(status_code=400, detail="Неверный цвет.")
-    families = {f["family"] if isinstance(f, dict) else f for f in AVAILABLE_FONTS}
-    family = font if font in families else ""
-    grade_expr = grade_filter(job.get("color"), grade if grade in LOOK_FILTERS or grade == "auto" else "off")
-    moment = max(0.0, min(float(t), job["duration"] - 0.1))
-    try:
-        path = await make_cover(job, moment, template, text, fmt, accent, family, grade_expr)
-    except UserError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.message)
-    except Exception:
-        logger.exception("Cover failed")
-        raise HTTPException(status_code=500, detail="Не удалось создать обложку.")
-    previous = job.get("cover_file")
-    if previous and previous != str(path):
-        with suppress(OSError):
-            Path(previous).unlink()
-    job["cover_file"] = str(path)
-    touch(job)
-    return FileResponse(str(path), media_type="image/jpeg", filename="GAPCUT_cover.jpg")
+            # OVHcloud SDXL returns 1024x1024. Crop and resize to the selected output ratio.
+            if Image is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Коркарди акс дар сервер дастрас нест.",
+                )
+            try:
+                image = Image.open(io.BytesIO(response.content)).convert("RGB")
+                target_ratio = width / height
+                source_ratio = image.width / image.height
+                if source_ratio > target_ratio:
+                    crop_width = int(image.height * target_ratio)
+                    left = (image.width - crop_width) // 2
+                    image = image.crop((left, 0, left + crop_width, image.height))
+                elif source_ratio < target_ratio:
+                    crop_height = int(image.width / target_ratio)
+                    top = (image.height - crop_height) // 2
+                    image = image.crop((0, top, image.width, top + crop_height))
+                resampling = getattr(Image, "Resampling", Image).LANCZOS
+                image = image.resize((width, height), resampling)
+                output = io.BytesIO()
+                image.save(output, format="JPEG", quality=92, optimize=True)
+                image_bytes = output.getvalue()
+            except Exception:
+                logger.exception("Could not decode or resize OVHcloud image")
+                raise HTTPException(status_code=502, detail="Сервиси AI акси дуруст барнагардонд.")
+
+            logger.info(
+                "Free OVHcloud SDXL image generated for Telegram user %s (%s, %s)",
+                user["id"], style, ratio,
+            )
+            return Response(
+                content=image_bytes,
+                media_type="image/jpeg",
+                headers={
+                    "Content-Disposition": 'inline; filename="GAPCUT_AI_photo.jpg"',
+                    "Cache-Control": "no-store",
+                },
+            )
+        except HTTPException:
+            raise
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status_code=504,
+                detail="Сохтани акс вақти зиёд гирифт. Боз кӯшиш кунед.",
+            )
+        except httpx.HTTPError:
+            logger.exception("OVHcloud SDXL image request failed")
+            raise HTTPException(
+                status_code=502,
+                detail="Ба генератори ройгони акс пайваст нашуд.",
+            )
 
 
 # =========================================================
