@@ -302,9 +302,6 @@ document.querySelectorAll(".sw").forEach(b=>b.onclick=()=>{
 });
 $("format").onchange=e=>settings.format=e.target.value;
 $("cutMode").onchange=e=>settings.cutMode=e.target.value;
-$("captionSize").onchange=e=>settings.captionSize=e.target.value;
-$("captionPosition").onchange=e=>settings.captionPosition=e.target.value;
-$("captionAccent").onchange=e=>settings.captionAccent=e.target.value;
 
 $("start").onclick=async()=>{
   if(busy)return;
