@@ -226,8 +226,8 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
   <div class="setting">
     <div><b>Интенсивность нарезки</b><small>Выберите, насколько плотно AI удаляет паузы</small></div>
     <select id="cutMode" style="max-width:155px">
+      <option value="light" selected>Бережная (рекомендуется)</option>
       <option value="normal">Умная</option>
-      <option value="light">Лёгкая</option>
       <option value="tight">Динамичная</option>
       <option value="off">Без нарезки</option>
     </select>
@@ -290,7 +290,7 @@ let transcriptLines=[];
 let settings={
   style:"Auto", language:"ru", pauses:true, fillers:true,
   captions:true, images:true, format:"9:16", textSounds:true, font:"",
-  cutMode:"normal", captionSize:"m", captionPosition:"auto", captionAccent:"#FF3D7F"
+  cutMode:"light", captionSize:"m", captionPosition:"auto", captionAccent:"#FF3D7F"
 };
 let busy=false;
 
