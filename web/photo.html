@@ -42,6 +42,7 @@ textarea,input,select{width:100%;border:1px solid var(--line);border-radius:13px
 <canvas id="canvas" style="display:none"></canvas>
 </main>
 <style>@import url("https://fonts.googleapis.com/css2?family=Anton&family=Black+Ops+One&family=Bebas+Neue&family=Bowlby+One+SC&family=Bungee&family=Russo+One&family=Teko:wght@600;700&display=swap");</style>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js"></script>
 <script>
 const tg=window.Telegram?.WebApp;if(tg){tg.ready();tg.expand()}
 const API="https://gapcut-ai.onrender.com", $=id=>document.getElementById(id);let blob=null,uploaded=null;
