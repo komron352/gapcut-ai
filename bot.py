@@ -1807,18 +1807,21 @@ def animated_phrase_events(text, start, end, sname, in_name, out_name, c, rng):
 
 
 def choose_animation(text, index, previous, count):
-    """Pick an entrance by what the phrase says (hook, question, emphasis, number, calm)."""
+    """Choose a visible, varied entrance for each phrase in Auto Pro."""
     t = text.strip()
     if index == 0:
-        pool = ["pop_3d", "zoom_in", "pop_up", "slide_up"]
+        pool = ["pop_3d", "zoom_in", "pop_up", "light_sweep", "slide_up"]
     elif t.endswith("?"):
-        pool = ["typewriter", "word_by_word", "wipe_reveal"]
+        pool = ["word_by_word", "wipe_reveal", "typewriter", "flip_in"]
     elif t.endswith("!") or any(ch.isdigit() for ch in t):
-        pool = ["pop_up", "bounce", "zoom_in", "stretch", "shake"]
-    elif count >= 5:
-        pool = ["fade_in", "blur_reveal", "slide_up", "tracking"]
+        pool = ["pop_3d", "bounce", "zoom_in", "stretch", "glitch", "shake"]
     else:
-        pool = ANIM_MIX
+        # Keep motion noticeable even on longer captions; avoid a run of plain fades.
+        pool = [
+            "pop_3d", "zoom_in", "light_sweep", "bounce", "glitch",
+            "neon_glow", "word_by_word", "elastic", "wipe_reveal",
+            "magnetic", "blur_reveal", "flip_in", "liquid",
+        ]
     pool = [name for name in pool if name != previous] or ANIM_MIX
     return pool[index % len(pool)]
 
@@ -1827,37 +1830,55 @@ TRANSITION_KINDS = ["zoom", "whip", "swipe", "motion", "flash", "blur", "glitch"
 
 
 def plan_transitions(words, duration, mode, cut_points, scenes=None):
-    """List of (time, kind) on the final timeline: at cuts and at new thoughts."""
+    """Build a reliable transition plan from cuts, scene changes and caption beats."""
     if mode in (None, "", "off"):
         return []
+
     points = [(t, "cut") for t in cut_points if 0.3 < t < duration - 0.3]
+
+    # Scene analysis can return only one scene. Always add caption/sentence beats
+    # as a fallback so Auto mode does not silently produce a video with no transitions.
     if scenes:
         for scene in scenes[1:]:
-            if 0.8 < scene["start"] < duration - 0.5:
-                points.append((scene["start"], "scene" if scene.get("importance", 0.5) < 0.8 else "key"))
-    else:
-        lines = make_lines(words)
-        for previous, line in zip(lines, lines[1:]):
-            ends_thought = previous["text"].rstrip().endswith((".", "?", "!", "…"))
-            if ends_thought and 0.8 < line["start"] < duration - 0.5:
-                points.append((line["start"], "thought"))
-    points.sort()
+            moment = float(scene.get("start", 0))
+            if 0.8 < moment < duration - 0.5:
+                origin = "key" if scene.get("importance", 0.5) >= 0.8 else "scene"
+                points.append((moment, origin))
+
+    lines = make_lines(words)
+    for previous, line in zip(lines, lines[1:]):
+        moment = float(line.get("start", 0))
+        if not 0.8 < moment < duration - 0.5:
+            continue
+        ends_thought = previous["text"].rstrip().endswith((".", "?", "!", "…"))
+        points.append((moment, "thought" if ends_thought else "phrase"))
+
+    if not points:
+        return []
+
+    priority = {"cut": 0, "key": 1, "scene": 2, "thought": 3, "phrase": 4}
+    points.sort(key=lambda item: (item[0], priority.get(item[1], 9)))
     chosen = []
     for moment, origin in points:
-        if chosen and moment - chosen[-1][0] < 1.5:
+        if chosen and moment - chosen[-1][0] < 1.05:
+            # Keep the strongest event when two beats are nearly simultaneous.
+            if priority.get(origin, 9) < priority.get(chosen[-1][1], 9):
+                chosen[-1] = (moment, origin)
             continue
         chosen.append((moment, origin))
-    chosen = chosen[:10]
+    chosen = chosen[:14]
+
     out = []
+    auto_kinds = ("zoom", "whip", "swipe", "motion", "flash", "blur", "glitch")
     for number, (moment, origin) in enumerate(chosen):
         if mode in TRANSITION_KINDS:
             kind = mode
         elif origin == "cut":
-            kind = ("zoom", "whip", "flash", "motion")[number % 4]
+            kind = ("whip", "flash", "zoom", "motion")[number % 4]
         elif origin == "key":
-            kind = ("zoom", "flash", "glitch")[number % 3]
+            kind = ("glitch", "zoom", "flash")[number % 3]
         else:
-            kind = ("blur", "swipe", "glitch", "zoom", "flash")[number % 5]
+            kind = auto_kinds[number % len(auto_kinds)]
         out.append((moment, kind))
     return out
 
