@@ -4159,6 +4159,21 @@ async def run_transcribe_job(job):
                 stage="Текст готов",
                 progress=100,
             )
+
+        # Continue on the server: do not wait for the Mini App to poll or
+        # send a second /render request. All selected settings were saved
+        # when the user pressed "Начать монтаж".
+        if job.get("auto_render"):
+            render_options = dict(job.get("render_options") or {})
+            if render_options.get("broll", "auto") != "off":
+                render_options["cards"] = list(job.get("cards") or [])
+            await run_render_job(
+                job,
+                job.get("render_style", "dynamic"),
+                job.get("render_format", "9:16"),
+                None,
+                render_options,
+            )
     except Exception as error:
         fail_job(job, error)
 
@@ -4527,6 +4542,7 @@ async def create_job(
     language: str = Form("tg_ru"),
     quality: str = Form("fast"),
     glossary: str = Form(""),
+    render_settings: str = Form("{}"),
     init_data: str = Form(""),
     x_init_data: str = Header(default=""),
 ):
@@ -4534,6 +4550,28 @@ async def create_job(
     language = clean_language(language)
     model = GROQ_MODEL_BEST if str(quality).strip().lower() == "best" else GROQ_MODEL
     glossary_terms = clean_glossary(glossary)
+
+    try:
+        cfg = json.loads(render_settings or "{}")
+        if not isinstance(cfg, dict):
+            raise ValueError("render_settings must be an object")
+        render_style = clean_style(cfg.get("style", "dynamic"))
+        render_format = clean_format(cfg.get("video_format", "9:16"))
+        render_options = clean_options(
+            cfg.get("accent", ""), cfg.get("size", "m"),
+            cfg.get("position", "auto"), cfg.get("subtitles", "1"),
+            cfg.get("zoom", "1"), cfg.get("fx", "1"), cfg.get("sfx", "1"),
+            cfg.get("font", ""), cfg.get("font2", ""),
+            cfg.get("fontmix", "0"), cfg.get("cut", "off"),
+            cfg.get("keys", "1"), cfg.get("anim", "auto"),
+            cfg.get("anim_out", "auto"), cfg.get("trans", "auto"),
+            cfg.get("broll", "auto"), cfg.get("sound", "normal"),
+            cfg.get("camera", "auto"), cfg.get("grade", "auto"),
+            cfg.get("music", "auto"), cfg.get("music_level", "low"),
+            cfg.get("music_sync", "1"),
+        )
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Неверные настройки монтажа.")
 
     purge_expired_jobs()
 
@@ -4600,6 +4638,12 @@ async def create_job(
         "music_mood": None,
         "cover": None,
         "output": None,
+        # The whole edit is executed by the server after upload. The browser
+        # may close at any time without cancelling transcription or rendering.
+        "auto_render": True,
+        "render_style": render_style,
+        "render_format": render_format,
+        "render_options": render_options,
         "updated": time.time(),
     }
     JOBS[job_id] = job
