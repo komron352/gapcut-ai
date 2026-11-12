@@ -44,7 +44,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, quote
 
 import httpx
 import uvicorn
@@ -63,7 +63,7 @@ from aiogram.types import (
 )
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
 
 try:
@@ -112,6 +112,8 @@ GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "86400"))
 MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "10"))
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY", "").strip()
+POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY", "").strip()
+POLLINATIONS_IMAGE_MODEL = os.getenv("POLLINATIONS_IMAGE_MODEL", "black-forest-labs/flux.1-schnell").strip() or "black-forest-labs/flux.1-schnell"
 CUSTOM_FONTS_DIR = "/usr/local/share/fonts/gapcut"
 FONT_CANDIDATES = [
     # Sans-serif / modern
@@ -4178,6 +4180,91 @@ async def home():
 @app.get("/api/fonts")
 async def list_fonts():
     return {"fonts": [f["family"] for f in AVAILABLE_FONTS]}
+
+
+@app.post("/api/images/generate")
+async def generate_standalone_image(
+    prompt: str = Form(...),
+    style: str = Form("realistic"),
+    ratio: str = Form("9:16"),
+    init_data: str = Form(""),
+    x_init_data: str = Header(default=""),
+):
+    user = require_user(init_data, x_init_data)
+    prompt = " ".join(str(prompt).split())[:1200]
+    if len(prompt) < 4:
+        raise HTTPException(status_code=400, detail="Введите описание изображения.")
+    if not POLLINATIONS_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Генератор фото ещё не подключён. Добавьте POLLINATIONS_API_KEY в Render Environment.",
+        )
+
+    styles = {
+        "realistic": "photorealistic, realistic professional photography, natural details",
+        "cinematic": "cinematic composition, dramatic film lighting, rich depth, premium color grading",
+        "premium": "luxury premium advertising photography, elegant studio lighting, polished composition",
+        "3d": "high-end 3D render, detailed materials, realistic global illumination",
+        "viral": "bold social media creative, dynamic composition, strong visual hook",
+        "anime": "beautiful high-quality anime illustration, detailed clean artwork",
+    }
+    dimensions = {
+        "9:16": (720, 1280),
+        "1:1": (1024, 1024),
+        "16:9": (1280, 720),
+    }
+    if style not in styles or ratio not in dimensions:
+        raise HTTPException(status_code=400, detail="Неверный стиль или формат изображения.")
+
+    width, height = dimensions[ratio]
+    full_prompt = (
+        f"{prompt}. {styles[style]}. Carefully composed, high detail, professional quality. "
+        "No text, no letters, no captions, no logos, no watermark. "
+        "Avoid extra unrelated objects, distorted anatomy, blurry details, low quality."
+    )
+    url = "https://gen.pollinations.ai/image/" + quote(full_prompt, safe="")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=20.0)) as client:
+            response = await client.get(
+                url,
+                params={"model": POLLINATIONS_IMAGE_MODEL, "width": width, "height": height},
+                headers={"Authorization": f"Bearer {POLLINATIONS_API_KEY}"},
+            )
+        if response.status_code in (401, 403):
+            logger.error("Pollinations image authorization failed: HTTP %s", response.status_code)
+            raise HTTPException(status_code=503, detail="Ключ генератора фото недействителен или не имеет доступа.")
+        if response.status_code == 402:
+            raise HTTPException(status_code=503, detail="На балансе генератора фото недостаточно средств.")
+        if response.status_code == 429:
+            raise HTTPException(status_code=429, detail="Лимит генератора фото исчерпан. Попробуйте позже.")
+        if response.status_code >= 400:
+            logger.error("Pollinations image error HTTP %s: %s", response.status_code, response.text[:500])
+            raise HTTPException(status_code=502, detail="Сервис генерации фото временно недоступен.")
+        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+        if not content_type.startswith("image/"):
+            logger.error("Pollinations returned non-image content type: %s", content_type)
+            raise HTTPException(status_code=502, detail="Генератор не вернул изображение.")
+        if not response.content or len(response.content) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=502, detail="Размер созданного изображения недопустим.")
+        logger.info("AI image generated for Telegram user %s (%s, %s)", user["id"], style, ratio)
+        extension = "png" if "png" in content_type else "jpg"
+        return Response(
+            content=response.content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="GAPCUT_AI_photo.{extension}"',
+                "Cache-Control": "no-store",
+            },
+        )
+    except HTTPException:
+        raise
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Генерация фото заняла слишком много времени. Попробуйте ещё раз.")
+    except httpx.HTTPError:
+        logger.exception("Pollinations image request failed")
+        raise HTTPException(status_code=502, detail="Не удалось подключиться к генератору фото.")
+
+
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
