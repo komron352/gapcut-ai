@@ -2240,7 +2240,7 @@ def between_expression(moments, length):
 # Cuts are made around words: every kept word keeps a small safety pad, so a word is
 # never clipped. Subtitles, zoom and cards are moved onto the new timeline.
 
-CUT_LEVELS = {"light": (0.55, 0.25), "normal": (0.40, 0.18), "tight": (0.28, 0.12)}
+CUT_LEVELS = {"light": (0.95, 0.34), "normal": (0.80, 0.30), "tight": (0.65, 0.26)}
 FILLER_RE = re.compile(r"^(?:э+м*|е+м+|м{2,}|гм+|хм+|эх+|ам{2,})$")
 
 
@@ -2258,21 +2258,11 @@ def plan_cuts(words, duration, level):
 
     speech = []
     fillers = 0
-    pending_cut = False
+    # Never delete a recognized word automatically: Whisper can mislabel
+    # Tajik/Russian words as fillers or repeat adjacent words in its output.
+    # Keep every timestamped token and only consider long pauses between them.
     for item in words:
-        if is_filler(item["word"]):
-            fillers += 1
-            pending_cut = True
-            continue
-        if speech:
-            previous = speech[-1][0]
-            same = core_token(previous["word"]).lower() == core_token(item["word"]).lower()
-            if same and len(core_token(item["word"])) >= 2 and item["start"] - previous["end"] < 0.35:
-                speech.pop()
-                fillers += 1
-                pending_cut = True
-        speech.append((item, pending_cut))
-        pending_cut = False
+        speech.append((item, False))
     if len(speech) < 3:
         return None
 
@@ -2303,11 +2293,15 @@ def plan_cuts(words, duration, level):
             segments.append([a, b])
 
     new_duration = sum(b - a for a, b in segments)
-    # Safety is judged against the spoken part, trailing silence may be cut freely.
-    spoken = speech[-1][0]["end"] - speech[0][0]["start"] + 0.65
-    if new_duration < 1.0 or new_duration < 0.4 * spoken:
+    # Conservative safety gate: retain at least 75% of the original timeline
+    # and at least 90% of the timestamped speech span. If recognition timing is
+    # poor or the proposed edit is too aggressive, keep the source unchanged.
+    spoken = max(0.0, speech[-1][0]["end"] - speech[0][0]["start"])
+    if new_duration < 1.0:
         return None
-    if duration - new_duration < 0.25:
+    if new_duration < 0.75 * duration or new_duration < 0.90 * spoken:
+        return None
+    if duration - new_duration < 0.50:
         return None
 
     offsets = []
