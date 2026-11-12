@@ -321,7 +321,7 @@ $("start").onclick=async()=>{
   setStatus("Подготавливаем отправку видео на сервер…",2);
   try{
     const renderSettings={
-      style:"viral",
+      style:"brandly",
       video_format:settings.format,
       subtitles:settings.captions?"1":"0",
       broll:settings.images?"auto":"off",
@@ -351,7 +351,7 @@ $("start").onclick=async()=>{
     upload.append("render_settings",JSON.stringify(renderSettings));
     upload.append("init_data",initData);
 
-    setStatus("Видео ба сервер фиристода мешавад…",5);
+    setStatus("Видео бор шуда истодааст…",5);
     const created=await apiFetch("/api/jobs",{method:"POST",body:upload});
     const first=await created.json();
     const jobId=first.job_id;
