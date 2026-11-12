@@ -886,14 +886,14 @@ def with_glossary(prompt, glossary):
     return (prompt + " " + ", ".join(glossary))[:400]
 
 
-def accept_fix(old, new):
+def accept_fix(old, new, min_similarity=0.6):
     old_core, new_core = core_token(old).lower(), core_token(new).lower()
     if not new_core or len(new.strip()) > 40 or len(new.split()) != 1:
         return False
     if old_core == new_core:
         return False
     a, b = old_core.translate(TG_MAP), new_core.translate(TG_MAP)
-    if difflib.SequenceMatcher(None, a, b).ratio() < 0.6:
+    if difflib.SequenceMatcher(None, a, b).ratio() < min_similarity:
         return False
     return 0.5 <= len(new_core) / max(1, len(old_core)) <= 2.0
 
@@ -1033,7 +1033,7 @@ async def correct_transcript(words, language, glossary):
         if item.get("fixed"):
             continue
         core = core_token(new)
-        if accept_fix(item["word"], core):
+        if accept_fix(item["word"], core, min_similarity=0.45):
             apply_fix(item, core)
             changed += 1
     logger.info("Spelling fixes applied: %s", changed)
