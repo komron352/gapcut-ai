@@ -144,7 +144,8 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 <section class="card">
   <div class="heading">2. Стиль монтажа</div>
   <div class="styles" id="styles">
-    <button class="sty on" data-style="Viral">🔥 Viral<span>Динамичный</span></button>
+    <button class="sty on" data-style="Auto">✦ AUTO PRO<span>Полный AI-монтаж</span></button>
+    <button class="sty" data-style="Viral">🔥 Viral<span>Динамичный</span></button>
     <button class="sty" data-style="Classic">✨ Classic<span>Классический</span></button>
     <button class="sty" data-style="Cinema">🎬 Cinema<span>Кинематографичный</span></button>
     <button class="sty" data-style="Podcast">🎙 Podcast<span>Подкаст</span></button>
@@ -253,7 +254,7 @@ let selectedFile=null;
 let completedJobId=null;
 let transcriptLines=[];
 let settings={
-  style:"Viral", language:"ru", pauses:true, fillers:true,
+  style:"Auto", language:"ru", pauses:true, fillers:true,
   captions:true, images:true, format:"9:16", textSounds:true, font:""
 };
 let busy=false;
@@ -390,7 +391,10 @@ $("start").onclick=async()=>{
     if(transcript.status!=="done"){
       setStatus("Речь распознана. Начинаем AI-монтаж…",78);
       const render=new FormData();
-      render.append("style",settings.style.toLowerCase());
+      const autoPro=settings.style==="Auto";
+      // Auto Pro uses the existing viral subtitle renderer plus the backend's
+      // automatic editing pipeline. Existing named styles remain unchanged.
+      render.append("style",autoPro?"viral":settings.style.toLowerCase());
       render.append("video_format",settings.format);
       render.append("subtitles",settings.captions?"1":"0");
       render.append("broll",settings.images?"auto":"off");
@@ -398,6 +402,11 @@ $("start").onclick=async()=>{
       render.append("anim",settings.captions?"auto":"");
       render.append("anim_out",settings.captions?"auto":"");
       render.append("trans","auto");
+      render.append("cut",(settings.pauses||settings.fillers)?"normal":"off");
+      if(autoPro){
+        render.append("camera","dynamic");
+        render.append("grade","auto");
+      }
       render.append("sfx",settings.textSounds?"1":"0");
       render.append("sound",settings.textSounds?"normal":"off");
       render.append("zoom","1");
