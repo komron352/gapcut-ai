@@ -3557,10 +3557,7 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
         # Keep the speaker/video visible as a soft, cinematic blurred backdrop
         # while the relevant photo appears sharply in the foreground.
         graph.append(
-            f"[{label}]split=2[bg{number}][base{number}]"
-        )
-        graph.append(
-            f"[bg{number}]scale={width}:{height}:flags=bilinear,"
+            f"[{label}]scale={width}:{height}:flags=bilinear,"
             f"gblur=sigma=22:steps=2,eq=brightness=-0.10:saturation=0.88,"
             f"drawbox=x=0:y=0:w=iw:h=ih:color=black@0.16:t=fill,"
             f"format=yuva420p[blur{number}]"
