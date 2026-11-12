@@ -222,10 +222,44 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
     <div><b>AI: вставлять изображения и B-roll</b><small>Автоматически подбирает фото и видео по смыслу речи</small></div>
     <button class="sw on" data-setting="images"></button>
   </div>
+
+  <div class="setting">
+    <div><b>Интенсивность нарезки</b><small>Выберите, насколько плотно AI удаляет паузы</small></div>
+    <select id="cutMode" style="max-width:155px">
+      <option value="normal">Умная</option>
+      <option value="light">Лёгкая</option>
+      <option value="tight">Динамичная</option>
+      <option value="off">Без нарезки</option>
+    </select>
+  </div>
 </section>
 
 <section class="card">
-  <div class="heading">7. Формат видео</div>
+  <div class="heading">7. Дизайн субтитров</div>
+  <div class="setting">
+    <div><b>Размер текста</b><small>Размер субтитров в ролике</small></div>
+    <select id="captionSize" style="max-width:130px">
+      <option value="s">Маленький</option>
+      <option value="m" selected>Средний</option>
+      <option value="l">Крупный</option>
+    </select>
+  </div>
+  <div class="setting">
+    <div><b>Положение текста</b><small>Расположение субтитров</small></div>
+    <select id="captionPosition" style="max-width:130px">
+      <option value="auto">Авто</option>
+      <option value="center">По центру</option>
+      <option value="top">Сверху</option>
+    </select>
+  </div>
+  <div class="setting">
+    <div><b>Акцентный цвет</b><small>Цвет выделения важных слов</small></div>
+    <input id="captionAccent" type="color" value="#FF3D7F" style="width:55px;height:38px;border:0;background:transparent">
+  </div>
+</section>
+
+<section class="card">
+  <div class="heading">8. Формат видео</div>
   <select id="format">
     <option value="9:16">9:16 — Reels / TikTok / Shorts</option>
     <option value="16:9">16:9 — YouTube</option>
@@ -255,7 +289,8 @@ let completedJobId=null;
 let transcriptLines=[];
 let settings={
   style:"Auto", language:"ru", pauses:true, fillers:true,
-  captions:true, images:true, format:"9:16", textSounds:true, font:""
+  captions:true, images:true, format:"9:16", textSounds:true, font:"",
+  cutMode:"normal", captionSize:"m", captionPosition:"auto", captionAccent:"#FF3D7F"
 };
 let busy=false;
 
@@ -329,6 +364,10 @@ document.querySelectorAll(".sw").forEach(b=>b.onclick=()=>{
   settings[b.dataset.setting]=b.classList.contains("on");
 });
 $("format").onchange=e=>settings.format=e.target.value;
+$("cutMode").onchange=e=>settings.cutMode=e.target.value;
+$("captionSize").onchange=e=>settings.captionSize=e.target.value;
+$("captionPosition").onchange=e=>settings.captionPosition=e.target.value;
+$("captionAccent").onchange=e=>settings.captionAccent=e.target.value;
 
 async function loadFonts(){
   try{
@@ -402,7 +441,10 @@ $("start").onclick=async()=>{
       render.append("anim",settings.captions?"auto":"");
       render.append("anim_out",settings.captions?"auto":"");
       render.append("trans","auto");
-      render.append("cut",(settings.pauses||settings.fillers)?"normal":"off");
+      render.append("cut",(settings.pauses||settings.fillers)?settings.cutMode:"off");
+      render.append("size",settings.captionSize);
+      render.append("position",settings.captionPosition);
+      render.append("accent",settings.captionAccent.replace("#",""));
       if(autoPro){
         render.append("camera","auto");
         render.append("grade","auto");
