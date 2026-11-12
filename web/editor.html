@@ -133,9 +133,9 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
   <div class="drop" id="drop">
     <div class="upload-icon">🎬</div>
     <b>Выберите видео</b>
-    <p>MP4, MOV • До 100 MB</p>
+    <p>MP4, MOV, AVI, MKV, WEBM и другие • До 100 MB</p>
     <button class="btn" id="choose">Выбрать видео</button>
-    <input type="file" id="file" accept="video/*" hidden>
+    <input type="file" id="file" accept="video/*,.avi,.flv,.wmv,.3gp,.3g2,.mpeg,.mpg,.ts,.mts,.m2ts,.vob,.ogv,.mxf,.asf,.f4v" hidden>
   </div>
   <video id="videoPreview" controls class="hidden"></video>
   <div class="file-name" id="fileName"></div>
@@ -343,7 +343,7 @@ async function downloadJob(jobId){
 $("choose").onclick=()=>$("file").click();
 $("file").onchange=e=>{
   const f=e.target.files[0];if(!f)return;
-  if(!f.type.startsWith("video/")){alert("Выберите видеофайл");return;}
+  // MIME types vary by device/container; the server validates the actual video stream.
   if(f.size>100*1024*1024){alert("Максимальный размер видео — 100 MB");return;}
   selectedFile=f;
   $("videoPreview").src=URL.createObjectURL(f);
