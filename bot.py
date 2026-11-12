@@ -2104,6 +2104,8 @@ def build_ass(words, style_name, width, height, output_path,
                 block = "\\N".join(pieces)
             elif mode in ("pop", "highlight"):
                 flagged = [i for i, t in enumerate(phrase) if t.get("key")]
+                if style_name == "brandly" and flagged:
+                    flagged = flagged[:1]
                 if not flagged:
                     flagged = [max(range(len(phrase)), key=lambda i: len(core_token(phrase[i]["word"])))]
                 block = " ".join(
