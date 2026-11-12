@@ -387,10 +387,19 @@ def require_user(*candidates):
 # =========================================================
 
 async def run_command(command, timeout=300, cwd=None, capture=False):
-    """Run a command; stderr goes to a temp file (small RAM footprint)."""
+    """Run a command with conservative FFmpeg threading for small Render instances."""
+    command = [str(part) for part in command]
+    if command and Path(command[0]).name == "ffmpeg":
+        # FFmpeg otherwise creates decoder/filter worker threads based on host CPU
+        # count; on a 512 MB instance their frame buffers can trigger an OOM restart.
+        command[1:1] = [
+            "-threads", "1",
+            "-filter_threads", "1",
+            "-filter_complex_threads", "1",
+        ]
     with tempfile.TemporaryFile(mode="w+b") as error_file:
         process = await asyncio.create_subprocess_exec(
-            *[str(part) for part in command],
+            *command,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=error_file,
@@ -3884,7 +3893,7 @@ async def render_video(
     command = [
         "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-progress", "pipe:1", "-nostats",
-        "-threads", "1", "-filter_threads", "1",
+        "-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1",
         "-i", str(input_path),
         *extra_inputs,
         "-t", f"{min(float(MAX_DURATION), duration):.3f}",
