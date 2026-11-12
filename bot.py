@@ -114,9 +114,25 @@ MAX_STORED_JOBS = int(os.getenv("MAX_STORED_JOBS", "10"))
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 CUSTOM_FONTS_DIR = "/usr/local/share/fonts/gapcut"
 FONT_CANDIDATES = [
-    ("Montserrat", 1), ("Oswald", 1), ("Roboto", 1), ("Inter", 1),
-    ("Open Sans", 1), ("Ubuntu", 1), ("Comfortaa", 1), ("Lobster", 0),
-    ("Bebas Neue", 0), ("Noto Sans", 1), ("Noto Serif", 0), ("DejaVu Sans", 1),
+    # Sans-serif / modern
+    ("Montserrat", 1), ("Inter", 1), ("Roboto", 1), ("Open Sans", 1),
+    ("Noto Sans", 1), ("Golos Text", 1), ("Manrope", 1), ("Fira Sans", 1),
+    ("PT Sans", 1), ("Source Sans 3", 1), ("Ubuntu", 1), ("Nunito", 1),
+    ("Raleway", 1), ("Arial", 1), ("Tahoma", 1), ("Verdana", 1),
+    ("Segoe UI", 1), ("Jost", 1), ("Work Sans", 1), ("IBM Plex Sans", 1),
+    ("Gilroy", 1), ("TT Norms", 1), ("TT Commons", 1), ("Rubik", 1),
+    ("Exo 2", 1), ("Roboto Condensed", 1), ("Fira Sans Condensed", 1),
+    # Display / bold
+    ("Oswald", 1), ("Bebas Neue", 1), ("Impact", 1), ("Roboto Slab", 1),
+    # Serif
+    ("Noto Serif", 1), ("Lora", 1), ("PT Serif", 1), ("Merriweather", 1),
+    ("Playfair Display", 1), ("Times New Roman", 1), ("Georgia", 1),
+    ("Bitter", 1), ("Crimson Text", 1), ("Literata", 1),
+    ("IBM Plex Serif", 1), ("Source Serif Pro", 1),
+    # Rounded / handwritten / mono
+    ("Caveat", 0), ("Comfortaa", 1), ("Pacifico", 0), ("Neucha", 0),
+    ("Marck Script", 0), ("Roboto Mono", 1), ("Fira Code", 1),
+    ("DejaVu Sans", 1),
 ]
 TAJIK_CHARSET = "493 4e3 49b 4ef 4b3 4b7 492 4e2 49a 4ee 4b2 4b6"
 AVAILABLE_FONTS = [{"family": "DejaVu Sans", "bold": 1}]
