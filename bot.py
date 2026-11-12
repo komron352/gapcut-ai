@@ -2562,6 +2562,12 @@ def fallback_broll_moments(words, duration, limit):
         token = re.sub(r"[^а-яёғӣқӯҳҷa-z0-9-]", "", str(item.get("word", "")).lower())
         query = BROLL_TERMS.get(token)
         if not query:
+            # Handle common Tajik/Russian suffixes (plural, case endings) safely.
+            for stem in sorted(BROLL_TERMS, key=len, reverse=True):
+                if len(stem) >= 4 and token.startswith(stem):
+                    query = BROLL_TERMS[stem]
+                    break
+        if not query:
             continue
         at = float(item.get("start", 0) or 0)
         if at < 1.2 or at > duration - 2.0 or at - last_at < 7.0:
@@ -3630,9 +3636,22 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
         shift = f"setpts=PTS-STARTPTS+{start:.2f}/TB"
         new_label = f"v{number + 1}"
         if card.get("mode") == "full":
+            if card.get("kind") == "photo":
+                # Full-screen Ken Burns-style slow pan; the original speaker remains
+                # audible and the still image is visibly integrated into the timeline.
+                visual_scale = (
+                    f"scale={int(width * 1.12)}:{int(height * 1.12)}:"
+                    f"force_original_aspect_ratio=increase,"
+                    f"crop={width}:{height}:"
+                    f"x='(iw-ow)*(0.5+0.12*sin(t*1.1))':y='(ih-oh)*0.5'"
+                )
+            else:
+                visual_scale = (
+                    f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                    f"crop={width}:{height}"
+                )
             graph.append(
-                f"[{input_index}:v]fps=30,scale={width}:{height}:"
-                f"force_original_aspect_ratio=increase,crop={width}:{height},"
+                f"[{input_index}:v]fps=30,{visual_scale},"
                 f"setsar=1,format=yuva420p,{shift},"
                 f"fade=t=in:st={start:.2f}:d=0.15:alpha=1,"
                 f"fade=t=out:st={max(start, end - 0.15):.2f}:d=0.15:alpha=1[c{number}]"
