@@ -3738,6 +3738,31 @@ async def render_video(
     _, _, display_width, display_height = probe_summary(info)
     width, height = get_output_size(video_format, display_width, display_height)
 
+    # Render from a low-memory proxy instead of decoding the original camera file
+    # throughout the complex subtitle/B-roll filter graph. Preserve aspect ratio,
+    # cap the long edge at 960 px, and normalize to 24 fps.
+    proxy_scale = min(1.0, 960.0 / max(width, height))
+    proxy_width = even(width * proxy_scale)
+    proxy_height = even(height * proxy_scale)
+    proxy_path = work_dir / "render_proxy.mp4"
+    await run_command([
+        "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-i", str(input_path),
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-vf", f"scale={proxy_width}:{proxy_height}:flags=bilinear,setsar=1,fps=24",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "29",
+        "-pix_fmt", "yuv420p", "-threads", "1",
+        "-c:a", "aac", "-b:a", "96k", "-ac", "2",
+        "-t", f"{min(float(MAX_DURATION), duration):.3f}",
+        "-movflags", "+faststart", str(proxy_path),
+    ], timeout=300, cwd=work_dir)
+    proxy_info, proxy_duration = await get_video_info(proxy_path)
+    input_path = proxy_path
+    info = proxy_info
+    duration = min(float(duration), float(proxy_duration))
+    _, _, display_width, display_height = probe_summary(info)
+    width, height = get_output_size(video_format, display_width, display_height)
+
     segments = None
     cut_points = []
     level = options.get("cut", "off")
