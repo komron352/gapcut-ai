@@ -106,7 +106,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 # Render Free: conservative limits.
 MAX_INPUT_SIZE = 100 * 1024 * 1024
 MAX_OUTPUT_SIZE = 150 * 1024 * 1024
-MAX_DURATION = 15
+MAX_DURATION = 60
 UPLOAD_CHUNK_SIZE = 256 * 1024
 GROQ_MAX_AUDIO_SIZE = 24 * 1024 * 1024
 
@@ -222,7 +222,7 @@ async def start_handler(message: Message):
         "🎨 5 стилей субтитров\n"
         "📱 Форматы Reels, TikTok и YouTube\n\n"
         "📦 Максимальный размер: 100 MB\n"
-        "⏱ Максимальная длительность: 15 секунд\n\n"
+        "⏱ Максимальная длительность: 60 секунд\n\n"
         "Нажмите «Начать монтаж», чтобы начать."
     )
     await message.answer(text, reply_markup=main_keyboard())
@@ -237,7 +237,7 @@ async def help_handler(message: Message):
         "3. Выберите язык, стиль и формат.\n"
         "4. Запустите обработку.\n\n"
         "📦 Максимальный размер: 100 MB\n"
-        "⏱ Максимальная длительность: 15 секунд\n\n"
+        "⏱ Максимальная длительность: 60 секунд\n\n"
         f"💬 Поддержка: {SUPPORT_URL}\n"
         f"📢 Канал: {CHANNEL_URL}"
     )
