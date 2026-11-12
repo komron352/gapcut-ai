@@ -3554,13 +3554,20 @@ def build_graph(words, base_filter, width, height, duration, options, ass_name,
             f"if(lte(hypot(abs(W/2-X)-(W/2-{radius}),abs(H/2-Y)-(H/2-{radius})),{radius}),255,0),255)',"
             f"{shift}[c{number}]"
         )
+        # Keep the speaker/video visible as a soft, cinematic blurred backdrop
+        # while the relevant photo appears sharply in the foreground.
         graph.append(
-            f"[{label}]drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:"
-            f"enable='between(t,{start:.2f},{end:.2f})'[w{number}]"
+            f"[{label}]split=2[bg{number}][base{number}]"
         )
         graph.append(
-            f"[w{number}][c{number}]overlay="
-            f"x='(W-w)/2+W*pow(1-min(1,max(0,(t-{start:.2f})/0.28)),3)':"
+            f"[bg{number}]scale={width}:{height}:flags=bilinear,"
+            f"gblur=sigma=22:steps=2,eq=brightness=-0.10:saturation=0.88,"
+            f"drawbox=x=0:y=0:w=iw:h=ih:color=black@0.16:t=fill,"
+            f"format=yuva420p[blur{number}]"
+        )
+        graph.append(
+            f"[blur{number}][c{number}]overlay="
+            f"x='(W-w)/2+W*pow(1-min(1,max(0,(t-{start:.2f})/0.32)),3)':"
             f"y='(H-h)/2':enable='between(t,{start:.2f},{end:.2f})':format=auto"
             f"[{new_label}]"
         )
