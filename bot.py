@@ -912,10 +912,31 @@ def apply_fix(item, new_core):
 
 def dictionary_fixes(words):
     count = 0
+
+    # High-confidence corrections observed in Tajik speech recognition.
+    # Keep a strict one-token-to-one-token mapping so subtitle timestamps
+    # remain aligned with the original audio.
+    common_tajik_fixes = {
+        "ке": "ки",
+        "имруз": "имрӯз",
+        "експерти": "экспертӣ",
+        "експерті": "экспертӣ",
+        "стартіг": "старти",
+        "стартиг": "старти",
+        "курсі": "курси",
+    }
+
     for item in words:
         if item.get("lang") != "tg":
             continue
+
         core = core_token(item["word"])
+        direct = common_tajik_fixes.get(core.lower())
+        if direct and direct != core:
+            apply_fix(item, direct)
+            count += 1
+            continue
+
         key = tg_key(item["word"])
         target = TAJIK_INDEX.get(key)
         if not target or len(key) < 3 or core.lower() == target:
