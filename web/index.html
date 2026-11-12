@@ -50,6 +50,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #8b3dff;outline-offset:2p
 
   <section class="tab on" id="t-home">
     <button class="hero" id="newBtn"><span><b id="newT"></b><small id="newS"></small></span><span class="plus">+</span></button>
+    <div class="card" style="margin-top:14px"><a class="item" id="photoBtn" href="photo.html"><i>🖼️</i><b id="photoT"></b><span id="photoS">›</span></a></div>
     <div class="row"><b id="lastT"></b></div>
     <div class="empty"><span id="lastE"></span><br><button class="btn" data-go id="lastB"></button></div>
   </section>
@@ -89,8 +90,8 @@ if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#ffffff");tg.setBackgroundC
 const EDITOR="editor.html",SUPPORT="https://t.me/aikomron",CHANNEL="https://t.me/gapcutai",API="https://gapcut-ai.onrender.com";
 const $=id=>document.getElementById(id);
 const T={
-ru:{newT:"Новый ролик",newS:"Загрузите видео — смонтируем за пару минут",lastT:"Последнее",lastE:"Здесь появятся ваши ролики. Пока пусто.",lastB:"Создать ролик",resT:"Мои ролики",resE:"Пока у вас нет готовых роликов. Создайте первое видео.",resB:"Создать ролик",n1:"Главная",n2:"Мои ролики",n3:"Монтаж",n4:"Поддержка",n5:"Профиль",profT:"Профиль",langL:"Язык интерфейса",langV:"Русский",supL:"Поддержка",chL:"Наш канал",aboutL:"О приложении",guest:"Гость",tgId:"Telegram ID",prem:"Premium"},
-tg:{newT:"Видеои нав",newS:"Видеоро бор кунед — дар чанд дақиқа монтаж мекунем",lastT:"Охирин",lastE:"Дар ин ҷо видеоҳои шумо пайдо мешаванд. Ҳоло холӣ аст.",lastB:"Сохтани видео",resT:"Видеоҳои ман",resE:"Ҳоло видеои тайёр надоред. Видеои аввалини худро созед.",resB:"Сохтани видео",n1:"Асосӣ",n2:"Видеоҳои ман",n3:"Монтаж",n4:"Дастгирӣ",n5:"Профил",profT:"Профил",langL:"Забони интерфейс",langV:"Тоҷикӣ",supL:"Дастгирӣ",chL:"Канали мо",aboutL:"Дар бораи барнома",guest:"Меҳмон",tgId:"Telegram ID",prem:"Premium"}
+ru:{newT:"Новый ролик",newS:"Загрузите видео — смонтируем за пару минут",photoT:"Создать фото",lastT:"Последнее",lastE:"Здесь появятся ваши ролики. Пока пусто.",lastB:"Создать ролик",resT:"Мои ролики",resE:"Пока у вас нет готовых роликов. Создайте первое видео.",resB:"Создать ролик",n1:"Главная",n2:"Мои ролики",n3:"Монтаж",n4:"Поддержка",n5:"Профиль",profT:"Профиль",langL:"Язык интерфейса",langV:"Русский",supL:"Поддержка",chL:"Наш канал",aboutL:"О приложении",guest:"Гость",tgId:"Telegram ID",prem:"Premium"},
+tg:{newT:"Видеои нав",newS:"Видеоро бор кунед — дар чанд дақиқа монтаж мекунем",photoT:"Сохтани акс",lastT:"Охирин",lastE:"Дар ин ҷо видеоҳои шумо пайдо мешаванд. Ҳоло холӣ аст.",lastB:"Сохтани видео",resT:"Видеоҳои ман",resE:"Ҳоло видеои тайёр надоред. Видеои аввалини худро созед.",resB:"Сохтани видео",n1:"Асосӣ",n2:"Видеоҳои ман",n3:"Монтаж",n4:"Дастгирӣ",n5:"Профил",profT:"Профил",langL:"Забони интерфейс",langV:"Тоҷикӣ",supL:"Дастгирӣ",chL:"Канали мо",aboutL:"Дар бораи барнома",guest:"Меҳмон",tgId:"Telegram ID",prem:"Premium"}
 };
 const user=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user)||null;
 let L=(user&&user.language_code==="tg")?"tg":"ru";
@@ -101,7 +102,7 @@ function render(){
   const t=T[L];document.documentElement.lang=L;
   const full=user?[user.first_name,user.last_name].filter(Boolean).join(" "):"";
   const name=full||t.guest;
-  ["newT","newS","lastT","lastE","lastB","resT","resE","resB","n1","n2","n3","n4","n5","profT","langL","langV","supL","chL","aboutL"].forEach(k=>$(k).textContent=t[k]);
+  ["newT","newS","photoT","lastT","lastE","lastB","resT","resE","resB","n1","n2","n3","n4","n5","profT","langL","langV","supL","chL","aboutL"].forEach(k=>$(k).textContent=t[k]);
   $("uname").textContent=name;$("uhandle").textContent=user&&user.username?"@"+user.username:"";
   const tags=[];if(user&&user.id)tags.push(t.tgId+": "+user.id);if(user&&user.is_premium)tags.push("⭐ "+t.prem);
   $("tags").innerHTML="";tags.forEach(x=>{const s=document.createElement("span");s.className="tag";s.textContent=x;$("tags").appendChild(s)});
