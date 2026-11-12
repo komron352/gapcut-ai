@@ -316,18 +316,19 @@ async function apiFetch(path,options={}){
 }
 async function waitForJob(jobId,onUpdate){
   const started=Date.now();
-  while(Date.now()-started<10*60*1000){
+  // Polling is only for displaying progress. The server-side job keeps running
+  // if Telegram or this Mini App is closed after the upload is accepted.
+  while(Date.now()-started<30*60*1000){
     const response=await apiFetch("/api/jobs/"+encodeURIComponent(jobId),{
       headers:{"X-Init-Data":getInitData()}
     });
     const job=await response.json();
     onUpdate(job);
     if(job.status==="error") throw new Error(job.error||"Не удалось обработать видео.");
-    if(job.status==="transcribed") return job;
     if(job.status==="done") return job;
-    await new Promise(resolve=>setTimeout(resolve,2500));
+    await new Promise(resolve=>setTimeout(resolve,3000));
   }
-  throw new Error("Обработка заняла слишком много времени. Попробуйте ещё раз.");
+  throw new Error("Видео ҳоло коркард шуда истодааст. Аз Telegram ба «Мои ролики» дароед — сервер монтажро идома медиҳад.");
 }
 async function downloadJob(jobId){
   const response=await apiFetch("/api/jobs/"+encodeURIComponent(jobId)+"/download",{
@@ -405,79 +406,60 @@ $("start").onclick=async()=>{
     return;
   }
   busy=true;$("start").disabled=true;
-  setStatus("Кнопка сработала. Подготавливаем отправку видео…",2);
+  setStatus("Подготавливаем отправку видео на сервер…",2);
   try{
-    setStatus("Отправляем видео на сервер GAPCUT AI…",3);
+    const autoPro=settings.style==="Auto";
+    const renderSettings={
+      style:autoPro?"dynamic":settings.style.toLowerCase(),
+      video_format:settings.format,
+      subtitles:settings.captions?"1":"0",
+      broll:settings.images?"auto":"off",
+      cut:(settings.pauses||settings.fillers)?settings.cutMode:"off",
+      size:settings.captionSize,
+      position:settings.captionPosition,
+      accent:settings.captionAccent.replace("#",""),
+      sfx:settings.textSounds?"1":"0",
+      sound:settings.textSounds?"normal":"off",
+      camera:autoPro?"auto":"",
+      grade:autoPro?"auto":"off",
+      music:autoPro?"lofi":"auto",
+      music_level:"low",
+      music_sync:"1",
+      zoom:"1",
+      fx:"1",
+      anim:settings.captions?"auto":"",
+      anim_out:settings.captions?"auto":"",
+      trans:"auto",
+      font:settings.font,
+      fontmix:autoPro?"1":"0"
+    };
     const upload=new FormData();
     upload.append("file",selectedFile,selectedFile.name);
     upload.append("language",settings.language);
     upload.append("quality","fast");
+    upload.append("render_settings",JSON.stringify(renderSettings));
     upload.append("init_data",initData);
+
+    setStatus("Видео ба сервер фиристода мешавад…",5);
     const created=await apiFetch("/api/jobs",{method:"POST",body:upload});
     const first=await created.json();
     const jobId=first.job_id;
-    if(!jobId)throw new Error("Сервер не вернул номер задачи.");
+    if(!jobId)throw new Error("Сервер рақами вазифаро барнагардонд.");
 
-    const transcript=await waitForJob(jobId,job=>{
+    setStatus("Видео қабул шуд. Акнун сервер мустақилона монтаж мекунад — метавонед Telegram-ро пӯшед.",10);
+    const finished=await waitForJob(jobId,job=>{
       const p=job.progress||0;
-      setStatus((job.stage||"Распознаём речь")+" · "+p+"%",Math.max(5,Math.min(75,p*.75)));
-    });
-    if(transcript.status!=="transcribed" && transcript.status!=="done"){
-      throw new Error("Не удалось подготовить текст видео.");
-    }
-    transcriptLines=Array.isArray(transcript.lines)?transcript.lines:[];
-    $("subtitle").value=transcriptLines.map(line=>line.text||"").join("\n");
-    if(transcript.status!=="done"){
-      setStatus("Речь распознана. Начинаем AI-монтаж…",78);
-      const render=new FormData();
-      const autoPro=settings.style==="Auto";
-      // Auto Pro uses the existing viral subtitle renderer plus the backend's
-      // automatic editing pipeline. Existing named styles remain unchanged.
-      render.append("style",autoPro?"dynamic":settings.style.toLowerCase());
-      render.append("video_format",settings.format);
-      render.append("subtitles",settings.captions?"1":"0");
-      render.append("broll",settings.images?"auto":"off");
-      // Auto-select every AI-recommended B-roll asset so photos/videos are
-      // actually downloaded and composited into the final timeline.
-      const autoCards=Array.isArray(transcript.cards)?transcript.cards:[];
-      render.append("cards",JSON.stringify(settings.images?autoCards.map(card=>card.id):[]));
-      // AI chooses a suitable text animation and transition for each phrase.
-      render.append("anim",settings.captions?"auto":"");
-      render.append("anim_out",settings.captions?"auto":"");
-      render.append("trans","auto");
-      render.append("cut",(settings.pauses||settings.fillers)?settings.cutMode:"off");
-      render.append("size",settings.captionSize);
-      render.append("position",settings.captionPosition);
-      render.append("accent",settings.captionAccent.replace("#",""));
-      if(autoPro){
-        render.append("camera","auto");
-        render.append("grade","auto");
+      if(job.status==="transcribed"||job.status==="rendering"){
+        setStatus("Матн тайёр шуд — монтаж дар сервер идома дорад · "+p+"%",Math.max(15,Math.min(95,15+p*.8)));
+      }else{
+        setStatus((job.stage||"Коркард") +" · "+p+"%",Math.max(5,Math.min(90,p)));
       }
-      render.append("sfx",settings.textSounds?"1":"0");
-      render.append("sound",settings.textSounds?"normal":"off");
-      // Auto Pro: use a soft, original lo-fi instrumental under the voice.
-      // Keep the music subtle and align visual beats/transitions to its tempo.
-      render.append("music",autoPro?"lofi":"auto");
-      render.append("music_level","low");
-      render.append("music_sync","1");
-      render.append("zoom","1");
-      render.append("fx","1");
-      if(settings.font)render.append("font",settings.font);
-      // Auto Pro alternates subtitle font families phrase-by-phrase.
-      render.append("fontmix",autoPro?"1":"0");
-      const editedText=$("subtitle").value.split(/\r?\n/);
-      const editedLines=transcriptLines.map((line,index)=>({...line,text:(editedText[index]??line.text??"").trim()}));
-      render.append("lines",JSON.stringify(editedLines));
-      render.append("init_data",initData);
-      await apiFetch("/api/jobs/"+encodeURIComponent(jobId)+"/render",{method:"POST",body:render});
-      const finished=await waitForJob(jobId,job=>{
-        setStatus((job.stage||"Монтируем видео")+" · "+(job.progress||0)+"%",78+(job.progress||0)*.22);
-      });
-      if(finished.status!=="done")throw new Error("Видео не удалось смонтировать.");
-    }
+    });
+    transcriptLines=Array.isArray(finished.lines)?finished.lines:[];
+    $("subtitle").value=transcriptLines.map(line=>line.text||"").join("\n");
     completedJobId=jobId;
     $("downloadBtn").classList.remove("hidden");
-    setStatus("Видео готов! Нажмите «Скачать видео» или откройте чат с ботом — он отправит готовый ролик.",100);
+    setStatus("Видео тайёр шуд! Бот ҳам бояд ролики тайёрро ба Telegram фиристад.",100);
   }catch(error){
     console.error("GAPCUT AI processing error:",error);
     setStatus("Ошибка: "+(error.message||"Неизвестная ошибка"),0);
