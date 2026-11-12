@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>GAPCUT AI — Создать фото</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#fff;--soft:#f3f3f6;--line:#e7e7ee;--tx:#14131a;--mu:#85829a;--g:linear-gradient(135deg,#ffa31a,#ff3d7f 50%,#8b3dff)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 30px);background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:520px;margin:auto}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.back{border:0;background:var(--soft);border-radius:12px;padding:11px 15px;color:var(--tx);font-weight:800;font-size:16px}
+.logo{font-size:22px;font-weight:900}.logo i{font-style:normal;background:var(--g);-webkit-background-clip:text;color:transparent}
+h1{font-size:28px;margin:8px 0 5px}.sub{color:var(--mu);font-size:14px;line-height:1.5;margin-bottom:22px}
+.card{background:var(--soft);border-radius:20px;padding:17px;margin-bottom:15px}
+.heading{font-weight:800;font-size:15px;margin-bottom:12px}
+textarea,select{width:100%;border:1px solid var(--line);border-radius:13px;background:#fff;padding:14px;color:var(--tx);font:inherit;outline:none}
+textarea{min-height:115px;resize:vertical;line-height:1.45}
+select{height:48px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{display:block;font-size:12px;color:var(--mu);margin:0 0 7px}
+.btn{width:100%;border:0;border-radius:15px;padding:16px;background:var(--g);color:white;font-weight:900;font-size:16px}
+.btn:disabled{opacity:.5}
+.hint{font-size:12px;color:var(--mu);line-height:1.5;margin:10px 2px 0}
+.status{font-size:13px;color:var(--mu);text-align:center;margin:13px 0;white-space:pre-wrap}
+.preview{display:none;width:100%;border-radius:16px;background:#17141f;max-height:70vh;object-fit:contain}
+.actions{display:none;gap:10px;margin-top:12px}
+.actions button{flex:1;border:0;border-radius:13px;padding:13px;font-weight:800;background:#17141f;color:#fff}
+.actions .secondary{background:#fff;color:var(--tx);border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<main>
+<header><button class="back" id="back">←</button><div class="logo">GAPCUT<i>.</i></div><span>✦ AI</span></header>
+<h1>Создать фото</h1>
+<div class="sub">Опишите идею — AI создаст отдельное изображение. Эта функция не связана с монтажом видео.</div>
+<section class="card">
+  <div class="heading">1. Опишите изображение</div>
+  <textarea id="prompt" maxlength="1200" placeholder="Например: премиальная реклама нового смартфона, чёрный фон, золотое освещение, реалистичная студийная съёмка..."></textarea>
+  <div class="hint">Чем точнее описание, тем лучше результат. Не добавляйте личные данные.</div>
+</section>
+<section class="card">
+  <div class="heading">2. Стиль и размер</div>
+  <div class="grid">
+    <div><label for="style">Стиль</label><select id="style">
+      <option value="realistic">Realistic</option>
+      <option value="cinematic">Cinematic</option>
+      <option value="premium">Premium</option>
+      <option value="3d">3D Render</option>
+      <option value="viral">Viral / Social</option>
+      <option value="anime">Anime</option>
+    </select></div>
+    <div><label for="ratio">Формат</label><select id="ratio">
+      <option value="9:16">9:16 — Stories / Reels</option>
+      <option value="1:1">1:1 — Square</option>
+      <option value="16:9">16:9 — YouTube</option>
+    </select></div>
+  </div>
+</section>
+<button class="btn" id="generate">✦ Создать фото</button>
+<div class="status" id="status">Готово к созданию</div>
+<section class="card" id="result" style="display:none">
+  <div class="heading">Ваше изображение</div>
+  <img class="preview" id="preview" alt="Созданное AI изображение">
+  <div class="actions" id="actions">
+    <button id="save">⬇️ Скачать фото</button>
+    <button class="secondary" id="again">Создать ещё</button>
+  </div>
+</section>
+<div class="hint" style="text-align:center;margin-top:22px">GAPCUT AI · AI Photo Studio</div>
+</main>
+<script>
+const tg=window.Telegram?.WebApp;if(tg){tg.ready();tg.expand();}
+const API="https://gapcut-ai.onrender.com";
+const $=id=>document.getElementById(id);
+let imageBlob=null;
+$("back").onclick=()=>{if(history.length>1)history.back();else location.href="index.html";};
+function setStatus(s){$("status").textContent=s;}
+$("generate").onclick=async()=>{
+  const prompt=$("prompt").value.trim();
+  if(prompt.length<4){setStatus("Сначала напишите, какое фото нужно создать.");$("prompt").focus();return;}
+  if(!tg?.initData){setStatus("Откройте GAPCUT AI через Telegram-бота.");return;}
+  const button=$("generate");button.disabled=true;button.textContent="⏳ AI создаёт фото...";
+  $("result").style.display="none";$("actions").style.display="none";imageBlob=null;
+  setStatus("Отправляем описание генератору AI. Это может занять до минуты...");
+  try{
+    const body=new FormData();
+    body.append("prompt",prompt);
+    body.append("style",$("style").value);
+    body.append("ratio",$("ratio").value);
+    body.append("init_data",tg.initData);
+    const response=await fetch(API+"/api/images/generate",{method:"POST",body});
+    if(!response.ok){
+      let message="Не удалось создать фото ("+response.status+").";
+      try{const data=await response.json();if(data.detail)message=typeof data.detail==="string"?data.detail:JSON.stringify(data.detail);}catch(e){}
+      throw new Error(message);
+    }
+    const type=response.headers.get("content-type")||"image/jpeg";
+    if(!type.startsWith("image/"))throw new Error("Сервер вернул не изображение.");
+    imageBlob=await response.blob();
+    const url=URL.createObjectURL(imageBlob);
+    $("preview").src=url;$("preview").style.display="block";
+    $("result").style.display="block";$("actions").style.display="flex";
+    setStatus("Готово! Фото создано.");
+  }catch(error){setStatus("Ошибка: "+(error.message||"Попробуйте ещё раз."));}
+  finally{button.disabled=false;button.textContent="✦ Создать фото";}
+};
+$("save").onclick=()=>{
+  if(!imageBlob)return;
+  const url=URL.createObjectURL(imageBlob),a=document.createElement("a");
+  a.href=url;a.download="GAPCUT_AI_photo.jpg";document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+};
+$("again").onclick=()=>{window.scrollTo({top:0,behavior:"smooth"});$("prompt").focus();};
+</script>
+</body>
+</html>
