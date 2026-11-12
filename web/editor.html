@@ -437,6 +437,10 @@ $("start").onclick=async()=>{
       render.append("video_format",settings.format);
       render.append("subtitles",settings.captions?"1":"0");
       render.append("broll",settings.images?"auto":"off");
+      // Auto-select every AI-recommended B-roll asset so photos/videos are
+      // actually downloaded and composited into the final timeline.
+      const autoCards=Array.isArray(transcript.cards)?transcript.cards:[];
+      render.append("cards",JSON.stringify(settings.images?autoCards.map(card=>card.id):[]));
       // AI chooses a suitable text animation and transition for each phrase.
       render.append("anim",settings.captions?"auto":"");
       render.append("anim_out",settings.captions?"auto":"");
@@ -451,13 +455,16 @@ $("start").onclick=async()=>{
       }
       render.append("sfx",settings.textSounds?"1":"0");
       render.append("sound",settings.textSounds?"normal":"off");
-      // Auto Pro: generate a topic-matched background score and sync visual beats.
-      render.append("music","auto");
-      render.append("music_level","normal");
+      // Auto Pro: use a soft, original lo-fi instrumental under the voice.
+      // Keep the music subtle and align visual beats/transitions to its tempo.
+      render.append("music",autoPro?"lofi":"auto");
+      render.append("music_level","low");
       render.append("music_sync","1");
       render.append("zoom","1");
       render.append("fx","1");
       if(settings.font)render.append("font",settings.font);
+      // Auto Pro alternates subtitle font families phrase-by-phrase.
+      render.append("fontmix",autoPro?"1":"0");
       const editedText=$("subtitle").value.split(/\r?\n/);
       const editedLines=transcriptLines.map((line,index)=>({...line,text:(editedText[index]??line.text??"").trim()}));
       render.append("lines",JSON.stringify(editedLines));
