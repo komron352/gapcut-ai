@@ -148,7 +148,7 @@ BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
 FONTS_DIR = Path(os.getenv("FONTS_DIR", str(Path(__file__).resolve().parent / "fonts")))
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".flv", ".wmv", ".3gp", ".3g2", ".mpeg", ".mpg", ".ts", ".mts", ".m2ts", ".vob", ".ogv", ".mxf", ".asf", ".f4v"}
-ALLOWED_STYLES = {"viral", "classic", "cinema", "podcast", "karaoke", "creator", "keyword", "minimal", "dynamic"}
+ALLOWED_STYLES = {"viral", "brandly", "classic", "cinema", "podcast", "karaoke", "creator", "keyword", "minimal", "dynamic"}
 ALLOWED_FORMATS = {"9:16", "16:9", "1:1", "original"}
 ALLOWED_LANGUAGES = {"tg", "ru", "tg_ru"}
 LANGUAGE_ALIASES = {"both": "tg_ru", "tg+ru": "tg_ru", "tg-ru": "tg_ru"}
@@ -1424,6 +1424,13 @@ def lines_to_words(lines, duration):
 # Colors are RGB hex here and converted to ASS (BGR) when written.
 
 STYLES = {
+    "brandly": {
+        "font": "Noto Sans", "size": 92, "bold": 1, "spacing": 0,
+        "primary": "FFFFFF", "secondary": "FFFFFF", "active": "4AA8FF",
+        "outline": "000000", "outline_w": 7, "shadow": 3,
+        "border_style": 1, "box_alpha": 0, "mode": "pop",
+        "max_words": 4, "max_chars": 34, "upper": True, "margin": 0.22,
+    },
     "viral": {
         "font": "Noto Sans", "size": 92, "bold": 1, "spacing": 0,
         "primary": "FFFFFF", "secondary": "FFFFFF", "active": "FFE500",
@@ -2029,6 +2036,9 @@ def build_ass(words, style_name, width, height, output_path,
 
     def colored(phrase):
         flagged = [i for i, t in enumerate(phrase) if t.get("key")]
+        # Brandly emphasizes one main keyword per caption card.
+        if style_name == "brandly" and flagged:
+            flagged = flagged[:1]
         if not keys or not flagged:
             return " ".join(display(t["word"]) for t in phrase)
         key_col = ass_tag_color(accent or "F5B937")
