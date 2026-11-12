@@ -1364,26 +1364,6 @@ def make_lines(words, max_words=7, max_chars=42, max_gap=0.8):
     return lines
 
 
-def brandly_cta_label(words):
-    """Return a short CTA only when the speaker explicitly says one."""
-    tail = " ".join(str(item.get("word", "")).lower() for item in words[-18:])
-    compact = re.sub(r"[^а-яёғӣқӯҳҷa-z0-9]+", " ", tail).strip()
-    rules = (
-        (("обуна шавед", "подписывайтесь", "подпишитесь"), "ОБУНА ШАВЕД"),
-        (("нависед", "пишите", "напишите"), "НАВИСЕД / НАПИШИТЕ"),
-        (("занг занед", "звоните", "позвоните"), "ТАМОС ГИРЕД"),
-        (("тамос гиред", "связаться с нами", "свяжитесь"), "ТАМОС ГИРЕД"),
-        (("фармоиш диҳед", "заказывайте", "закажите"), "ФАРМОИШ ДИҲЕД"),
-        (("сабт шавед", "записывайтесь", "запишитесь"), "САБТ ШАВЕД"),
-        (("директ", "direct"), "ДАР DIRECT НАВИСЕД"),
-        (("комментария", "комментарий", "шарҳ"), "ФИКРАТОНРО НАВИСЕД"),
-    )
-    for triggers, label in rules:
-        if any(trigger in compact for trigger in triggers):
-            return label
-    return ""
-
-
 def lines_to_words(lines, duration):
     """Turn edited lines back into timed words."""
     if not isinstance(lines, list) or not lines:
@@ -3842,20 +3822,6 @@ async def render_video(
             anim_out=options.get("anim_out"),
             anim_log=anim_log,
         )
-        if style_name == "brandly":
-            cta_label = brandly_cta_label(words)
-            if cta_label:
-                cta_start = max(0.0, duration - 2.6)
-                cta_event = (
-                    f"Dialogue: 2,{ass_time(cta_start)},{ass_time(duration)},F0,,0,0,0,,"
-                    f"{{\\an8\\pos({width // 2},{int(height * 0.13)})"
-                    f"\\fs{max(34, int(height * 0.052))}\\b1"
-                    f"\\1c&H00FFA84A&\\3c&H00101010&\\bord8\\shad3}}"
-                    f"{escape_ass_text(cta_label)}\\n"
-                )
-                with (Path(work_dir) / ass_name).open("a", encoding="utf-8") as ass_file:
-                    ass_file.write(cta_event)
-                logger.info("Brandly CTA overlay enabled: %s", cta_label)
     fonts_option = ""
     if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
         fonts_option = f":fontsdir={FONTS_DIR}"
