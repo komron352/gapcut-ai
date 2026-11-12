@@ -2519,32 +2519,95 @@ async def verify_candidates(client, phrase, query, candidates):
     return fallback
 
 
+# Deterministic Tajik/Russian -> English visual vocabulary.
+# This path works even when no paid LLM endpoint is configured.
+BROLL_TERMS = {
+    "мошин":"car", "автомобил":"car", "нақлиёт":"car", "машина":"car", "авто":"car",
+    "хона":"house", "бино":"building", "биноҳо":"buildings", "квартира":"apartment",
+    "мактаб":"school", "донишгоҳ":"university", "курс":"classroom", "курси":"classroom",
+    "телефон":"smartphone", "компютер":"computer", "ноутбук":"laptop", "интернет":"technology",
+    "пул":"money", "бизнес":"business", "корхона":"business office", "тиҷорат":"business",
+    "пизишк":"doctor", "духтур":"doctor", "беморхона":"hospital", "саломатӣ":"healthcare",
+    "варзиш":"fitness", "футбол":"football", "бозӣ":"sports", "давидан":"running",
+    "ғизо":"food", "таом":"food", "нон":"bread", "мева":"fruit", "сабзавот":"vegetables",
+    "об":"water", "қаҳва":"coffee", "чой":"tea", "ош":"pilaf food",
+    "сафар":"travel", "ҳавопаймо":"airplane", "самолёт":"airplane", "фурудгоҳ":"airport",
+    "меҳмонхона":"hotel", "баҳр":"sea", "кӯҳ":"mountain", "дарё":"river",
+    "тоҷикистон":"tajikistan landscape", "душанбе":"dushanbe city",
+    "либос":"clothing", "пойафзол":"shoes", "соат":"watch", "сумка":"bag",
+    "камера":"camera", "видео":"video camera", "акс":"photography",
+    "сохтмон":"construction", "коргар":"construction worker", "семент":"cement",
+    "энергия":"solar panels", "барқ":"electricity", "офтоб":"sun", "кишоварзӣ":"farming",
+    "гул":"flowers", "дарахт":"tree", "ҳайвон":"animals", "саг":"dog", "гурба":"cat",
+    "машина":"car", "дом":"house", "здание":"building", "школа":"school",
+    "университет":"university", "курс":"classroom", "обучение":"education",
+    "телефон":"smartphone", "компьютер":"computer", "ноутбук":"laptop",
+    "деньги":"money", "бизнес":"business", "работа":"office work", "компания":"office",
+    "врач":"doctor", "больница":"hospital", "здоровье":"healthcare",
+    "спорт":"fitness", "футбол":"football", "еда":"food", "пища":"food",
+    "хлеб":"bread", "фрукты":"fruit", "овощи":"vegetables", "вода":"water",
+    "кофе":"coffee", "чай":"tea", "плов":"pilaf food", "путешествие":"travel",
+    "самолет":"airplane", "аэропорт":"airport", "отель":"hotel", "море":"sea",
+    "горы":"mountains", "река":"river", "одежда":"clothing", "обувь":"shoes",
+    "часы":"watch", "сумка":"bag", "камера":"camera", "строительство":"construction",
+    "рабочий":"construction worker", "цемент":"cement", "электричество":"electricity",
+    "солнце":"sun", "сельское":"farming", "цветы":"flowers", "дерево":"tree",
+    "животные":"animals", "собака":"dog", "кошка":"cat",
+}
+
+def fallback_broll_moments(words, duration, limit):
+    picked = []
+    last_at = -99.0
+    for index, item in enumerate(words):
+        token = re.sub(r"[^а-яёғӣқӯҳҷa-z0-9-]", "", str(item.get("word", "")).lower())
+        query = BROLL_TERMS.get(token)
+        if not query:
+            continue
+        at = float(item.get("start", 0) or 0)
+        if at < 1.2 or at > duration - 2.0 or at - last_at < 7.0:
+            continue
+        picked.append({"index": index, "query": query, "confidence": 0.78,
+                       "reason": "Matched a concrete spoken topic"})
+        last_at = at
+        if len(picked) >= limit:
+            break
+    return picked
+
+
 async def suggest_broll(words, duration, client=None, topic=""):
-    """Return (moments, info). A moment: id, at, query, reason, conf, thumb, credit, alts."""
-    info = {"suggested": 0, "kept": 0}
-    if not (PIXABAY_API_KEY and LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 6 or duration < 6:
+    """Select relevant B-roll; has a no-LLM fallback and reports actual assets."""
+    info = {"suggested": 0, "kept": 0, "source": "none"}
+    if not PIXABAY_API_KEY or len(words) < 3 or duration < 6:
+        logger.warning("B-roll unavailable: Pixabay key missing or clip too short")
         return [], info
     own_client = client is None
     if own_client:
-        client = httpx.AsyncClient(timeout=25.0)
+        client = httpx.AsyncClient(timeout=35.0, follow_redirects=True)
     moments = []
     try:
         limit = max(1, min(5, int(duration // 9)))
-        numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
-        if topic:
-            numbered = f"Video topic: {topic}\n" + numbered
-        raw = await llm_json(
-            client,
-            "You are a video editor choosing B-roll. The speech is numbered word by word "
-            f"(Tajik or Russian). Choose at most {limit} moments where a stock photo or video "
-            "of a CONCRETE, clearly visual thing (object, place, activity, animal, food) "
-            "would help. Skip abstract ideas, feelings, greetings and filler. Answer only "
-            'with JSON: {"moments":[{"index":word index,"query":"2-3 word English stock '
-            'search","confidence":0..1,"reason":"short English reason"}]}.',
-            numbered,
-        )
+        raw = None
+        if LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM:
+            numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
+            if topic:
+                numbered = f"Video topic: {topic}\\n" + numbered
+            raw = await llm_json(
+                client,
+                "You are a professional video editor choosing B-roll. The speech is "
+                "Tajik or Russian. Choose concrete visual nouns and activities only; "
+                "never choose abstract concepts. Select well-spaced moments. Return JSON "
+                '{"moments":[{"index":0,"query":"2-3 English stock search words",'
+                '"confidence":0.0,"reason":"short reason"}]}.',
+                numbered,
+            )
+        proposed = (raw or {}).get("moments", []) if raw else []
+        if not proposed:
+            proposed = fallback_broll_moments(words, duration, limit)
+            info["source"] = "dictionary_fallback"
+        else:
+            info["source"] = "llm"
         last_at = -99.0
-        for item in (raw or {}).get("moments", [])[:8]:
+        for item in proposed[:max(limit * 2, 5)]:
             try:
                 index = int(item["index"])
                 query = str(item["query"]).strip()[:60]
@@ -2554,27 +2617,38 @@ async def suggest_broll(words, duration, client=None, topic=""):
                 continue
             if not (0 <= index < len(words)) or not query:
                 continue
-            at = words[index]["start"]
-            if at < 1.0 or at > duration - 2.0 or at - last_at < 8.0 or conf < 0.6:
+            at = float(words[index].get("start", 0) or 0)
+            if at < 1.0 or at > duration - 2.0 or at - last_at < 6.0 or conf < 0.55:
                 continue
             info["suggested"] += 1
             candidates = await find_candidates(client, query)
             if not candidates:
+                # Retry a shorter search phrase; Pixabay can be strict with long queries.
+                short_query = query.split()[0]
+                if short_query != query:
+                    candidates = await find_candidates(client, short_query)
+                    if candidates:
+                        query = short_query
+            if not candidates:
+                logger.info("No Pixabay B-roll candidates for query=%s", query)
                 continue
-            phrase = " ".join(w["word"] for w in words[max(0, index - 6):index + 7])
+            phrase = " ".join(w.get("word", "") for w in words[max(0, index - 5):index + 6])
             good = await verify_candidates(client, phrase, query, candidates)
-            alts = [candidates[i] for i in good][:3]
+            alts = [candidates[i] for i in good if 0 <= i < len(candidates)][:3]
+            # If verification service is unavailable, retain the first Pixabay result
+            # rather than silently dropping every image. Query itself is the relevance gate.
             if not alts:
-                continue
+                alts = candidates[:1]
             moments.append({
                 "id": len(moments), "at": round(at, 2), "query": query, "reason": reason,
-                "conf": round(conf, 2), "thumb": alts[0]["thumb"],
-                "credit": alts[0]["credit"], "alts": alts,
+                "conf": round(conf, 2), "thumb": alts[0].get("thumb", ""),
+                "credit": alts[0].get("credit", ""), "alts": alts,
             })
             last_at = at
             if len(moments) >= limit:
                 break
         info["kept"] = len(moments)
+        logger.info("B-roll selection: %s", info)
     except Exception:
         logger.warning("B-roll suggestion failed", exc_info=True)
     finally:
@@ -3611,7 +3685,7 @@ async def render_video(
     bmode = options.get("broll", "auto")
     cards0 = [] if bmode == "off" else list(options.get("cards") or [])
     for card in cards0:
-        card["mode"] = (("full" if card.get("kind") == "video" else "card")
+        card["mode"] = (("full" if card.get("kind") in ("video", "photo") else "card")
                         if bmode == "auto" else bmode)
         card["len"] = (min(3.0, max(1.8, card.get("dur") or 2.5))
                        if card.get("kind") == "video" else 1.9)
