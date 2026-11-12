@@ -196,7 +196,7 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
     <span class="chip">💫 3D / Slide</span>
   </div>
   <p style="font-size:12px;color:var(--mu);line-height:1.5;margin:0">
-    Звуки текста: Pop · Click · Whoosh · Impact. Фоновую музыку выберете отдельно.
+    Звуки текста: Pop · Click · Whoosh · Impact. AI автоматически подберёт фоновую музыку по теме и темпу видео.
   </p>
 </section>
 
@@ -451,6 +451,10 @@ $("start").onclick=async()=>{
       }
       render.append("sfx",settings.textSounds?"1":"0");
       render.append("sound",settings.textSounds?"normal":"off");
+      // Auto Pro: generate a topic-matched background score and sync visual beats.
+      render.append("music","auto");
+      render.append("music_level","normal");
+      render.append("music_sync","1");
       render.append("zoom","1");
       render.append("fx","1");
       if(settings.font)render.append("font",settings.font);
