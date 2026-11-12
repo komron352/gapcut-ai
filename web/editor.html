@@ -166,7 +166,23 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 </section>
 
 <section class="card">
-  <div class="heading">4. AI-анимация и звуки текста</div>
+  <div class="heading">4. Шрифт субтитров</div>
+  <label for="fontSelect" style="display:block;font-size:13px;color:var(--mu);margin-bottom:8px">
+    Выберите шрифт — пример ниже покажет его вид
+  </label>
+  <select id="fontSelect">
+    <option value="">Автоматический шрифт</option>
+  </select>
+  <div id="fontSample" style="margin-top:12px;padding:15px;border-radius:13px;background:#fff;text-align:center;font-size:21px;font-weight:700">
+    ҒУРӮҲИ ТОҶИКӢ · GAPCUT AI
+  </div>
+  <small id="fontStatus" style="display:block;color:var(--mu);margin-top:8px">
+    Загружаем доступные шрифты…
+  </small>
+</section>
+
+<section class="card">
+  <div class="heading">5. AI-анимация и звуки текста</div>
   <p style="font-size:13px;color:var(--mu);line-height:1.5;margin:0 0 12px">
     GAPCUT AI сам подберёт эффект для каждой фразы по смыслу и интонации.
   </p>
@@ -184,7 +200,7 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 </section>
 
 <section class="card">
-  <div class="heading">5. Настройки монтажа</div>
+  <div class="heading">6. Настройки монтажа</div>
 
   <div class="setting">
     <div><b>Удалить паузы</b><small>Автоматически убрать тишину</small></div>
@@ -208,7 +224,7 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 </section>
 
 <section class="card">
-  <div class="heading">6. Формат видео</div>
+  <div class="heading">7. Формат видео</div>
   <select id="format">
     <option value="9:16">9:16 — Reels / TikTok / Shorts</option>
     <option value="16:9">16:9 — YouTube</option>
@@ -238,7 +254,7 @@ let completedJobId=null;
 let transcriptLines=[];
 let settings={
   style:"Viral", language:"ru", pauses:true, fillers:true,
-  captions:true, images:false, format:"9:16", textSounds:true
+  captions:true, images:false, format:"9:16", textSounds:true, font:""
 };
 let busy=false;
 
@@ -313,6 +329,30 @@ document.querySelectorAll(".sw").forEach(b=>b.onclick=()=>{
 });
 $("format").onchange=e=>settings.format=e.target.value;
 
+async function loadFonts(){
+  try{
+    const response=await apiFetch("/api/fonts");
+    const data=await response.json();
+    const fonts=Array.isArray(data.fonts)?data.fonts:[];
+    const select=$("fontSelect");
+    fonts.forEach(name=>{
+      const option=document.createElement("option");
+      option.value=name;option.textContent=name;
+      select.appendChild(option);
+    });
+    $("fontStatus").textContent=fonts.length
+      ? fonts.length+" шрифтов доступны на сервере и проверены для букв тоҷикӣ."
+      : "Пока доступен только системный шрифт.";
+    select.onchange=()=>{
+      settings.font=select.value;
+      $("fontSample").style.fontFamily=select.value ? '"'+select.value+'",sans-serif' : 'sans-serif';
+    };
+  }catch(error){
+    $("fontStatus").textContent="Не удалось загрузить список шрифтов. Будет использован системный.";
+  }
+}
+loadFonts();
+
 $("start").onclick=async()=>{
   if(busy)return;
   if(!selectedFile){alert("Сначала выберите видео");return;}
@@ -358,6 +398,7 @@ $("start").onclick=async()=>{
       render.append("sound",settings.textSounds?"normal":"off");
       render.append("zoom","1");
       render.append("fx","1");
+      if(settings.font)render.append("font",settings.font);
       const editedText=$("subtitle").value.split(/\r?\n/);
       const editedLines=transcriptLines.map((line,index)=>({...line,text:(editedText[index]??line.text??"").trim()}));
       render.append("lines",JSON.stringify(editedLines));
