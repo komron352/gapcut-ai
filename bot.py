@@ -2603,7 +2603,8 @@ async def suggest_broll(words, duration, client=None, topic=""):
         client = httpx.AsyncClient(timeout=35.0, follow_redirects=True)
     moments = []
     try:
-        limit = max(1, min(5, int(duration // 9)))
+        # Brandly needs several short visual beats in its final B-roll outro.
+        limit = max(1, min(4, int(duration // 6)))
         raw = None
         if LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM:
             numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
@@ -2749,14 +2750,14 @@ TRANS_SOUND = {"whip": "whoosh", "swipe": "whoosh", "motion": "whoosh", "zoom": 
                "flash": "hit", "blur": "riser", "glitch": "click"}
 
 
-def plan_sound(duration, words, starts, trans_points, cards, anim_log, zoom_on):
+def plan_sound(duration, words, starts, trans_points, cards, anim_log, zoom_on, brandly=False):
     """Sound cues (time, kind, strength) tied to what happens on screen."""
     groups = []
     if words:
         groups.append([(max(0.0, words[0]["start"] - 0.02), "impact", 0.8)])
     group = []
     for card in cards:
-        group.append((card["at"], "hit" if card.get("mode") == "full" else "pop", 1.0))
+        group.append((card["at"], "whoosh" if brandly else ("hit" if card.get("mode") == "full" else "pop"), 1.0))
         if card["at"] >= 1.0:
             group.append((card["at"] - 0.9, "riser", 1.0))
     groups.append(group)
@@ -3746,6 +3747,24 @@ async def render_video(
             ])
             logger.info("Auto cut %s: %s segments, %.1fs", level, len(segments), duration)
 
+    # BRANDLY: reserve the closing visual section for full-screen B-roll.
+    # The original audio track remains underneath as voice-over.
+    if style_name == "brandly":
+        outro_cards = list(options.get("cards") or [])
+        if outro_cards:
+            outro_duration = min(11.0, max(4.0, duration * 0.55))
+            outro_start = max(0.0, duration - outro_duration)
+            slot = outro_duration / len(outro_cards)
+            scheduled = []
+            for index, card in enumerate(outro_cards):
+                item = dict(card)
+                item["at"] = round(outro_start + index * slot, 3)
+                item["len"] = round(slot, 3)
+                item["mode"] = "full"
+                scheduled.append(item)
+            options = dict(options, cards=scheduled, brandly_outro=True)
+            logger.info("Brandly B-roll outro: %s scenes over %.1fs", len(scheduled), outro_duration)
+
     scenes_final = []
     for scene in options.get("scenes") or []:
         a, b = float(scene["start"]), float(scene["end"])
@@ -3830,7 +3849,7 @@ async def render_video(
     if level in ("light", "normal", "strong"):
         cues = plan_sound(
             duration, words, starts, options.get("trans_points") or [], cards,
-            anim_log, bool(options.get("zoom")),
+            anim_log, bool(options.get("zoom")), brandly=(style_name == "brandly"),
         )
     music_info = None
     mean_db = None
