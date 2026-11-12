@@ -2099,8 +2099,9 @@ def build_ass(words, style_name, width, height, output_path,
             if anim_log is not None and in_name:
                 anim_log.append((phrase_start, in_name))
             out_name = anim_out if anim_out in ANIM_OUT else None
-            if anim_out == "auto" and p_index % 2 == 1:
-                out_name = ANIM_MIX_OUT[(p_index // 2) % len(ANIM_MIX_OUT)]
+            if anim_out == "auto":
+                # Give every sufficiently long phrase a visible, varied exit.
+                out_name = ANIM_MIX_OUT[p_index % len(ANIM_MIX_OUT)]
             events.extend(animated_phrase_events(
                 block, phrase_start, phrase_end, sname, in_name, out_name,
                 base_ctx, random.Random(p_index + 11),
