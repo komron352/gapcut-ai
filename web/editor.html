@@ -166,7 +166,25 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 </section>
 
 <section class="card">
-  <div class="heading">4. Настройки монтажа</div>
+  <div class="heading">4. AI-анимация и звуки текста</div>
+  <p style="font-size:13px;color:var(--mu);line-height:1.5;margin:0 0 12px">
+    GAPCUT AI сам подберёт эффект для каждой фразы по смыслу и интонации.
+  </p>
+  <div class="chips" style="margin-bottom:12px">
+    <span class="chip">✨ Pop-up</span>
+    <span class="chip">🌀 Bounce</span>
+    <span class="chip">⌨️ Typewriter</span>
+    <span class="chip">🎬 Fade / Zoom</span>
+    <span class="chip">⚡ Glitch</span>
+    <span class="chip">💫 3D / Slide</span>
+  </div>
+  <p style="font-size:12px;color:var(--mu);line-height:1.5;margin:0">
+    Звуки текста: Pop · Click · Whoosh · Impact. Фоновую музыку выберете отдельно.
+  </p>
+</section>
+
+<section class="card">
+  <div class="heading">5. Настройки монтажа</div>
 
   <div class="setting">
     <div><b>Удалить паузы</b><small>Автоматически убрать тишину</small></div>
@@ -190,7 +208,7 @@ footer {font-size:12px;color:var(--mu);text-align:center;margin-top:22px}
 </section>
 
 <section class="card">
-  <div class="heading">5. Формат видео</div>
+  <div class="heading">6. Формат видео</div>
   <select id="format">
     <option value="9:16">9:16 — Reels / TikTok / Shorts</option>
     <option value="16:9">16:9 — YouTube</option>
@@ -220,7 +238,7 @@ let completedJobId=null;
 let transcriptLines=[];
 let settings={
   style:"Viral", language:"ru", pauses:true, fillers:true,
-  captions:true, images:false, format:"9:16"
+  captions:true, images:false, format:"9:16", textSounds:true
 };
 let busy=false;
 
@@ -332,6 +350,14 @@ $("start").onclick=async()=>{
       render.append("video_format",settings.format);
       render.append("subtitles",settings.captions?"1":"0");
       render.append("broll",settings.images?"auto":"off");
+      // AI chooses a suitable text animation and transition for each phrase.
+      render.append("anim",settings.captions?"auto":"");
+      render.append("anim_out",settings.captions?"auto":"");
+      render.append("trans","auto");
+      render.append("sfx",settings.textSounds?"1":"0");
+      render.append("sound",settings.textSounds?"normal":"off");
+      render.append("zoom","1");
+      render.append("fx","1");
       const editedText=$("subtitle").value.split(/\r?\n/);
       const editedLines=transcriptLines.map((line,index)=>({...line,text:(editedText[index]??line.text??"").trim()}));
       render.append("lines",JSON.stringify(editedLines));
