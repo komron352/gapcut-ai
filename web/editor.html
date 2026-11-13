@@ -379,14 +379,17 @@ $("start").onclick=async()=>{
   setStatus("Подготавливаем отправку видео на сервер…",2);
   try{
     const renderSettings={
-      style:"brandly",
+      style:settings.style||"brandly",
       video_format:settings.format,
-      subtitles:settings.captions?"1":"0",\n      emojis:settings.emojis?"1":"0",\n      cards:settings.cards?"1":"0",\n      hook:settings.hook?"1":"0",
+      subtitles:settings.captions?"1":"0",
+      emojis:settings.emojis?"1":"0",
+      cards:settings.cards?"1":"0",
+      hook:settings.hook?"1":"0",
       broll:settings.images?"auto":"off",
-      cut:(settings.pauses||settings.fillers)?settings.cutMode:"off",
-      size:"l",
-      position:"center",
-      accent:"4AA8FF",
+      cut:settings.cutMode||"light",
+      size:settings.captionSize||"l",
+      position:settings.captionPosition||"auto",
+      accent:settings.accent||"4AA8FF",
       sfx:settings.textSounds?"1":"0",
       sound:settings.textSounds?"normal":"off",
       camera:settings.camera?"dynamic":"off",
@@ -399,7 +402,7 @@ $("start").onclick=async()=>{
       anim:settings.captions?"auto":"",
       anim_out:settings.captions?"auto":"",
       trans:"auto",
-      font:"",
+      font:settings.font||"",
       fontmix:"1"
     };
     const upload=new FormData();
