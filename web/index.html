@@ -42,6 +42,25 @@ nav .big i{width:62px;height:62px;margin:0 auto 4px;border-radius:50%;display:gr
 .job-card{background:var(--soft);border-radius:18px;padding:15px;margin:0 0 12px}.job-head{display:flex;align-items:center;gap:10px}.job-head b{flex:1;overflow-wrap:anywhere}.job-meta{font-size:12px;color:var(--mu);margin-top:7px}.job-actions{display:flex;gap:8px;margin-top:12px}.job-actions button{border:0;border-radius:12px;padding:11px 14px;font-weight:800;background:#17141f;color:#fff}.job-actions button:disabled{opacity:.5}
 button:focus-visible,a:focus-visible{outline:3px solid #8b3dff;outline-offset:2px}
 @media (prefers-reduced-motion:no-preference){.tab.on{animation:in .25s ease both}@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}}
+
+/* GAPCUT premium interface refresh — visual layer only */
+:root{--bg:#080b14;--soft:#111827;--line:rgba(148,163,184,.16);--tx:#f7f9ff;--mu:#98a5ba;--g:linear-gradient(135deg,#39b7ff,#5968ff 55%,#a855f7)}
+html,body{background:radial-gradient(100% 55% at 50% -10%,#1b2c52 0%,#080b14 68%);color:var(--tx)}
+body{padding-left:16px;padding-right:16px}
+.logo{letter-spacing:1.2px}.logo i{background:linear-gradient(110deg,#4fc3ff,#7885ff);-webkit-background-clip:text;background-clip:text}
+.top{margin-bottom:24px}.ava{border:1px solid rgba(255,255,255,.18);box-shadow:0 6px 22px #0008}
+.hero{min-height:154px;border:1px solid rgba(120,160,255,.24);border-radius:25px;background:radial-gradient(100% 130% at 100% 0%,#263f75 0%,transparent 55%),linear-gradient(145deg,#17243d,#101827 70%);box-shadow:0 18px 44px #0007}
+.hero b{font-size:26px;letter-spacing:-.6px}.hero small{color:#bac9e5}.plus{background:linear-gradient(135deg,#39b7ff,#5968ff);color:white;box-shadow:0 8px 24px #347dff55}
+.row{margin-top:28px}.row b{color:#f4f7ff}
+.empty,.card,.job-card{background:linear-gradient(145deg,#141d2e,#101725);border:1px solid var(--line);color:var(--tx)}
+.empty{color:#a8b4c9}.item{color:var(--tx);border-color:var(--line)}.item i{background:#1c2940;color:#8fcfff}
+.item span{color:#91a1bb}.who small,.job-meta{color:#9baac1}.tag{background:#1c2940;color:#c8dcff}
+h2{color:#f7f9ff}
+.btn{background:linear-gradient(110deg,#39b7ff,#5968ff 60%,#8b5cf6);box-shadow:0 10px 28px #356dff44}
+nav{background:rgba(12,18,31,.91);border:1px solid rgba(148,163,184,.2);box-shadow:0 12px 40px #0009}
+nav a,nav button{color:#91a0b8}nav .on{color:#fff}nav .big i{background:linear-gradient(135deg,#39b7ff,#5968ff 60%,#8b5cf6);box-shadow:0 10px 25px #356dff66,0 0 0 5px #0c1220}
+.job-actions button{background:#263b61;color:#fff}
+
 </style>
 </head>
 <body>
@@ -90,8 +109,8 @@ if(tg){tg.ready();tg.expand();try{tg.setHeaderColor("#ffffff");tg.setBackgroundC
 const EDITOR="editor.html",SUPPORT="https://t.me/aikomron",CHANNEL="https://t.me/gapcutai",API="https://gapcut-ai.onrender.com";
 const $=id=>document.getElementById(id);
 const T={
-ru:{newT:"Новый ролик",newS:"Загрузите видео — смонтируем за пару минут",photoT:"Создать фото",lastT:"Последнее",lastE:"Здесь появятся ваши ролики. Пока пусто.",lastB:"Создать ролик",resT:"Мои ролики",resE:"Пока у вас нет готовых роликов. Создайте первое видео.",resB:"Создать ролик",n1:"Главная",n2:"Мои ролики",n3:"Монтаж",n4:"Поддержка",n5:"Профиль",profT:"Профиль",langL:"Язык интерфейса",langV:"Русский",supL:"Поддержка",chL:"Наш канал",aboutL:"О приложении",guest:"Гость",tgId:"Telegram ID",prem:"Premium"},
-tg:{newT:"Видеои нав",newS:"Видеоро бор кунед — дар чанд дақиқа монтаж мекунем",photoT:"Сохтани акс",lastT:"Охирин",lastE:"Дар ин ҷо видеоҳои шумо пайдо мешаванд. Ҳоло холӣ аст.",lastB:"Сохтани видео",resT:"Видеоҳои ман",resE:"Ҳоло видеои тайёр надоред. Видеои аввалини худро созед.",resB:"Сохтани видео",n1:"Асосӣ",n2:"Видеоҳои ман",n3:"Монтаж",n4:"Дастгирӣ",n5:"Профил",profT:"Профил",langL:"Забони интерфейс",langV:"Тоҷикӣ",supL:"Дастгирӣ",chL:"Канали мо",aboutL:"Дар бораи барнома",guest:"Меҳмон",tgId:"Telegram ID",prem:"Premium"}
+ru:{newT:"Монтаж видео",newS:"Загрузите ролик — GAPCUT AI сделает профессиональный монтаж",photoT:"Создать фото",lastT:"Последнее",lastE:"Здесь появятся ваши ролики. Пока пусто.",lastB:"Создать ролик",resT:"Мои ролики",resE:"Пока у вас нет готовых роликов. Создайте первое видео.",resB:"Создать ролик",n1:"Главная",n2:"Мои ролики",n3:"Монтаж",n4:"Поддержка",n5:"Профиль",profT:"Профиль",langL:"Язык интерфейса",langV:"Русский",supL:"Поддержка",chL:"Наш канал",aboutL:"О приложении",guest:"Гость",tgId:"Telegram ID",prem:"Premium"},
+tg:{newT:"Монтажи видео",newS:"Видео бор кунед — GAPCUT AI монтажи касбӣ мекунад",photoT:"Сохтани акс",lastT:"Охирин",lastE:"Дар ин ҷо видеоҳои шумо пайдо мешаванд. Ҳоло холӣ аст.",lastB:"Сохтани видео",resT:"Видеоҳои ман",resE:"Ҳоло видеои тайёр надоред. Видеои аввалини худро созед.",resB:"Сохтани видео",n1:"Асосӣ",n2:"Видеоҳои ман",n3:"Монтаж",n4:"Дастгирӣ",n5:"Профил",profT:"Профил",langL:"Забони интерфейс",langV:"Тоҷикӣ",supL:"Дастгирӣ",chL:"Канали мо",aboutL:"Дар бораи барнома",guest:"Меҳмон",tgId:"Telegram ID",prem:"Premium"}
 };
 const user=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user)||null;
 let L=(user&&user.language_code==="tg")?"tg":"ru";
