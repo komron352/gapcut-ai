@@ -259,13 +259,20 @@ async def renderster_auto_edit(input_path, output_path, video_format="9:16", sty
                 output_url = edited.get("url") or status.get("output_url")
                 if not output_url:
                     raise UserError("Renderster видеои тайёрро барнагардонд.", 502)
+                # Only download signed output files hosted by Renderster.
+                parsed_output = urlparse(output_url)
+                if parsed_output.scheme != "https" or parsed_output.hostname != "renderster.com" or not parsed_output.path.startswith("/files/"):
+                    raise UserError("Renderster URL-и натиҷаи ғайриэътимоднок баргардонд.", 502)
                 download = await client.get(output_url)
                 download.raise_for_status()
+                if not download.content or not download.headers.get("content-type", "").startswith("video/"):
+                    raise UserError("Файли натиҷаи Renderster видео нест ё холӣ аст.", 502)
                 Path(output_path).write_bytes(download.content)
                 return {
                     "job_id": job_id,
                     "warnings": result.get("warnings") or [],
                     "credit_cost": status.get("credit_cost"),
+                    "edited": edited,
                 }
         raise UserError("Вақти интизории Renderster ба охир расид.", 504)
 
@@ -301,13 +308,15 @@ async def renderster_learn_style(input_path, style_name="GAPCUT AI Reference"):
             current = check.json()
             state = current.get("status") or current.get("state")
             if state == "failed":
-                raise UserError("Омӯзиши услуб ноком шуд: " + str(current.get("error") or "хатои номаълум")[:500], 502)
+                raise UserError("Омӯзиши услуб ноком шуд: " + str(current.get("error") or current.get("message") or "хатои номаълум")[:500], 502)
+            if state == "cancelled":
+                raise UserError("Омӯзиши услуб дар Renderster бекор карда шуд.", 502)
             if state == "completed":
                 learned = (current.get("result") or {}).get("learned_style") or {}
                 style_id = learned.get("id")
                 if not style_id:
                     raise UserError("Renderster ID-и услубро барнагардонд.", 502)
-                return {"style_id": style_id, "name": learned.get("name"), "credit_cost": current.get("credit_cost")}
+                return {"style_id": style_id, "name": learned.get("name"), "params": learned.get("params"), "credit_cost": current.get("credit_cost")}
         raise UserError("Вақти омӯзиши услуб ба охир расид.", 504)
 
 
