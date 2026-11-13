@@ -202,6 +202,11 @@ select,textarea{background:#15111e!important;border:1px solid #4a3e59!important;
 footer{color:#8e829f}
 @media(min-width:520px){main{max-width:520px}}
 
+
+/* iOS / Telegram WebView: let the real file input receive the tap */
+.file-picker-wrap{position:relative;width:100%;min-height:48px;margin-top:8px}
+.file-picker-wrap .btn{display:block;width:100%;height:48px;pointer-events:none}
+.file-input-overlay{position:absolute;inset:0;width:100%;height:100%;opacity:0;z-index:5;display:block;cursor:pointer;font-size:0}
 </style>
 
 </head>
@@ -227,8 +232,10 @@ footer{color:#8e829f}
   <div class="drop" id="drop">
     <b>Видеоро интихоб кунед</b>
     <p>MP4, MOV, AVI, MKV, WEBM · то 100 MB</p>
-    <button class="btn" id="choose">＋ Интихоби видео</button>
-    <input type="file" id="file" accept="video/*,.avi,.flv,.wmv,.3gp,.3g2,.mpeg,.mpg,.ts,.mts,.m2ts,.vob,.ogv,.mxf,.asf,.f4v" hidden>
+    <div class="file-picker-wrap">
+      <button class="btn" id="choose" type="button">＋ Интихоби видео</button>
+      <input type="file" id="file" class="file-input-overlay" accept="video/*,.avi,.flv,.wmv,.3gp,.3g2,.mpeg,.mpg,.ts,.mts,.m2ts,.vob,.ogv,.mxf,.asf,.f4v">
+    </div>
   </div>
   <div class="file-name" id="fileName"></div>
 </section>
@@ -434,7 +441,6 @@ async function downloadJob(jobId){
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
-$("choose").onclick=()=>$("file").click();
 $("file").onchange=e=>{
   const f=e.target.files[0];if(!f)return;
   // MIME types vary by device/container; the server validates the actual video stream.
