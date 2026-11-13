@@ -377,10 +377,10 @@ function applyLanguage(lang){
   const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
   nodes.forEach(n=>{const key=n.nodeValue.trim();if(map[key])n.nodeValue=n.nodeValue.replace(key,map[key]);});
   document.querySelectorAll("select option").forEach(o=>{const key=o.textContent.trim();if(map[key])o.textContent=map[key];});
-  try{localStorage.setItem("gapcut_editor_lang",UI_LANG)}catch(e){}
+  try{localStorage.setItem("gapcut_editor_lang_v2",UI_LANG)}catch(e){}
 }
 document.querySelectorAll(".lang-btn").forEach(b=>b.addEventListener("click",()=>applyLanguage(b.dataset.lang)));
-let savedLang="tg";try{savedLang=localStorage.getItem("gapcut_editor_lang")||"tg"}catch(e){}
+let savedLang="tg";try{savedLang=localStorage.getItem("gapcut_editor_lang_v2")||"tg"}catch(e){}
 applyLanguage(savedLang);
 
 const $=id=>document.getElementById(id);
