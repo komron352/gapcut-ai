@@ -237,7 +237,7 @@ footer{color:#8e829f}
   <div class="control-row"><div><div class="control-label">Субтитрҳои автоматӣ</div><div class="control-sub">Тоҷикӣ ва русӣ аз рӯйи овоз</div></div><button class="switch on" data-setting="captions" aria-label="Субтитрҳо"></button></div>
   <div class="control-sub" style="margin-top:12px">Шрифт</div>
   <div class="choice-strip" id="fontChoices">
-    <button class="choice" data-font="Montserrat">Montserrat</button><button class="choice" data-font="Inter">Inter</button><button class="choice active" data-font="Modernist">Modernist</button><button class="choice" data-font="Oswald">Oswald</button><button class="choice" data-font="Roboto">Roboto</button>
+    <button class="choice" data-font="Montserrat">Montserrat</button><button class="choice" data-font="Inter">Inter</button><button class="choice active" data-font="Montserrat">Montserrat</button><button class="choice" data-font="Oswald">Oswald</button><button class="choice" data-font="Roboto">Roboto</button>
   </div>
   <div class="control-sub">Ранги калимаҳои муҳим</div>
   <div class="choice-strip" id="colorChoices">
@@ -380,7 +380,7 @@ let completedJobId=null;
 let transcriptLines=[];
 let settings={
   style:"brandly", language:"tg_ru", pauses:true, fillers:true,
-  captions:true, images:true, format:"9:16", textSounds:true, font:"Modernist", emojis:false, cards:true, hook:false, camera:true, introZoom:true, accent:"4AA8FF",
+  captions:true, images:true, format:"9:16", textSounds:true, font:"Montserrat", emojis:false, cards:true, hook:false, camera:true, introZoom:true, accent:"4AA8FF",
   cutMode:"light", captionSize:"l", captionPosition:"center", captionAccent:"#4AA8FF"
 };
 let busy=false;\nlet UI_LANG="ru";
@@ -486,10 +486,10 @@ $("start").onclick=async()=>{
       music_sync:"1",
       zoom:settings.introZoom?"1":"0",
       fx:"1",
-      anim:settings.captions?"auto":"",
+      anim:settings.captions?"mix":"",
       anim_out:settings.captions?"auto":"",
       trans:"auto",
-      font:settings.font||"",
+      font:settings.font||"Montserrat",
       fontmix:"1"
     };
     const upload=new FormData();
