@@ -30,7 +30,7 @@ header {
   display:flex;align-items:center;justify-content:space-between;
   margin-bottom:25px;
 }
-.logo {font-size:23px;font-weight:900}
+.logo {font-size:23px;font-weight:900}\n.lang-switch{display:flex;gap:4px;padding:4px;border-radius:14px;background:#30283b}.lang-btn{border:0;border-radius:10px;padding:7px 10px;background:transparent;color:#b9aec9;font-weight:800}.lang-btn.active{background:#f4edff;color:#191321}
 .logo span {
   background:var(--gradient);
   -webkit-background-clip:text;
@@ -211,7 +211,7 @@ footer{color:#8e829f}
 <header>
   <button class="back" onclick="history.back()">←</button>
   <div class="logo">GAPCUT<span>.</span></div>
-  <div>✦ AI</div>
+  <div class="lang-switch"><button type="button" class="lang-btn active" data-lang="ru">RU</button><button type="button" class="lang-btn" data-lang="tg">TJ</button></div>
 </header>
 
 <h1>Новый монтаж</h1>
@@ -287,6 +287,92 @@ footer{color:#8e829f}
 const tg=window.Telegram?.WebApp;
 if(tg){tg.ready();tg.expand();}
 const API="https://gapcut-ai.onrender.com";
+
+const UI_TEXT={
+  "Новый монтаж":"Монтажи нав",
+  "Загрузите видео — GAPCUT AI подготовит его к публикации":"Видео бор кунед — GAPCUT AI онро барои нашр омода мекунад",
+  "Видео":"Видео",
+  "Видео интихоб кунед, то пешнамоиш пайдо шавад":"Барои дидани пешнамоиш видео интихоб кунед",
+  "Видеоро интихоб кунед":"Интихоби видео",
+  "то 100 MB":"то 100 MB",
+  "＋ Интихоби видео":"＋ Интихоби видео",
+  "Субтитрҳо":"Субтитрҳо",
+  "Субтитрҳои автоматӣ":"Субтитрҳои худкор",
+  "Тоҷикӣ ва русӣ аз рӯйи овоз":"Тоҷикӣ ва русӣ аз рӯйи овоз",
+  "Шрифт":"Шрифт",
+  "Ранги калимаҳои муҳим":"Ранги калимаҳои муҳим",
+  "Янтарь":"Қаҳрабо",
+  "Лазурь":"Осмонӣ",
+  "Лайм":"Лайм",
+  "Розовый":"Гулобӣ",
+  "Белый":"Сафед",
+  "Ороиши субтитр":"Услуби субтитр",
+  "Динамикӣ":"Динамикӣ",
+  "Классикӣ":"Классикӣ",
+  "Андозаи матн":"Андозаи матн",
+  "Хурд":"Хурд",
+  "Миёна":"Миёна",
+  "Калон":"Калон",
+  "Ҷойгиршавӣ":"Ҷойгиршавӣ",
+  "Автоматӣ":"Худкор",
+  "Марказ":"Марказ",
+  "Боло":"Боло",
+  "Эмодзиҳо":"Эмодзиҳо",
+  "Дар матн эмодзиҳои мувофиқ илова шаванд":"Ба матн эмодзиҳои мувофиқ илова шаванд",
+  "Плашкаҳо ва карточкаҳо":"Плашкаҳо ва кортҳо",
+  "Барои таъкид кардани фикрҳои муҳим":"Барои таъкид кардани фикрҳои муҳим",
+  "Сохтани хук (Hook)":"Сохтани Hook",
+  "Ҷумлаи ҷолиб дар оғози видео":"Ҷумлаи ҷолиб дар оғози видео",
+  "Параметрҳои монтаж":"Танзимоти монтаж",
+  "Эффектҳои садоӣ":"Эффектҳои садоӣ",
+  "Медиа-карточкаҳо / B-roll":"Кортҳои медиавӣ / B-roll",
+  "Кадрҳо аз рӯйи маънои сухан":"Кадрҳо мувофиқи маънои сухан",
+  "Ҳаракати камера":"Ҳаракати камера",
+  "Zoom ва ҳаракати сабук":"Zoom ва ҳаракати нарм",
+  "Наезд камера дар оғоз":"Наздикшавии камера дар оғоз",
+  "Zoom-in барои ҷалби диққат":"Zoom-in барои ҷалби диққат",
+  "Буридани видео":"Буридани видео",
+  "Сабук":"Сабук",
+  "Мӯътадил":"Мӯътадил",
+  "Бе буридан":"Бе буридан",
+  "Суръати коркард":"Суръати коркард",
+  "Оддӣ":"Оддӣ",
+  "Сифати баланд":"Сифати баланд",
+  "Формати видео":"Формати видео",
+  "5. Обработка видео":"5. Коркарди видео",
+  "✦ Начать ИИ-монтаж":"✦ Оғози монтажи AI",
+  "Видео готово к настройке":"Видео барои танзим омода аст",
+  "⬇️ Скачать видео":"⬇️ Боргирии видео"
+};
+const UI_RU={
+  "Монтажи нав":"Новый монтаж","Видео бор кунед — GAPCUT AI онро барои нашр омода мекунад":"Загрузите видео — GAPCUT AI подготовит его к публикации",
+  "Видео":"Видео","Барои дидани пешнамоиш видео интихоб кунед":"Выберите видео для предпросмотра","Интихоби видео":"Выбрать видео","то 100 MB":"до 100 MB",
+  "＋ Интихоби видео":"＋ Выбрать видео","Субтитрҳо":"Субтитры","Субтитрҳои худкор":"Автоматические субтитры","Тоҷикӣ ва русӣ аз рӯйи овоз":"Таджикский и русский по речи",
+  "Шрифт":"Шрифт","Ранги калимаҳои муҳим":"Цвет ключевых слов","Қаҳрабо":"Янтарный","Осмонӣ":"Лазурный","Лайм":"Лайм","Гулобӣ":"Розовый","Сафед":"Белый",
+  "Услуби субтитр":"Стиль субтитров","Динамикӣ":"Динамичный","Классикӣ":"Классический","Андозаи матн":"Размер текста","Хурд":"Маленький","Миёна":"Средний","Калон":"Большой",
+  "Ҷойгиршавӣ":"Расположение","Худкор":"Авто","Марказ":"По центру","Боло":"Сверху","Эмодзиҳо":"Эмодзи","Ба матн эмодзиҳои мувофиқ илова шаванд":"Добавлять подходящие эмодзи в текст",
+  "Плашкаҳо ва кортҳо":"Плашки и карточки","Барои таъкид кардани фикрҳои муҳим":"Для выделения важных мыслей","Сохтани Hook":"Создать хук (Hook)","Ҷумлаи ҷолиб дар оғози видео":"Цепляющая фраза в начале видео",
+  "Танзимоти монтаж":"Параметры монтажа","Эффектҳои садоӣ":"Звуковые эффекты","Кортҳои медиавӣ / B-roll":"Медиа-карточки / B-roll","Кадрҳо мувофиқи маънои сухан":"Кадры по смыслу речи",
+  "Ҳаракати камера":"Движение камеры","Zoom ва ҳаракати нарм":"Zoom и плавное движение","Наздикшавии камера дар оғоз":"Наезд камеры в начале","Zoom-in барои ҷалби диққат":"Zoom-in для привлечения внимания",
+  "Буридани видео":"Нарезка видео","Сабук":"Лёгкая","Мӯътадил":"Обычная","Динамикӣ":"Динамичная","Бе буридан":"Без нарезки",
+  "Суръати коркард":"Скорость обработки","Оддӣ":"Обычная","Сифати баланд":"Высокое качество","Формати видео":"Формат видео","5. Коркарди видео":"5. Обработка видео",
+  "✦ Оғози монтажи AI":"✦ Начать ИИ-монтаж","Видео барои танзим омода аст":"Видео готово к настройке","⬇️ Боргирии видео":"⬇️ Скачать видео"
+};
+function applyLanguage(lang){
+  UI_LANG=lang==="tg"?"tg":"ru";
+  document.documentElement.lang=UI_LANG;
+  document.querySelectorAll(".lang-btn").forEach(b=>b.classList.toggle("active",b.dataset.lang===UI_LANG));
+  const map=UI_LANG==="tg"?UI_TEXT:UI_RU;
+  const walker=document.createTreeWalker(document.querySelector("main"),NodeFilter.SHOW_TEXT);
+  const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
+  nodes.forEach(n=>{const key=n.nodeValue.trim();if(map[key])n.nodeValue=n.nodeValue.replace(key,map[key]);});
+  document.querySelectorAll("select option").forEach(o=>{const key=o.textContent.trim();if(map[key])o.textContent=map[key];});
+  try{localStorage.setItem("gapcut_editor_lang",UI_LANG)}catch(e){}
+}
+document.querySelectorAll(".lang-btn").forEach(b=>b.addEventListener("click",()=>applyLanguage(b.dataset.lang)));
+let savedLang="ru";try{savedLang=localStorage.getItem("gapcut_editor_lang")||"ru"}catch(e){}
+applyLanguage(savedLang);
+
 const $=id=>document.getElementById(id);
 let selectedFile=null;
 let completedJobId=null;
@@ -296,7 +382,7 @@ let settings={
   captions:true, images:true, format:"9:16", textSounds:true, font:"Modernist", emojis:false, cards:true, hook:false, camera:true, introZoom:true, accent:"4AA8FF",
   cutMode:"light", captionSize:"l", captionPosition:"center", captionAccent:"#4AA8FF"
 };
-let busy=false;
+let busy=false;\nlet UI_LANG="ru";
 
 function setStatus(message,progress){
   $("status").textContent=message;
