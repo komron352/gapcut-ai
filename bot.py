@@ -45,7 +45,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from urllib.parse import parse_qsl, quote
+from urllib.parse import parse_qsl, quote, urlparse
 
 import httpx
 import uvicorn
@@ -184,6 +184,139 @@ class UserError(Exception):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+
+
+# =========================================================
+# RENDERSTER AI AUTO-EDIT (optional external editing engine)
+# =========================================================
+RENDERSTER_API_KEY = os.getenv("RENDERSTER_API_KEY", "").strip()
+RENDERSTER_AUTO_EDIT = os.getenv("RENDERSTER_AUTO_EDIT", "0").strip() == "1"
+RENDERSTER_EDIT_STYLE_ID = os.getenv("RENDERSTER_EDIT_STYLE_ID", "").strip()
+RENDERSTER_BASE_URL = "https://renderster.com"
+
+
+async def renderster_auto_edit(input_path, output_path, video_format="9:16", style_id=""):
+    """Run Renderster's async /media auto_edit job and download its finished MP4."""
+    if not RENDERSTER_API_KEY:
+        raise UserError("RENDERSTER_API_KEY дар сервер танзим нашудааст.", 503)
+
+    orientation = "vertical" if video_format == "9:16" else (
+        "horizontal" if video_format == "16:9" else "original"
+    )
+    options = {
+        "orientation": orientation,
+        "music": "auto",
+        "stock_broll": True,
+        "clean_audio": "auto",
+        "retakes": "cut",
+    }
+    chosen_style = style_id or RENDERSTER_EDIT_STYLE_ID
+    if chosen_style:
+        options["edit_style"] = chosen_style
+
+    headers = {"X-API-Key": RENDERSTER_API_KEY}
+    timeout = httpx.Timeout(1800.0, connect=30.0, write=180.0, read=60.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        with Path(input_path).open("rb") as handle:
+            response = await client.post(
+                f"{RENDERSTER_BASE_URL}/media",
+                headers=headers,
+                data={"type": "auto_edit", "options": json.dumps(options)},
+                files={"file": (Path(input_path).name, handle, "video/mp4")},
+            )
+        if response.status_code >= 400:
+            detail = response.text[:1000]
+            raise UserError(f"Renderster API ({response.status_code}): {detail}", 502)
+        job = response.json()
+        job_id = job.get("id")
+        if not job_id:
+            raise UserError("Renderster ҷавоби бе job ID баргардонд.", 502)
+
+        deadline = time.monotonic() + 1500
+        while time.monotonic() < deadline:
+            await asyncio.sleep(5)
+            status_response = await client.get(
+                f"{RENDERSTER_BASE_URL}/media/{job_id}", headers=headers
+            )
+            if status_response.status_code >= 400:
+                raise UserError(
+                    f"Хатои санҷиши Renderster job ({status_response.status_code}).", 502
+                )
+            status = status_response.json()
+            state = status.get("status") or status.get("state")
+            if state == "failed":
+                raise UserError(
+                    "Renderster монтажро анҷом дода натавонист: "
+                    + str(status.get("error") or status.get("message") or "хатои номаълум")[:500],
+                    502,
+                )
+            if state == "cancelled":
+                raise UserError("Монтажи Renderster бекор карда шуд.", 502)
+            if state == "completed":
+                result = status.get("result") or {}
+                edited = result.get("edited") or {}
+                output_url = edited.get("url") or status.get("output_url")
+                if not output_url:
+                    raise UserError("Renderster видеои тайёрро барнагардонд.", 502)
+                # Only download signed output files hosted by Renderster.
+                parsed_output = urlparse(output_url)
+                if parsed_output.scheme != "https" or parsed_output.hostname != "renderster.com" or not parsed_output.path.startswith("/files/"):
+                    raise UserError("Renderster URL-и натиҷаи ғайриэътимоднок баргардонд.", 502)
+                download = await client.get(output_url)
+                download.raise_for_status()
+                if not download.content or not download.headers.get("content-type", "").startswith("video/"):
+                    raise UserError("Файли натиҷаи Renderster видео нест ё холӣ аст.", 502)
+                Path(output_path).write_bytes(download.content)
+                return {
+                    "job_id": job_id,
+                    "warnings": result.get("warnings") or [],
+                    "credit_cost": status.get("credit_cost"),
+                    "edited": edited,
+                }
+        raise UserError("Вақти интизории Renderster ба охир расид.", 504)
+
+
+async def renderster_learn_style(input_path, style_name="GAPCUT AI Reference"):
+    """Learn an edit style from an uploaded reference video (costs Renderster credits)."""
+    if not RENDERSTER_API_KEY:
+        raise UserError("RENDERSTER_API_KEY дар сервер танзим нашудааст.", 503)
+    headers = {"X-API-Key": RENDERSTER_API_KEY}
+    timeout = httpx.Timeout(1800.0, connect=30.0, write=180.0, read=60.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        with Path(input_path).open("rb") as handle:
+            response = await client.post(
+                f"{RENDERSTER_BASE_URL}/media",
+                headers=headers,
+                data={
+                    "type": "learn_style",
+                    "options": json.dumps({"style_name": style_name[:60]}),
+                },
+                files={"file": (Path(input_path).name, handle, "video/mp4")},
+            )
+        if response.status_code >= 400:
+            raise UserError(f"Renderster Learn Style ({response.status_code}): {response.text[:800]}", 502)
+        job = response.json()
+        job_id = job.get("id")
+        if not job_id:
+            raise UserError("Renderster ҷавоби бе job ID баргардонд.", 502)
+        deadline = time.monotonic() + 1500
+        while time.monotonic() < deadline:
+            await asyncio.sleep(5)
+            check = await client.get(f"{RENDERSTER_BASE_URL}/media/{job_id}", headers=headers)
+            check.raise_for_status()
+            current = check.json()
+            state = current.get("status") or current.get("state")
+            if state == "failed":
+                raise UserError("Омӯзиши услуб ноком шуд: " + str(current.get("error") or current.get("message") or "хатои номаълум")[:500], 502)
+            if state == "cancelled":
+                raise UserError("Омӯзиши услуб дар Renderster бекор карда шуд.", 502)
+            if state == "completed":
+                learned = (current.get("result") or {}).get("learned_style") or {}
+                style_id = learned.get("id")
+                if not style_id:
+                    raise UserError("Renderster ID-и услубро барнагардонд.", 502)
+                return {"style_id": style_id, "name": learned.get("name"), "params": learned.get("params"), "credit_cost": current.get("credit_cost")}
+        raise UserError("Вақти омӯзиши услуб ба охир расид.", 504)
 
 
 # =========================================================
@@ -4260,14 +4393,22 @@ async def run_render_job(job, style, video_format, lines, options):
             def report(progress, stage):
                 touch(job, progress=progress, stage=stage)
 
-            if options.get("broll", "auto") != "off":
-                options = dict(options, cards=await fetch_broll_assets(
-                    options.get("cards") or [], job["dir"]
-                ))
-            await render_video(
-                job["input"], output_path, job["dir"], words, style,
-                video_format, job["info"], job["duration"], report, options,
-            )
+            if RENDERSTER_AUTO_EDIT and RENDERSTER_API_KEY:
+                report(10, "Renderster AI монтаж мекунад")
+                renderster_result = await renderster_auto_edit(
+                    job["input"], output_path, video_format
+                )
+                report(95, "Видеои Renderster гирифта шуд")
+                touch(job, renderster=renderster_result)
+            else:
+                if options.get("broll", "auto") != "off":
+                    options = dict(options, cards=await fetch_broll_assets(
+                        options.get("cards") or [], job["dir"]
+                    ))
+                await render_video(
+                    job["input"], output_path, job["dir"], words, style,
+                    video_format, job["info"], job["duration"], report, options,
+                )
 
             touch(
                 job,
@@ -4361,6 +4502,35 @@ async def home():
         "max_duration_seconds": MAX_DURATION,
         "processing_concurrency": 1,
     }
+
+
+@app.post("/api/renderster/learn-style")
+async def learn_renderster_style(
+    file: UploadFile = File(...),
+    style_name: str = Form("GAPCUT AI Reference"),
+    init_data: str = Form(""),
+    x_init_data: str = Header(default=""),
+):
+    user = require_user(init_data, x_init_data)
+    if str(user.get("id")) != "5475524665":
+        raise HTTPException(status_code=403, detail="Танҳо соҳиби GAPCUT AI метавонад услуб омӯзонад.")
+    if not RENDERSTER_API_KEY:
+        raise HTTPException(status_code=503, detail="RENDERSTER_API_KEY танзим нашудааст.")
+    suffix = Path(file.filename or "reference.mp4").suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Формати видео дастгирӣ намешавад.")
+    work_dir = Path(tempfile.mkdtemp(prefix="gapcut_renderster_"))
+    source = work_dir / ("reference" + suffix)
+    try:
+        data = await file.read(MAX_INPUT_SIZE + 1)
+        if len(data) > MAX_INPUT_SIZE:
+            raise HTTPException(status_code=413, detail="Видео аз ҳад калон аст.")
+        source.write_bytes(data)
+        result = await renderster_learn_style(source, style_name)
+        return {"status": "learned", **result,
+                "next_step": "RENDERSTER_EDIT_STYLE_ID-ро дар Render Environment гузоред ва RENDERSTER_AUTO_EDIT=1 кунед."}
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @app.get("/api/fonts")
