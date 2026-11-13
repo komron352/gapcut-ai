@@ -45,7 +45,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from urllib.parse import parse_qsl, quote
+from urllib.parse import parse_qsl, quote, urlparse
 
 import httpx
 import uvicorn
