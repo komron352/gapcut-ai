@@ -663,7 +663,7 @@ def get_video_filter(video_format, width, height):
 # SPEECH RECOGNITION (Groq Whisper)
 # =========================================================
 
-TG_PROMPT = "Ин гуфтори тоҷикӣ аст. Матнро танҳо бо алифбои кириллӣ нависед. Ҳарфҳои ғ, ӣ, қ, ӯ, ҳ, ҷ-ро дуруст истифода баред. Калимаҳои тоҷикиро ба шакли дурусти имлоӣ нависед, на бо имлои русӣ ё фонетикӣ. Ба ибораҳои гуфтугӯӣ ва калимаҳои қарзӣ диққат диҳед. Намунаҳои имло: имрӯз, тоҷикӣ, мегӯям, мешавад, ки, курси, старти курси ман. Алифбои форсӣ ё арабиро истифода набаред. Салом! Имрӯз мо бо забони тоҷикӣ сӯҳбат мекунем."
+TG_PROMPT = "Ин гуфтори тоҷикӣ аст. Матнро танҳо бо алифбои кириллӣ нависед. Имлои меъёрии забони тоҷикӣ ва ҳарфҳои махсуси тоҷикӣ ғ, ӣ, қ, ӯ, ҳ, ҷ ҳатман риоя шаванд. Ҳарфҳои русии г, и, к, у, х, ч-ро ба ҷойи ҳарфҳои махсуси тоҷикӣ истифода набаред, агар калимаи тоҷикӣ онҳоро талаб кунад. Калимаҳои тоҷикиро тарҷума накунед ва бо имлои русӣ нанависед. Калимаҳои русии воқеан гуфташударо дар гуфтори омехта русӣ нигоҳ доред. Алифбои форсӣ ё арабиро истифода набаред. Намунаҳои имло: имрӯз, тоҷикӣ, мегӯям, мешавад, ки, ҳозир, фаҳмидам, кӯмак, зиндагӣ, донишҷӯ, Тоҷикистон, Хуҷанд. Салом! Имрӯз мо бо забони тоҷикӣ сӯҳбат мекунем."
 RU_PROMPT = "Привет! Сегодня мы говорим по-русски."
 TG_LETTERS = set("ғӣқӯҳҷҒӢҚӮҲҶ")
 
@@ -1130,11 +1130,11 @@ async def llm_fixes(words, language, glossary):
                 "content": (
                     "You are an expert proofreader of spoken Tajik (standard Tajik Cyrillic) and Russian ASR transcripts. "
                     "The input is a sequence of numbered word tokens in original order. Use surrounding words as sentence context, not isolated spelling guesses. "
-                    "Correct misspelled Tajik words, phonetic Russian-letter spellings of Tajik (especially ғ, ӣ, қ, ӯ, ҳ, ҷ), and obvious speech-recognition substitutions. "
+                    "Correct misspelled Tajik words using standard Tajik Cyrillic orthography. Restore ғ, ӣ, қ, ӯ, ҳ, ҷ where required instead of Russian look-alike letters г, и, к, у, х, ч. Check word forms and grammar using neighboring context. Keep Russian words only when the speaker actually switched to Russian. "
                     "Prefer natural, grammatically correct Tajik while preserving the speaker's actual meaning. Keep valid Russian words in mixed-language speech. "
                     "Do not translate, paraphrase, formalize colloquial speech, invent content, or change correct words just for style. "
                     "Replace a token with its corrected one-word form only; never merge, split, add or remove tokens because each token has a fixed timestamp. "
-                    "Preserve punctuation and capitalization where possible. Examples: имрӯз, тоҷикӣ, мешавад, ки, мегӯям, курси, старти курси ман (only when those words were spoken). "
+                    "Preserve punctuation and capitalization where possible. Examples: имрӯз, тоҷикӣ, мешавад, ки, мегӯям, фаҳмидам, ҳозир, кӯмак, зиндагӣ, донишҷӯ, Тоҷикистон, Хуҷанд (only when those words were spoken). "
                     "If uncertain, leave the token unchanged." + hint + " Answer only with JSON: "
                     '{"fixes":[{"i":word index,"w":"corrected word"}]}. '
                     'Return {"fixes":[]} if nothing is clearly wrong.'                ),
