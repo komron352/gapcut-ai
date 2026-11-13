@@ -243,6 +243,14 @@ footer{color:#8e829f}
 <section class="card">
   <div class="heading"><span class="section-number">02</span> Субтитрҳо</div>
   <div class="control-row"><div><div class="control-label">Субтитрҳои автоматӣ</div><div class="control-sub">Тоҷикӣ ва русӣ аз рӯйи овоз</div></div><button class="switch on" data-setting="captions" aria-label="Субтитрҳо"></button></div>
+  <div class="control-row">
+    <div><div class="control-label">Забони гуфтор</div><div class="control-sub">Барои видеои тоҷикӣ ҳаминро интихоб кунед</div></div>
+    <select class="value-select" id="transcriptLanguage">
+      <option value="tg" selected>Тоҷикӣ</option>
+      <option value="ru">Русӣ</option>
+      <option value="tg_ru">Тоҷикӣ + Русӣ (омехта)</option>
+    </select>
+  </div>
   <div class="control-sub" style="margin-top:12px">Шрифт</div>
   <div class="choice-strip" id="fontChoices">
     <button class="choice" data-font="Montserrat">Montserrat</button><button class="choice" data-font="Inter">Inter</button><button class="choice active" data-font="Montserrat">Montserrat</button><button class="choice" data-font="Oswald">Oswald</button><button class="choice" data-font="Roboto">Roboto</button>
@@ -355,7 +363,12 @@ const UI_TEXT={
 const UI_RU={
   "Монтажи нав":"Новый монтаж","Видео бор кунед — GAPCUT AI онро барои нашр омода мекунад":"Загрузите видео — GAPCUT AI подготовит его к публикации",
   "Видео":"Видео","Барои дидани пешнамоиш видео интихоб кунед":"Выберите видео для предпросмотра","Интихоби видео":"Выбрать видео","то 100 MB":"до 100 MB",
-  "＋ Интихоби видео":"＋ Выбрать видео","Субтитрҳо":"Субтитры","Субтитрҳои худкор":"Автоматические субтитры","Тоҷикӣ ва русӣ аз рӯйи овоз":"Таджикский и русский по речи",
+  "＋ Интихоби видео":"＋ Выбрать видео","Субтитрҳо":"Субтитры","Субтитрҳои худкор":"Автоматические субтитры",
+  "Забони гуфтор":"Язык речи",
+  "Барои видеои тоҷикӣ ҳаминро интихоб кунед":"Для видео на таджикском выберите этот вариант",
+  "Тоҷикӣ":"Таджикский",
+  "Русӣ":"Русский",
+  "Тоҷикӣ + Русӣ (омехта)":"Таджикский + русский (смешанный)","Тоҷикӣ ва русӣ аз рӯйи овоз":"Таджикский и русский по речи",
   "Шрифт":"Шрифт","Ранги калимаҳои муҳим":"Цвет ключевых слов","Қаҳрабо":"Янтарный","Осмонӣ":"Лазурный","Лайм":"Лайм","Гулобӣ":"Розовый","Сафед":"Белый",
   "Услуби субтитр":"Стиль субтитров","Динамикӣ":"Динамичный","Классикӣ":"Классический","Андозаи матн":"Размер текста","Хурд":"Маленький","Миёна":"Средний","Калон":"Большой",
   "Ҷойгиршавӣ":"Расположение","Худкор":"Авто","Марказ":"По центру","Боло":"Сверху","Эмодзиҳо":"Эмодзи","Ба матн эмодзиҳои мувофиқ илова шаванд":"Добавлять подходящие эмодзи в текст",
@@ -388,10 +401,11 @@ let selectedFile=null;
 let completedJobId=null;
 let transcriptLines=[];
 let settings={
-  style:"brandly", language:"tg_ru", pauses:true, fillers:true,
+  style:"brandly", language:"tg", pauses:true, fillers:true,
   captions:true, images:true, format:"9:16", textSounds:true, font:"Montserrat", emojis:false, cards:true, hook:false, camera:true, introZoom:true, accent:"4AA8FF",
   cutMode:"light", captionSize:"l", captionPosition:"center", captionAccent:"#4AA8FF"
 };
+$("transcriptLanguage").onchange=e=>settings.language=e.target.value;
 let busy=false;
 
 function setStatus(message,progress){
