@@ -4398,14 +4398,29 @@ async def run_render_job(job, style, video_format, lines, options):
             def report(progress, stage):
                 touch(job, progress=progress, stage=stage)
 
-            if RENDERSTER_AUTO_EDIT and RENDERSTER_API_KEY:
+            use_local_renderer = not (RENDERSTER_AUTO_EDIT and RENDERSTER_API_KEY)
+            if not use_local_renderer:
                 report(10, "Renderster AI монтаж мекунад")
-                renderster_result = await renderster_auto_edit(
-                    job["input"], output_path, video_format
-                )
-                report(95, "Видеои Renderster гирифта шуд")
-                touch(job, renderster=renderster_result)
-            else:
+                try:
+                    renderster_result = await renderster_auto_edit(
+                        job["input"], output_path, video_format
+                    )
+                    report(95, "Видеои Renderster гирифта шуд")
+                    touch(job, renderster=renderster_result)
+                except UserError as render_error:
+                    error_text = str(render_error).lower()
+                    if "trial_required" not in error_text and "api (402)" not in error_text:
+                        raise
+                    # Renderster free trial has ended. Continue with GAPCUT's
+                    # built-in FFmpeg renderer instead of failing the user's job.
+                    logger.warning(
+                        "Renderster trial exhausted; falling back to local FFmpeg renderer for job %s",
+                        job["id"],
+                    )
+                    use_local_renderer = True
+
+            if use_local_renderer:
+                report(12, "GAPCUT AI муҳаррики дохилӣ монтаж мекунад")
                 if options.get("broll", "auto") != "off":
                     options = dict(options, cards=await fetch_broll_assets(
                         options.get("cards") or [], job["dir"]
