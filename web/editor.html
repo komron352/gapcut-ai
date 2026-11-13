@@ -366,6 +366,7 @@ const UI_RU={
   "Суръати коркард":"Скорость обработки","Оддӣ":"Обычная","Сифати баланд":"Высокое качество","Формати видео":"Формат видео","5. Коркарди видео":"5. Обработка видео",
   "✦ Оғози монтажи AI":"✦ Начать ИИ-монтаж","Видео барои танзим омода аст":"Видео готово к настройке","⬇️ Боргирии видео":"⬇️ Скачать видео"
 };
+let UI_LANG="tg";
 function applyLanguage(lang){
   UI_LANG=lang==="tg"?"tg":"ru";
   document.documentElement.lang=UI_LANG;
@@ -379,7 +380,7 @@ function applyLanguage(lang){
   try{localStorage.setItem("gapcut_editor_lang",UI_LANG)}catch(e){}
 }
 document.querySelectorAll(".lang-btn").forEach(b=>b.addEventListener("click",()=>applyLanguage(b.dataset.lang)));
-let savedLang="ru";try{savedLang=localStorage.getItem("gapcut_editor_lang")||"ru"}catch(e){}
+let savedLang="tg";try{savedLang=localStorage.getItem("gapcut_editor_lang")||"tg"}catch(e){}
 applyLanguage(savedLang);
 
 const $=id=>document.getElementById(id);
@@ -392,7 +393,6 @@ let settings={
   cutMode:"light", captionSize:"l", captionPosition:"center", captionAccent:"#4AA8FF"
 };
 let busy=false;
-let UI_LANG="ru";
 
 function setStatus(message,progress){
   $("status").textContent=message;
