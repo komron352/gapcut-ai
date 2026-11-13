@@ -209,7 +209,6 @@ async def renderster_auto_edit(input_path, output_path, video_format="9:16", sty
         "stock_broll": True,
         "clean_audio": "auto",
         "retakes": "cut",
-        "caption_style": "karaoke",
     }
     chosen_style = style_id or RENDERSTER_EDIT_STYLE_ID
     if chosen_style:
