@@ -362,7 +362,8 @@ function applyLanguage(lang){
   UI_LANG=lang==="tg"?"tg":"ru";
   document.documentElement.lang=UI_LANG;
   document.querySelectorAll(".lang-btn").forEach(b=>b.classList.toggle("active",b.dataset.lang===UI_LANG));
-  const map=UI_LANG==="tg"?UI_TEXT:UI_RU;
+  const reverse=Object.fromEntries(Object.entries(UI_TEXT).map(([ru,tg])=>[tg,ru]));
+  const map=UI_LANG==="tg"?UI_TEXT:{...reverse,...UI_RU};
   const walker=document.createTreeWalker(document.querySelector("main"),NodeFilter.SHOW_TEXT);
   const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
   nodes.forEach(n=>{const key=n.nodeValue.trim();if(map[key])n.nodeValue=n.nodeValue.replace(key,map[key]);});
