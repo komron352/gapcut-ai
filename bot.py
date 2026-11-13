@@ -894,8 +894,22 @@ def script_score(parsed):
     score = parsed["avg_logprob"]
     if cyrillic < 0.8:
         score -= 2.0
-    if any(c in TG_LETTERS for c in text):
-        score += 0.25
+
+    # Mixed mode compares two Whisper transcripts for the same time chunk.
+    # Reward native Tajik letters and words from the Tajik lexicon, instead
+    # of choosing a whole chunk mainly by small log-probability differences.
+    tokens = [core_token(token).lower() for token in re.findall(r"[^\\W_]+", text, flags=re.UNICODE)]
+    tajik_hits = 0
+    for token in tokens:
+        if not token:
+            continue
+        key = tg_key(token)
+        if TAJIK_INDEX.get(key):
+            tajik_hits += 1
+
+    native_letters = sum(c in TG_LETTERS for c in letters)
+    score += min(1.8, tajik_hits * 0.18)
+    score += min(1.2, native_letters * 0.30)
     return score
 
 
