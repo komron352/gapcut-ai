@@ -155,6 +155,52 @@ select option{background:#101827;color:#f7f9ff}
 button,select{font-family:inherit}
 .btn{min-height:48px;font-size:15px}
 
+
+/* Brandly-inspired, step-by-step editor layout */
+:root{--bg:#100d18;--card:#1d1828;--line:#383044;--tx:#f5f0ff;--mu:#b8aec9;--gradient:linear-gradient(110deg,#ff9b45,#ff3b8d 52%,#9b35df)}
+html,body{background:#100d18!important;color:var(--tx)!important}
+body{padding:calc(env(safe-area-inset-top) + 14px) 14px 42px}
+header{margin-bottom:20px}
+.back{background:#30283b;color:#fff;border:0;border-radius:22px}
+h1{font-size:27px;color:#fff;margin:6px 0}
+.sub{color:#b9aec9}
+.card{background:#1d1828!important;border:1px solid #30283c;border-radius:24px;padding:17px 16px;box-shadow:0 10px 24px #0004;margin-bottom:15px}
+.heading{font-size:19px;color:#f7f2ff;margin-bottom:15px}
+.drop{background:#15111e;border:1.5px dashed #655477;color:#fff;border-radius:20px}
+.drop p{color:#b7abc8}
+.btn{background:var(--gradient);border-radius:18px;box-shadow:0 9px 22px #b62d8b44;color:#fff}
+.preview-stage{position:relative;background:#08070c;border-radius:22px;overflow:hidden;min-height:190px;display:grid;place-items:center;margin:10px 0 14px}
+.preview-stage video{width:100%;max-height:310px;object-fit:contain}
+.preview-placeholder{text-align:center;padding:32px 15px;color:#a99bbd}
+.preview-placeholder strong{display:block;font-size:22px;color:#fff;margin-bottom:7px}
+.control-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:62px;border-top:1px solid #383044;padding:12px 0}
+.control-row:first-of-type{border-top:0}
+.control-label{font-size:16px;font-weight:750;color:#f5f0ff}
+.control-sub{font-size:12px;color:#a99db9;margin-top:4px;line-height:1.35}
+.switch{width:54px;height:32px;flex:none;border:0;border-radius:30px;background:#393244;position:relative}
+.switch:after{content:"";position:absolute;width:24px;height:24px;left:4px;top:4px;background:#fff;border-radius:50%;transition:.18s}
+.switch.on{background:#f4edff}.switch.on:after{left:26px;background:#17121f}
+.choice-strip{display:flex;gap:8px;overflow-x:auto;padding:7px 0 12px;scrollbar-width:none}
+.choice-strip::-webkit-scrollbar{display:none}
+.choice{flex:none;border:1px solid #50445f;border-radius:17px;background:#292235;color:#d8cfe5;padding:12px 16px;font-size:14px;font-weight:750;white-space:nowrap}
+.choice.active{background:#f4edff;color:#191321;border-color:#f4edff}
+.color-choice{display:flex;align-items:center;gap:8px}
+.dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+.value-select{border:0!important;background:transparent!important;color:#c9bed8!important;text-align:right;max-width:155px;padding:8px 2px!important;font-weight:700}
+.value-select option{background:#1d1828;color:#fff}
+.info-note{font-size:12px;color:#a99db9;line-height:1.45;margin-top:8px}
+.section-number{color:#ff80bd;margin-right:5px}
+.brandly-preview{min-height:190px;border-radius:18px}
+.brandly-hook{font-size:26px}
+.setting{padding:12px 0;border-color:#383044}
+.setting b{color:#f6f0ff}.setting small{color:#b5a9c6}
+.auto-row{color:#f6f0ff}.auto-row small{color:#b5a9c6}
+.auto-check{background:#263c56;color:#67bdff}
+select,textarea{background:#15111e!important;border:1px solid #4a3e59!important;color:#f7f1ff!important}
+.progress{background:#383044}.status{color:#c3b8d1}
+footer{color:#8e829f}
+@media(min-width:520px){main{max-width:520px}}
+
 </style>
 
 </head>
@@ -172,73 +218,57 @@ button,select{font-family:inherit}
 <div class="sub">Загрузите видео — GAPCUT AI подготовит его к публикации</div>
 
 <section class="card">
-  <div class="heading">1. Загрузите видео</div>
+  <div class="heading"><span class="section-number">01</span> Видео</div>
+  <div class="preview-stage" id="previewStage">
+    <div class="preview-placeholder" id="previewPlaceholder"><strong>🎬 GAPCUT AI</strong>Видео интихоб кунед, то пешнамоиш пайдо шавад</div>
+    <video id="videoPreview" controls class="hidden"></video>
+  </div>
   <div class="drop" id="drop">
-    <div class="upload-icon">🎬</div>
-    <b>Выберите видео</b>
-    <p>MP4, MOV, AVI, MKV, WEBM и другие • До 100 MB</p>
-    <button class="btn" id="choose">Выбрать видео</button>
+    <b>Видеоро интихоб кунед</b>
+    <p>MP4, MOV, AVI, MKV, WEBM · то 100 MB</p>
+    <button class="btn" id="choose">＋ Интихоби видео</button>
     <input type="file" id="file" accept="video/*,.avi,.flv,.wmv,.3gp,.3g2,.mpeg,.mpg,.ts,.mts,.m2ts,.vob,.ogv,.mxf,.asf,.f4v" hidden>
   </div>
-  <video id="videoPreview" controls class="hidden"></video>
   <div class="file-name" id="fileName"></div>
 </section>
 
 <section class="card">
-  <div class="heading">2. Услуби монтаж — BRANDLY AI</div>
-  <div class="brandly-preview"><div class="brandly-top"><span>GAPCUT AI</span><span>✦ BRANDLY STYLE</span></div><div class="brandly-hook">ЧӢ ТАВР <strong>МУВАФФАҚ</strong> ШУДАН?</div><div class="brandly-caption"><b>МУВАФФАҚ</b> <span>шавӣ имрӯз</span></div><div class="brandly-bottom"><i></i><span>AI AUTO EDIT</span></div></div>
-  <p class="auto-note">Шрифт, анимация, эффектҳои садоӣ ва B-roll — ИИ худкор интихоб мекунад. Танзимоти дастӣ нест.</p>
+  <div class="heading"><span class="section-number">02</span> Субтитрҳо</div>
+  <div class="control-row"><div><div class="control-label">Субтитрҳои автоматӣ</div><div class="control-sub">Тоҷикӣ ва русӣ аз рӯйи овоз</div></div><button class="switch on" data-setting="captions" aria-label="Субтитрҳо"></button></div>
+  <div class="control-sub" style="margin-top:12px">Шрифт</div>
+  <div class="choice-strip" id="fontChoices">
+    <button class="choice" data-font="Montserrat">Montserrat</button><button class="choice" data-font="Inter">Inter</button><button class="choice active" data-font="Modernist">Modernist</button><button class="choice" data-font="Oswald">Oswald</button><button class="choice" data-font="Roboto">Roboto</button>
+  </div>
+  <div class="control-sub">Ранги калимаҳои муҳим</div>
+  <div class="choice-strip" id="colorChoices">
+    <button class="choice color-choice" data-color="FFC94A"><i class="dot" style="background:#ffc94a"></i> Янтарь</button>
+    <button class="choice color-choice active" data-color="4AA8FF"><i class="dot" style="background:#4aa8ff"></i> Лазурь</button>
+    <button class="choice color-choice" data-color="A8E632"><i class="dot" style="background:#a8e632"></i> Лайм</button>
+    <button class="choice color-choice" data-color="FF5E9C"><i class="dot" style="background:#ff5e9c"></i> Розовый</button>
+    <button class="choice color-choice" data-color="FFFFFF"><i class="dot" style="background:#fff"></i> Белый</button>
+  </div>
+  <div class="control-row"><div class="control-label">Ороиши субтитр</div><select class="value-select" id="captionStyle"><option value="brandly">Динамикӣ</option><option value="viral">Viral</option><option value="classic">Классикӣ</option><option value="cinema">Cinema</option><option value="podcast">Podcast</option><option value="karaoke">Karaoke</option><option value="minimal">Minimal</option></select></div>
+  <div class="control-row"><div class="control-label">Андозаи матн</div><select class="value-select" id="captionSize"><option value="s">Хурд</option><option value="m">Миёна</option><option value="l" selected>Калон</option></select></div>
+  <div class="control-row"><div class="control-label">Ҷойгиршавӣ</div><select class="value-select" id="captionPosition"><option value="auto">Автоматӣ</option><option value="center">Марказ</option><option value="top">Боло</option></select></div>
+  <div class="control-row"><div><div class="control-label">Эмодзиҳо</div><div class="control-sub">Дар матн эмодзиҳои мувофиқ илова шаванд</div></div><button class="switch" data-setting="emojis"></button></div>
+  <div class="control-row"><div><div class="control-label">Плашкаҳо ва карточкаҳо</div><div class="control-sub">Барои таъкид кардани фикрҳои муҳим</div></div><button class="switch on" data-setting="cards"></button></div>
+  <div class="control-row"><div><div class="control-label">Сохтани хук (Hook)</div><div class="control-sub">Ҷумлаи ҷолиб дар оғози видео</div></div><button class="switch" data-setting="hook"></button></div>
+  <div class="brandly-preview" style="margin-top:14px"><div class="brandly-top"><span>GAPCUT AI</span><span>✦ PREVIEW</span></div><div class="brandly-hook">ҲАР ЯК <strong>ҲИКОЯ</strong></div><div class="brandly-caption"><b>ДИҚҚАТ</b> <span>мехоҳад</span></div><div class="brandly-bottom"><i></i><span>SUBTITLE PREVIEW</span></div></div>
 </section>
 
-<section class="card"><div class="heading">3. Субтитрҳои автоматӣ</div><div class="auto-row"><span class="auto-check">✓</span><div><b>Забонро ИИ худаш муайян мекунад</b><small>Тоҷикӣ · Русӣ · Омехтаи тоҷикӣ ва русӣ</small></div></div><div class="auto-row"><span class="auto-check">✓</span><div><b>Матн аз рӯйи овози видео</b><small>Маъно ва калимаҳои гуфташуда нигоҳ дошта мешаванд</small></div></div></section>
-
-
-
-<section class="card"><div class="heading">4. Анимация ва садо</div><div class="auto-row"><span class="auto-check">✓</span><div><b>Анимацияи матн — автоматӣ</b><small>Pop-in · Fade · Zoom · мувофиқи саҳна</small></div></div><div class="auto-row"><span class="auto-check">✓</span><div><b>Эффектҳои садоӣ — автоматӣ</b><small>Pop · Whoosh · Ding · мусиқӣ хомӯш ё хеле паст</small></div></div></section>
-
 <section class="card">
-  <div class="heading">6. Настройки монтажа</div>
-
-  <div class="setting">
-    <div><b>Удалить паузы</b><small>Автоматически убрать тишину</small></div>
-    <button class="sw on" data-setting="pauses"></button>
-  </div>
-
-  <div class="setting">
-    <div><b>Убрать слова-паразиты</b><small>Удалить лишние «эээ» и повторы</small></div>
-    <button class="sw on" data-setting="fillers"></button>
-  </div>
-
-  <div class="setting">
-    <div><b>Автосубтитры</b><small>Распознавание речи AI</small></div>
-    <button class="sw on" data-setting="captions"></button>
-  </div>
-
-  <div class="setting">
-    <div><b>AI: вставлять изображения и B-roll</b><small>Автоматически подбирает фото и видео по смыслу речи</small></div>
-    <button class="sw on" data-setting="images"></button>
-  </div>
-
-  <div class="setting">
-    <div><b>Интенсивность нарезки</b><small>Выберите, насколько плотно AI удаляет паузы</small></div>
-    <select id="cutMode" style="max-width:155px">
-      <option value="light" selected>Бережная (рекомендуется)</option>
-      <option value="normal">Умная</option>
-      <option value="tight">Динамичная</option>
-      <option value="off">Без нарезки</option>
-    </select>
-  </div>
+  <div class="heading"><span class="section-number">03</span> Параметрҳои монтаж</div>
+  <div class="control-row"><div><div class="control-label">Эффектҳои садоӣ</div><div class="control-sub">Pop, Whoosh, Ding</div></div><button class="switch on" data-setting="textSounds"></button></div>
+  <div class="control-row"><div><div class="control-label">Медиа-карточкаҳо / B-roll</div><div class="control-sub">Кадрҳо аз рӯйи маънои сухан</div></div><button class="switch on" data-setting="images"></button></div>
+  <div class="control-row"><div><div class="control-label">Ҳаракати камера</div><div class="control-sub">Zoom ва ҳаракати сабук</div></div><button class="switch on" data-setting="camera"></button></div>
+  <div class="control-row"><div><div class="control-label">Наезд камера дар оғоз</div><div class="control-sub">Zoom-in барои ҷалби диққат</div></div><button class="switch on" data-setting="introZoom"></button></div>
+  <div class="control-row"><div class="control-label">Буридани видео</div><select class="value-select" id="cutMode"><option value="light">Сабук</option><option value="normal">Мӯътадил</option><option value="tight">Динамикӣ</option><option value="off">Бе буридан</option></select></div>
+  <div class="control-row"><div class="control-label">Суръати коркард</div><select class="value-select" id="quality"><option value="fast">Оддӣ</option><option value="best">Сифати баланд</option></select></div>
 </section>
 
-
-
 <section class="card">
-  <div class="heading">8. Формат видео</div>
-  <select id="format">
-    <option value="9:16">9:16 — Reels / TikTok / Shorts</option>
-    <option value="16:9">16:9 — YouTube</option>
-    <option value="1:1">1:1 — Instagram</option>
-  </select>
+  <div class="heading"><span class="section-number">04</span> Формати видео</div>
+  <select id="format"><option value="9:16">9:16 — Reels / TikTok / Shorts</option><option value="16:9">16:9 — YouTube</option><option value="1:1">1:1 — Instagram</option></select>
 </section>
 
 <section class="card">
@@ -262,8 +292,8 @@ let selectedFile=null;
 let completedJobId=null;
 let transcriptLines=[];
 let settings={
-  style:"Brandly", language:"tg_ru", pauses:true, fillers:true,
-  captions:true, images:true, format:"9:16", textSounds:true, font:"",
+  style:"brandly", language:"tg_ru", pauses:true, fillers:true,
+  captions:true, images:true, format:"9:16", textSounds:true, font:"Modernist", emojis:false, cards:true, hook:false, camera:true, introZoom:true, accent:"4AA8FF",
   cutMode:"light", captionSize:"l", captionPosition:"center", captionAccent:"#4AA8FF"
 };
 let busy=false;
@@ -322,16 +352,16 @@ $("file").onchange=e=>{
   if(f.size>100*1024*1024){alert("Максимальный размер видео — 100 MB");return;}
   selectedFile=f;
   $("videoPreview").src=URL.createObjectURL(f);
-  $("videoPreview").classList.remove("hidden");
+  $("videoPreview").classList.remove("hidden");\n  $("previewPlaceholder").classList.add("hidden");
   $("fileName").textContent=f.name;
   setStatus("Видео выбрано. Можно начинать монтаж.",0);
 };
 
-document.querySelectorAll(".sw").forEach(b=>b.onclick=()=>{
+document.querySelectorAll(".switch").forEach(b=>b.onclick=()=>{
   b.classList.toggle("on");
   settings[b.dataset.setting]=b.classList.contains("on");
 });
-$("format").onchange=e=>settings.format=e.target.value;
+$("format").onchange=e=>settings.format=e.target.value;\n$("captionStyle").onchange=e=>settings.style=e.target.value;\n$("captionSize").onchange=e=>settings.captionSize=e.target.value;\n$("captionPosition").onchange=e=>settings.captionPosition=e.target.value;\ndocument.querySelectorAll("[data-font]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-font]").forEach(x=>x.classList.toggle("active",x===b));settings.font=b.dataset.font;});\ndocument.querySelectorAll("[data-color]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-color]").forEach(x=>x.classList.toggle("active",x===b));settings.accent=b.dataset.color;});
 $("cutMode").onchange=e=>settings.cutMode=e.target.value;
 
 $("start").onclick=async()=>{
@@ -351,7 +381,7 @@ $("start").onclick=async()=>{
     const renderSettings={
       style:"brandly",
       video_format:settings.format,
-      subtitles:settings.captions?"1":"0",
+      subtitles:settings.captions?"1":"0",\n      emojis:settings.emojis?"1":"0",\n      cards:settings.cards?"1":"0",\n      hook:settings.hook?"1":"0",
       broll:settings.images?"auto":"off",
       cut:(settings.pauses||settings.fillers)?settings.cutMode:"off",
       size:"l",
@@ -359,12 +389,12 @@ $("start").onclick=async()=>{
       accent:"4AA8FF",
       sfx:settings.textSounds?"1":"0",
       sound:settings.textSounds?"normal":"off",
-      camera:"dynamic",
+      camera:settings.camera?"dynamic":"off",
       grade:"cinematic",
       music:"off",
       music_level:"low",
       music_sync:"1",
-      zoom:"1",
+      zoom:settings.introZoom?"1":"0",
       fx:"1",
       anim:settings.captions?"auto":"",
       anim_out:settings.captions?"auto":"",
@@ -375,7 +405,7 @@ $("start").onclick=async()=>{
     const upload=new FormData();
     upload.append("file",selectedFile,selectedFile.name);
     upload.append("language",settings.language);
-    upload.append("quality","fast");
+    upload.append("quality",$("quality").value);
     upload.append("render_settings",JSON.stringify(renderSettings));
     upload.append("init_data",initData);
 
