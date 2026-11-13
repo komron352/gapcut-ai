@@ -30,7 +30,8 @@ header {
   display:flex;align-items:center;justify-content:space-between;
   margin-bottom:25px;
 }
-.logo {font-size:23px;font-weight:900}\n.lang-switch{display:flex;gap:4px;padding:4px;border-radius:14px;background:#30283b}.lang-btn{border:0;border-radius:10px;padding:7px 10px;background:transparent;color:#b9aec9;font-weight:800}.lang-btn.active{background:#f4edff;color:#191321}
+.logo {font-size:23px;font-weight:900}
+.lang-switch{display:flex;gap:4px;padding:4px;border-radius:14px;background:#30283b}.lang-btn{border:0;border-radius:10px;padding:7px 10px;background:transparent;color:#b9aec9;font-weight:800}.lang-btn.active{background:#f4edff;color:#191321}
 .logo span {
   background:var(--gradient);
   -webkit-background-clip:text;
@@ -383,7 +384,8 @@ let settings={
   captions:true, images:true, format:"9:16", textSounds:true, font:"Montserrat", emojis:false, cards:true, hook:false, camera:true, introZoom:true, accent:"4AA8FF",
   cutMode:"light", captionSize:"l", captionPosition:"center", captionAccent:"#4AA8FF"
 };
-let busy=false;\nlet UI_LANG="ru";
+let busy=false;
+let UI_LANG="ru";
 
 function setStatus(message,progress){
   $("status").textContent=message;
@@ -439,7 +441,8 @@ $("file").onchange=e=>{
   if(f.size>100*1024*1024){alert("Максимальный размер видео — 100 MB");return;}
   selectedFile=f;
   $("videoPreview").src=URL.createObjectURL(f);
-  $("videoPreview").classList.remove("hidden");\n  $("previewPlaceholder").classList.add("hidden");
+  $("videoPreview").classList.remove("hidden");
+  $("previewPlaceholder").classList.add("hidden");
   $("fileName").textContent=f.name;
   setStatus("Видео выбрано. Можно начинать монтаж.",0);
 };
@@ -448,7 +451,12 @@ document.querySelectorAll(".switch").forEach(b=>b.onclick=()=>{
   b.classList.toggle("on");
   settings[b.dataset.setting]=b.classList.contains("on");
 });
-$("format").onchange=e=>settings.format=e.target.value;\n$("captionStyle").onchange=e=>settings.style=e.target.value;\n$("captionSize").onchange=e=>settings.captionSize=e.target.value;\n$("captionPosition").onchange=e=>settings.captionPosition=e.target.value;\ndocument.querySelectorAll("[data-font]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-font]").forEach(x=>x.classList.toggle("active",x===b));settings.font=b.dataset.font;});\ndocument.querySelectorAll("[data-color]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-color]").forEach(x=>x.classList.toggle("active",x===b));settings.accent=b.dataset.color;});
+$("format").onchange=e=>settings.format=e.target.value;
+$("captionStyle").onchange=e=>settings.style=e.target.value;
+$("captionSize").onchange=e=>settings.captionSize=e.target.value;
+$("captionPosition").onchange=e=>settings.captionPosition=e.target.value;
+document.querySelectorAll("[data-font]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-font]").forEach(x=>x.classList.toggle("active",x===b));settings.font=b.dataset.font;});
+document.querySelectorAll("[data-color]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-color]").forEach(x=>x.classList.toggle("active",x===b));settings.accent=b.dataset.color;});
 $("cutMode").onchange=e=>settings.cutMode=e.target.value;
 
 $("start").onclick=async()=>{
