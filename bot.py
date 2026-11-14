@@ -3933,24 +3933,8 @@ async def render_video(
             ])
             logger.info("Auto cut %s: %s segments, %.1fs", level, len(segments), duration)
 
-    # BRANDLY: reserve the closing visual section for full-screen B-roll.
-    # The original audio track remains underneath as voice-over.
-    if style_name == "brandly":
-        outro_cards = list(options.get("cards") or [])
-        if outro_cards:
-            outro_duration = min(11.0, max(4.0, duration * 0.55))
-            outro_start = max(0.0, duration - outro_duration)
-            slot = outro_duration / len(outro_cards)
-            scheduled = []
-            for index, card in enumerate(outro_cards):
-                item = dict(card)
-                item["at"] = round(outro_start + index * slot, 3)
-                item["len"] = round(slot, 3)
-                item["mode"] = "full"
-                scheduled.append(item)
-            options = dict(options, cards=scheduled, brandly_outro=True)
-            logger.info("Brandly B-roll outro: %s scenes over %.1fs", len(scheduled), outro_duration)
-
+    # Keep AI-selected B-roll timestamps. Do not replace the final half of
+    # the speaker's footage with a forced full-screen outro montage.
     scenes_final = []
     for scene in options.get("scenes") or []:
         a, b = float(scene["start"]), float(scene["end"])
