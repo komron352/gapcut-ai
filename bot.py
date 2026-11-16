@@ -4405,17 +4405,19 @@ async def run_render_job(job, style, video_format, lines, options):
                     )
                     report(95, "Видеои Renderster гирифта шуд")
                     touch(job, renderster=renderster_result)
-                except UserError as render_error:
-                    error_text = str(render_error).lower()
-                    if "trial_required" not in error_text and "api (402)" not in error_text:
-                        raise
-                    # Renderster free trial has ended. Continue with GAPCUT's
-                    # built-in FFmpeg renderer instead of failing the user's job.
-                    logger.warning(
-                        "Renderster trial exhausted; falling back to local FFmpeg renderer for job %s",
+                except Exception:
+                    # Hybrid mode must be resilient: a Renderster outage, quota,
+                    # timeout, invalid response or exhausted trial must not make
+                    # the user's edit fail when the built-in renderer can run.
+                    logger.exception(
+                        "Renderster failed; falling back to GAPCUT FFmpeg renderer for job %s",
                         job["id"],
                     )
                     use_local_renderer = True
+                    # Never let a partial provider artifact be mistaken for a
+                    # completed render by the local pipeline.
+                    with suppress(OSError):
+                        output_path.unlink()
 
             if use_local_renderer:
                 report(12, "GAPCUT AI муҳаррики дохилӣ монтаж мекунад")
