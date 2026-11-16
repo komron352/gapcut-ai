@@ -77,6 +77,8 @@ try:
 except ImportError:
     Image = ImageDraw = ImageFont = None
 
+from gapcut_engine import build_edit_decision_list
+
 
 # =========================================================
 # CONFIG
@@ -204,12 +206,14 @@ async def renderster_auto_edit(input_path, output_path, video_format="9:16", sty
     orientation = "vertical" if video_format == "9:16" else (
         "horizontal" if video_format == "16:9" else "original"
     )
+    # Renderster documents "none" as the explicit no-music option.
+    # Do not add unrequested stock footage or discard abandoned takes.
     options = {
         "orientation": orientation,
-        "music": "auto",
-        "stock_broll": True,
+        "music": "none",
+        "stock_broll": False,
         "clean_audio": "auto",
-        "retakes": "cut",
+        "retakes": "keep",
     }
     chosen_style = style_id or RENDERSTER_EDIT_STYLE_ID
     if chosen_style:
@@ -4063,7 +4067,10 @@ async def render_video(
     options = dict(
         options,
         scenes_final=scenes_final,
-        camera_eff=camera if camera in ("auto", "zoom_in", "zoom_out", "push", "shake", "dynamic", "off") else "",
+        # "dynamic" is the UI's request for director-led movement. Resolve it
+        # through semantic scene roles instead of applying a zoom to every caption.
+        camera_eff=("auto" if camera == "dynamic" else camera)
+                    if camera in ("auto", "zoom_in", "zoom_out", "push", "shake", "dynamic", "off") else "",
         scene_marks=([sc["start"] for sc in scenes_final[1:] if sc.get("importance", 0.5) >= 0.8]
                      if scenes_final else None),
         grade_filter=grade_filter(options.get("color"), options.get("grade", "off")),
@@ -4409,6 +4416,16 @@ def public_job(job):
         data["cover"] = {"times": cover.get("times", []), "title": cover.get("title", "")}
         data["cards"] = [public_card(c) for c in job["cards"]]
         data["broll_info"] = job.get("broll_info", {})
+        plan = job.get("edit_plan") or {}
+        data["edit_plan_summary"] = {
+            "schema_version": plan.get("schema_version"),
+            "scene_count": len(plan.get("scenes") or []),
+            "caption_count": len(plan.get("captions") or []),
+            "motion_count": len(plan.get("motion") or []),
+            "broll_count": len(plan.get("broll") or []),
+            "hook_selected": bool(plan.get("hook")),
+            "output_duration": plan.get("output_duration"),
+        }
     if job["status"] == "done":
         data["download_url"] = f"/api/jobs/{job['id']}/download"
     return data
@@ -4466,6 +4483,10 @@ async def run_transcribe_job(job):
             job["cards"], job["broll_info"] = await suggest_broll(
                 words, job["duration"], topic=job["topic"]
             )
+            job["edit_plan"] = build_edit_decision_list(
+                words, job["scenes"], job["cards"], job["duration"],
+                job.get("render_style", "viral"), job.get("render_format", "9:16"),
+            )
             job["cut_preview"] = cut_preview(words, job["duration"])
             touch(
                 job,
@@ -4484,6 +4505,10 @@ async def run_transcribe_job(job):
             render_options = dict(job.get("render_options") or {})
             if render_options.get("broll", "auto") != "off":
                 render_options["cards"] = list(job.get("cards") or [])
+            # Scene analysis is only useful when it reaches the renderer.
+            render_options["scenes"] = list(job.get("scenes") or [])
+            render_options["color"] = job.get("color")
+            render_options["music_mood"] = job.get("music_mood")
             await run_render_job(
                 job,
                 job.get("render_style", "dynamic"),
@@ -4504,6 +4529,21 @@ async def run_render_job(job, style, video_format, lines, options):
                 words = lines_to_words(lines, job["duration"])
             else:
                 words = job["words"]
+
+            cut_level = options.get("cut", "off")
+            cut_plan = plan_cuts(words, job["duration"], cut_level) if cut_level in CUT_LEVELS else None
+            job["edit_plan"] = build_edit_decision_list(
+                words, job.get("scenes") or [], job.get("cards") or [],
+                job["duration"], style, video_format,
+                keep_ranges=cut_plan["segments"] if cut_plan else None,
+            )
+            options = dict(
+                options,
+                edit_plan=job["edit_plan"],
+                scenes=list(job.get("scenes") or options.get("scenes") or []),
+                color=job.get("color") or options.get("color"),
+                music_mood=job.get("music_mood") or options.get("music_mood"),
+            )
 
             output_path = job["dir"] / "gapcut_ai.mp4"
             if output_path.exists():
