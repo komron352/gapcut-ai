@@ -87,3 +87,9 @@ These filters still need listening tests against real quiet/noisy Tajik and Russ
 ## Runtime monitoring
 
 The existing `/health` response now includes best-effort resident-memory usage from Linux procfs, active job count, whether the single heavy-processing lock is held, and the configured stored-job cap. This is telemetry only; it does not make in-memory jobs restart-safe.
+
+## Safe aspect-ratio reframing
+
+The local proxy now preserves the source aspect ratio instead of resizing every source directly to the requested output canvas. For a large source/target aspect-ratio mismatch, the renderer uses a blurred, darkened fill behind the complete source frame. This avoids distorting a landscape speaker into a vertical frame or silently center-cropping the subject.
+
+This is a safe fallback, not face tracking. Face-aware tracking remains available only through the optional Renderster path at this stage; the local FFmpeg renderer does not yet detect or follow faces.
