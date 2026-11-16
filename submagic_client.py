@@ -6,6 +6,7 @@ acceptance tests are complete.
 """
 from __future__ import annotations
 
+import json
 import mimetypes
 import os
 import re
@@ -126,7 +127,7 @@ class SubmagicClient:
         if not path.is_file():
             raise SubmagicError("The source video file does not exist.")
         size = path.stat().st_size
-        if size <= 0 or size > MAX_UPLOAD_BYTES:
+        if size <= 0 or size >= MAX_UPLOAD_BYTES:
             raise SubmagicError("The video must be non-empty and smaller than 2 GB.")
         if not isinstance(title, str) or not title.strip() or len(title.strip()) > 100:
             raise SubmagicError("Project title must contain 1–100 characters.")
@@ -148,7 +149,7 @@ class SubmagicClient:
         if template_name:
             fields["templateName"] = template_name
         if dictionary:
-            fields["dictionary"] = __import__("json").dumps(
+            fields["dictionary"] = json.dumps(
                 [str(word)[:50] for word in dictionary[:100]],
                 ensure_ascii=False,
             )
