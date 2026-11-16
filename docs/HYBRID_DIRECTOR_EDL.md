@@ -18,7 +18,7 @@ This branch introduces the first deterministic Edit Decision List (EDL) layer wh
 ### Not implemented yet
 
 - Face detection/tracking and face-aware reframing.
-- True speech VAD (current pause detection is FFmpeg energy-based silence detection).
+- WebRTC VAD is now integrated for internal speech/silence boundaries, with FFmpeg energy-based silence detection as a fallback. Its thresholds still need validation on real quiet/noisy Tajik and Russian recordings.
 - Full semantic alignment of competing Tajik/Russian transcripts.
 - Per-word calibrated confidence scores from the speech provider.
 - User-facing transcript correction controls (would require a separately approved UI change; current Mini App must remain unchanged).
@@ -103,3 +103,11 @@ This is a safe fallback, not face tracking. Face-aware tracking remains availabl
 - The existing job TTL cleanup still removes expired job directories.
 
 **Storage caveat:** the default path remains the system temporary directory and is reported as `ephemeral_default`. For recovery across Render instance replacement, set `GAPCUT_STORAGE_DIR` to an actual persistent-disk mount path. A configured path is reported as `custom_path_configured`; the health endpoint cannot verify that the path is truly backed by persistent storage. No Render environment variable or disk setting was changed in this branch.
+
+## Voice activity detection
+
+- Added `webrtcvad-wheels==2.0.14.post1` (MIT; Python 3.10+ and Python 3.11 wheels available).
+- The backend decodes mono 16 kHz PCM to a temporary file and evaluates 30 ms frames with WebRTC VAD mode 1. It streams frames from disk rather than loading the full PCM track into RAM.
+- Short unvoiced gaps inside phrases are bridged; only sufficiently long internal pauses become chunk boundaries. Leading/trailing silence is not used to create empty ASR chunks.
+- If the optional VAD pass fails or yields no speech frames, the existing FFmpeg `silencedetect` fallback remains active.
+- Unit tests cover short-gap bridging and long-pause detection. Real-media tuning is still pending.
