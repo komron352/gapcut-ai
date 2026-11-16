@@ -36,6 +36,7 @@ import hmac
 import random
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -75,6 +76,16 @@ try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
     Image = ImageDraw = ImageFont = None
+try:
+    import webrtcvad
+except ImportError:
+    webrtcvad = None
+
+from gapcut_engine import (
+    build_edit_decision_list,
+    build_transcript_qa,
+    vad_flags_to_silences,
+)
 
 
 # =========================================================
@@ -144,11 +155,23 @@ LLM_MODEL = os.getenv("LLM_MODEL", os.getenv("KEYWORD_MODEL", "auto")).strip() o
 LLM_CHAT_URL = f"{LLM_BASE_URL}/chat/completions" if LLM_BASE_URL else ""
 FFMPEG_PRESET = os.getenv("FFMPEG_PRESET", "ultrafast").strip() or "ultrafast"
 
-BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
+_STORAGE_DIR = os.getenv("GAPCUT_STORAGE_DIR", "").strip()
+STORAGE_DIR_CONFIGURED = bool(_STORAGE_DIR)
+BASE_DIR = Path(_STORAGE_DIR) if _STORAGE_DIR else Path(tempfile.gettempdir()) / "gapcut_ai"
 FONTS_DIR = Path(os.getenv("FONTS_DIR", str(Path(__file__).resolve().parent / "fonts")))
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".flv", ".wmv", ".3gp", ".3g2", ".mpeg", ".mpg", ".ts", ".mts", ".m2ts", ".vob", ".ogv", ".mxf", ".asf", ".f4v"}
-ALLOWED_STYLES = {"viral", "brandly", "classic", "cinema", "podcast", "karaoke", "creator", "keyword", "minimal", "dynamic"}
+ALLOWED_STYLES = {
+    "viral", "brandly", "classic", "cinema", "podcast", "karaoke",
+    "creator", "keyword", "minimal", "dynamic",
+    "kinetic", "premium", "clean", "cinematic",
+}
+STYLE_ALIASES = {
+    "kinetic": "brandly",
+    "premium": "podcast",
+    "clean": "minimal",
+    "cinematic": "cinema",
+}
 ALLOWED_FORMATS = {"9:16", "16:9", "1:1", "original"}
 ALLOWED_LANGUAGES = {"tg", "ru", "tg_ru"}
 LANGUAGE_ALIASES = {"both": "tg_ru", "tg+ru": "tg_ru", "tg-ru": "tg_ru"}
@@ -195,20 +218,28 @@ RENDERSTER_EDIT_STYLE_ID = os.getenv("RENDERSTER_EDIT_STYLE_ID", "").strip()
 RENDERSTER_BASE_URL = "https://renderster.com"
 
 
-async def renderster_auto_edit(input_path, output_path, video_format="9:16", style_id=""):
+async def renderster_auto_edit(
+    input_path, output_path, video_format="9:16", style_id="", render_settings=None
+):
     """Run Renderster's async /media auto_edit job and download its finished MP4."""
     if not RENDERSTER_API_KEY:
         raise UserError("RENDERSTER_API_KEY дар сервер танзим нашудааст.", 503)
 
+    render_settings = render_settings or {}
     orientation = "vertical" if video_format == "9:16" else (
         "horizontal" if video_format == "16:9" else "original"
     )
+    # Music is opt-in. Renderster's stock B-roll is only enabled when the user
+    # selected automatic B-roll; its API matches stock footage to the speech.
+    music_setting = render_settings.get("music") or "off"
+    provider_music = "none" if music_setting in ("", "off") else music_setting
+    broll_mode = render_settings.get("broll", "auto")
     options = {
         "orientation": orientation,
-        "music": "auto",
-        "stock_broll": True,
-        "clean_audio": "auto",
-        "retakes": "cut",
+        "music": provider_music,
+        "stock_broll": broll_mode == "auto",
+        "clean_audio": render_settings.get("clean_audio", "auto"),
+        "retakes": "keep",
     }
     chosen_style = style_id or RENDERSTER_EDIT_STYLE_ID
     if chosen_style:
@@ -635,6 +666,55 @@ def even(value):
     return max(2, value - (value % 2))
 
 
+async def validate_render_output(output_path, expected_duration=None):
+    """Do not mark a job done until the output is a readable A/V video."""
+    path = Path(output_path)
+    if not path.exists() or path.stat().st_size < 1000:
+        raise UserError("Монтаж файл видеои тайёрро насохт.", 500)
+    if path.stat().st_size > MAX_OUTPUT_SIZE:
+        raise UserError("Андозаи видеои тайёр аз ҳадди иҷозат зиёд аст.", 500)
+
+    info, actual_duration = await get_video_info(path)
+    has_video, has_audio, width, height = probe_summary(info)
+    if not has_video or not has_audio or width < 2 or height < 2:
+        raise UserError("Видеои тайёр роҳҳои тасвир ё садои дуруст надорад.", 500)
+    if actual_duration > float(MAX_DURATION) + 1.0:
+        raise UserError("Давомнокии видеои тайёр аз ҳадди иҷозат зиёд аст.", 500)
+
+    # Probe metadata alone does not prove every packet can be decoded.
+    # Run a bounded, single-threaded decode check before marking the job done.
+    await run_command(
+        [
+            "ffmpeg", "-v", "error", "-xerror", "-i", str(path),
+            "-map", "0:v:0", "-map", "0:a:0?", "-f", "null", "-",
+        ],
+        timeout=180,
+        cwd=path.parent,
+        capture=True,
+    )
+
+    if expected_duration is not None:
+        expected = float(expected_duration)
+        tolerance = max(0.8, expected * 0.05)
+        if abs(actual_duration - expected) > tolerance:
+            logger.error(
+                "Render duration mismatch: expected %.3fs, got %.3fs",
+                expected, actual_duration,
+            )
+            raise UserError(
+                "Давомнокии видеои тайёр ба нақшаи монтаж мувофиқат намекунад.",
+                500,
+            )
+
+    return {
+        "duration": round(actual_duration, 3),
+        "width": width,
+        "height": height,
+        "has_audio": has_audio,
+        "size": path.stat().st_size,
+    }
+
+
 def get_output_size(video_format, display_width, display_height):
     if video_format == "9:16":
         return 720, 1280
@@ -650,9 +730,28 @@ def get_output_size(video_format, display_width, display_height):
     return even(width * factor), even(height * factor)
 
 
-def get_video_filter(video_format, width, height):
+def get_video_filter(video_format, width, height, source_width=None, source_height=None):
+    """Reframe without distorting or silently chopping off a wide/tall source."""
     if video_format == "original":
-        return f"scale={width}:{height},setsar=1"
+        return f"scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1"
+
+    target_ratio = float(width) / max(1.0, float(height))
+    source_ratio = (
+        float(source_width) / max(1.0, float(source_height))
+        if source_width and source_height else target_ratio
+    )
+    if source_ratio > target_ratio * 1.25 or source_ratio < target_ratio / 1.25:
+        # Safe fallback when local face tracking is unavailable: preserve the
+        # complete source frame over a soft blurred fill instead of center-cropping it.
+        return (
+            f"split=2[reframe_bg][reframe_fg];"
+            f"[reframe_bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},gblur=sigma=24:steps=2,"
+            f"eq=brightness=-0.18:saturation=0.82[reframe_fill];"
+            f"[reframe_fg]scale={width}:{height}:force_original_aspect_ratio=decrease:"
+            f"flags=lanczos[reframe_main];"
+            f"[reframe_fill][reframe_main]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1"
+        )
     return (
         f"scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height},setsar=1"
@@ -898,7 +997,7 @@ def script_score(parsed):
     # Mixed mode compares two Whisper transcripts for the same time chunk.
     # Reward native Tajik letters and words from the Tajik lexicon, instead
     # of choosing a whole chunk mainly by small log-probability differences.
-    tokens = [core_token(token).lower() for token in re.findall(r"[^\\W_]+", text, flags=re.UNICODE)]
+    tokens = [core_token(token).lower() for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)]
     tajik_hits = 0
     for token in tokens:
         if not token:
@@ -912,8 +1011,122 @@ def script_score(parsed):
     score += min(1.2, native_letters * 0.30)
     return score
 
+def merge_mixed_transcripts(tg_parsed, ru_parsed):
+    """Keep the stronger transcript, then recover clearly non-overlapping words
+    from the other language pass. Never duplicate words covering the same audio.
+    """
+    tg_words = [dict(w, lang="tg") for w in tg_parsed.get("words", [])]
+    ru_words = [dict(w, lang="ru") for w in ru_parsed.get("words", [])]
+    if not tg_words:
+        return normalize_words(ru_words)
+    if not ru_words:
+        return normalize_words(tg_words)
 
-async def detect_silences(audio_path, work_dir):
+    primary_lang = "tg" if script_score(tg_parsed) >= script_score(ru_parsed) else "ru"
+    primary = tg_words if primary_lang == "tg" else ru_words
+    secondary = ru_words if primary_lang == "tg" else tg_words
+
+    merged = list(primary)
+    common_tajik = {"салом", "ман", "ту", "шумо", "мо", "онҳо", "ҳаст", "нест"}
+
+    def has_tajik_evidence(item):
+        token = core_token(item.get("word", "")).lower()
+        return (
+            any(char in TG_LETTERS for char in token)
+            or token in common_tajik
+            or bool(TAJIK_INDEX.get(tg_key(token)))
+        )
+
+    for candidate in secondary:
+        try:
+            c_start = float(candidate["start"])
+            c_end = float(candidate["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if c_end <= c_start or c_end - c_start > 2.5:
+            continue
+
+        collisions = []
+        c_mid = (c_start + c_end) / 2
+        for existing in merged:
+            e_start, e_end = float(existing["start"]), float(existing["end"])
+            overlap = max(0.0, min(c_end, e_end) - max(c_start, e_start))
+            shorter = max(0.04, min(c_end - c_start, e_end - e_start))
+            e_mid = (e_start + e_end) / 2
+            if overlap / shorter >= 0.30 or abs(c_mid - e_mid) <= 0.12:
+                collisions.append(existing)
+
+        if not collisions:
+            merged.append(candidate)
+            continue
+
+        # Prefer a clearly Tajik token over a Russian-pass transliteration or
+        # translation at the same timestamp. Otherwise keep the chunk backbone.
+        replace = next((
+            existing for existing in collisions
+            if candidate.get("lang") == "tg"
+            and has_tajik_evidence(candidate)
+            and not has_tajik_evidence(existing)
+        ), None)
+        if replace is not None:
+            merged.remove(replace)
+            merged.append(candidate)
+
+    return normalize_words(merged)
+
+
+def detected_language_ranges(words, start, end):
+    """Compact per-word language tags into phrase-level detected ranges."""
+    ranges = []
+    for word in words:
+        lang = word.get("lang")
+        if lang not in ("tg", "ru"):
+            continue
+        a = max(float(start), float(word["start"]))
+        b = min(float(end), float(word["end"]))
+        if b <= a:
+            continue
+        if ranges and ranges[-1]["lang"] == lang and a - ranges[-1]["end"] <= 0.8:
+            ranges[-1]["end"] = b
+        else:
+            ranges.append({"start": a, "end": b, "lang": lang})
+    return ranges
+
+
+async def detect_silences(audio_path, work_dir, duration=None):
+    # WebRTC VAD is lightweight and processes 30 ms PCM frames from disk, so
+    # long recordings are not loaded into RAM. FFmpeg energy detection remains
+    # the fallback if the optional VAD module or its PCM pass is unavailable.
+    if webrtcvad is not None:
+        pcm_path = Path(work_dir) / "vad_audio_16k_mono.pcm"
+        try:
+            await run_command(
+                [
+                    "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-i", str(audio_path), "-vn", "-ac", "1", "-ar", "16000",
+                    "-f", "s16le", str(pcm_path),
+                ],
+                timeout=90,
+                cwd=work_dir,
+            )
+            detector = webrtcvad.Vad(1)
+            flags = []
+            frame_bytes = 960  # 30 ms * 16 kHz * 16-bit mono
+            with pcm_path.open("rb") as pcm:
+                while True:
+                    frame = pcm.read(frame_bytes)
+                    if len(frame) != frame_bytes:
+                        break
+                    flags.append(detector.is_speech(frame, 16000))
+            if any(flags):
+                measured_duration = duration or len(flags) * 0.03
+                return vad_flags_to_silences(flags, measured_duration)
+        except Exception:
+            logger.warning("WebRTC VAD failed; falling back to FFmpeg silencedetect", exc_info=True)
+        finally:
+            with suppress(OSError):
+                pcm_path.unlink()
+
     stderr = await run_command(
         [
             "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info",
@@ -1077,14 +1290,10 @@ def dictionary_fixes(words):
     # High-confidence corrections observed in Tajik speech recognition.
     # Keep a strict one-token-to-one-token mapping so subtitle timestamps
     # remain aligned with the original audio.
+    # Only unambiguous orthographic normalization is automatic here.
+    # Context-dependent or domain-specific tokens are left untouched for review.
     common_tajik_fixes = {
-        "ке": "ки",
         "имруз": "имрӯз",
-        "експерти": "экспертӣ",
-        "експерті": "экспертӣ",
-        "стартіг": "старти",
-        "стартиг": "старти",
-        "курсі": "курси",
     }
 
     for item in words:
@@ -1223,7 +1432,7 @@ async def transcribe_video(audio_path, work_dir, language, audio_duration, repor
             detected = [{"start": 0.0, "end": audio_duration, "lang": language}]
         else:
             report(25, "Анализируем паузы")
-            silences = await detect_silences(audio_path, work_dir)
+            silences = await detect_silences(audio_path, work_dir, audio_duration)
             chunks = plan_chunks(audio_duration, silences)
 
             words = []
@@ -1263,19 +1472,14 @@ async def transcribe_video(audio_path, work_dir, language, audio_duration, repor
 
                 if not tg_parsed["words"] and not ru_parsed["words"]:
                     continue
-                if not ru_parsed["words"]:
-                    chosen, lang = tg_parsed, "tg"
-                elif not tg_parsed["words"]:
-                    chosen, lang = ru_parsed, "ru"
-                elif script_score(tg_parsed) >= script_score(ru_parsed):
-                    chosen, lang = tg_parsed, "tg"
-                else:
-                    chosen, lang = ru_parsed, "ru"
 
-                for item in chosen["words"]:
-                    item["lang"] = lang
-                words.extend(chosen["words"])
-                detected.append({"start": start, "end": end, "lang": lang})
+                # Do not label an entire 8–18 second chunk as one language.
+                # Keep the stronger pass as the backbone and recover words
+                # present only in the alternate pass when their timestamps do
+                # not collide with an already recognized word.
+                chunk_words = merge_mixed_transcripts(tg_parsed, ru_parsed)
+                words.extend(chunk_words)
+                detected.extend(detected_language_ranges(chunk_words, start, end))
 
     words = normalize_words(words)
     if not words:
@@ -2117,7 +2321,8 @@ def transition_filters(points, width):
 
 def build_ass(words, style_name, width, height, output_path,
               accent=None, size="m", position="auto",
-              font=None, font2=None, mix=False, keys=True, anim=None, anim_out=None, anim_log=None):
+              font=None, font2=None, mix=False, keys=True, anim=None, anim_out=None,
+              anim_log=None, hook_range=None):
     style = dict(STYLES.get(style_name, STYLES["viral"]))
     if accent:
         style["active"] = accent
@@ -2243,6 +2448,19 @@ def build_ass(words, style_name, width, height, output_path,
         if p_index + 1 < len(phrases):
             phrase_end = min(phrase_end, phrases[p_index + 1][0]["start"] - 0.02)
         phrase_end = max(phrase_end, phrase_start + 0.15)
+        is_hook_phrase = False
+        if hook_range and len(hook_range) == 2:
+            try:
+                hook_start, hook_end = float(hook_range[0]), float(hook_range[1])
+                is_hook_phrase = phrase_start < hook_end and phrase_end > hook_start
+            except (TypeError, ValueError):
+                is_hook_phrase = False
+        phrase_font_size = int(font_size * 1.12) if is_hook_phrase else font_size
+        hook_prefix = (
+            "{\\fs%d\\1c%s\\b1}" % (phrase_font_size, ass_tag_color(style["active"]))
+            if is_hook_phrase else ""
+        )
+        hook_suffix = "{\\r%s}" % sname if is_hook_phrase else ""
 
         mode = style["mode"]
         if mode == "dynamic":
@@ -2256,11 +2474,11 @@ def build_ass(words, style_name, width, height, output_path,
                 pool = flagged or list(range(len(phrase)))
                 kidx = max(pool, key=lambda i: len(core_token(phrase[i]["word"])))
                 ktext = display(phrase[kidx]["word"])
-                ksize = int(font_size * min(1.0, 9.0 / max(len(ktext), 1)))
+                ksize = int(phrase_font_size * min(1.0, 9.0 / max(len(ktext), 1)))
                 lead = " ".join(display(t["word"]) for j, t in enumerate(phrase) if j != kidx)
                 pieces = []
                 if lead:
-                    pieces.append("{\\fs%d\\1c&HFFFFFF&}%s" % (int(font_size * 0.52), lead))
+                    pieces.append("{\\fs%d\\1c&HFFFFFF&}%s" % (int(phrase_font_size * 0.52), lead))
                 pieces.append("{\\fs%d\\1c%s%s}%s" % (ksize, act, font_tag, ktext))
                 block = "\\N".join(pieces)
             elif mode in ("pop", "highlight"):
@@ -2286,6 +2504,10 @@ def build_ass(words, style_name, width, height, output_path,
             else:
                 block = colored(phrase)
 
+            if is_hook_phrase:
+                block = hook_prefix + block + hook_suffix
+            phrase_ctx = dict(base_ctx, fs=phrase_font_size) if is_hook_phrase else base_ctx
+
             plain = " ".join(t["word"] for t in phrase)
             in_name = anim if anim in ANIM_IN else None
             if anim == "auto":
@@ -2301,7 +2523,7 @@ def build_ass(words, style_name, width, height, output_path,
                 out_name = ANIM_MIX_OUT[p_index % len(ANIM_MIX_OUT)]
             events.extend(animated_phrase_events(
                 block, phrase_start, phrase_end, sname, in_name, out_name,
-                base_ctx, random.Random(p_index + 11),
+                phrase_ctx, random.Random(p_index + 11),
             ))
             continue
 
@@ -2332,6 +2554,8 @@ def build_ass(words, style_name, width, height, output_path,
                     else:
                         parts.append(text)
 
+                if is_hook_phrase:
+                    parts = [hook_prefix + part + hook_suffix for part in parts]
                 events.append(
                     f"Dialogue: 0,{ass_time(start)},{ass_time(end)},{sname},,"
                     f"0,0,0,,{' '.join(parts)}"
@@ -2342,8 +2566,8 @@ def build_ass(words, style_name, width, height, output_path,
             pool = flagged or list(range(len(phrase)))
             key_idx = max(pool, key=lambda i: len(clean_token(phrase[i]["word"])))
             key_text = display(phrase[key_idx]["word"])
-            key_size = int(font_size * min(1.0, 9.0 / max(len(key_text), 1)))
-            lead_size = int(font_size * 0.52)
+            key_size = int(phrase_font_size * min(1.0, 9.0 / max(len(key_text), 1)))
+            lead_size = int(phrase_font_size * 0.52)
             key_color = ass_tag_color(style["active"])
 
             for w_index, token in enumerate(phrase):
@@ -2370,6 +2594,8 @@ def build_ass(words, style_name, width, height, output_path,
                     pieces.append(
                         f"{{\\fs{key_size}\\1c{key_color}{font_tag}{pop}}}{key_text}"
                     )
+                if is_hook_phrase:
+                    pieces = [hook_prefix + piece + hook_suffix for piece in pieces]
                 events.append(
                     f"Dialogue: 0,{ass_time(start)},{ass_time(end)},{sname},,"
                     "0,0,0,," + "\\N".join(pieces)
@@ -2384,6 +2610,8 @@ def build_ass(words, style_name, width, height, output_path,
                     span = phrase_end - token["start"]
                 centis = max(1, int(round(span * 100)))
                 parts.append(f"{{\\kf{centis}}}{display(token['word'])}")
+            if is_hook_phrase:
+                parts = [hook_prefix + part + hook_suffix for part in parts]
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
                 f"{sname},,0,0,0,,{' '.join(parts)}"
@@ -2391,6 +2619,8 @@ def build_ass(words, style_name, width, height, output_path,
 
         elif mode == "fade":
             text = colored(phrase)
+            if is_hook_phrase:
+                text = hook_prefix + text + hook_suffix
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
                 f"{sname},,0,0,0,,{{\\fad(250,200)}}{text}"
@@ -2398,6 +2628,8 @@ def build_ass(words, style_name, width, height, output_path,
 
         else:
             text = colored(phrase)
+            if is_hook_phrase:
+                text = hook_prefix + text + hook_suffix
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
                 f"{sname},,0,0,0,,{text}"
@@ -2452,13 +2684,34 @@ def plan_cuts(words, duration, level):
 
     speech = []
     fillers = 0
-    # Never delete a recognized word automatically: Whisper can mislabel
-    # Tajik/Russian words as fillers or repeat adjacent words in its output.
-    # Keep every timestamped token and only consider long pauses between them.
+    # Fail closed when ASR timestamps are malformed. A bad word time must
+    # never become a destructive edit decision.
+    previous_start = -1.0
     for item in words:
+        try:
+            word_start = float(item["start"])
+            word_end = float(item["end"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if (
+            not math.isfinite(word_start)
+            or not math.isfinite(word_end)
+            or word_start < 0
+            or word_end <= word_start
+            or word_end > duration + 0.25
+            or word_start < previous_start
+        ):
+            return None
+        previous_start = word_start
         speech.append((item, False))
+
     if len(speech) < 3:
         return None
+    # Refuse heavily overlapping word intervals: the source-to-output map
+    # cannot safely decide which spoken token owns that time.
+    for (left, _), (right, _) in zip(speech, speech[1:]):
+        if float(left["end"]) - float(right["start"]) > 0.08:
+            return None
 
     groups = []
     first = speech[0][0]
@@ -2487,13 +2740,13 @@ def plan_cuts(words, duration, level):
             segments.append([a, b])
 
     new_duration = sum(b - a for a, b in segments)
-    # Conservative safety gate: retain at least 75% of the original timeline
-    # and at least 90% of the timestamped speech span. If recognition timing is
+    # Conservative safety gate: retain at least 85% of the original timeline
+    # and at least 97% of the timestamped speech span. If recognition timing is
     # poor or the proposed edit is too aggressive, keep the source unchanged.
     spoken = max(0.0, speech[-1][0]["end"] - speech[0][0]["start"])
     if new_duration < 1.0:
         return None
-    if new_duration < 0.75 * duration or new_duration < 0.90 * spoken:
+    if new_duration < 0.85 * duration or new_duration < 0.97 * spoken:
         return None
     if duration - new_duration < 0.50:
         return None
@@ -2515,9 +2768,15 @@ def plan_cuts(words, duration, level):
 
     new_words = []
     for item, _ in speech:
+        source_start, source_end = float(item["start"]), float(item["end"])
+        # Every recognized word must remain fully inside one kept source range.
+        if not any(a <= source_start and source_end <= b for a, b in segments):
+            return None
         moved = dict(item)
-        moved["start"] = remap(item["start"])
-        moved["end"] = max(moved["start"] + 0.04, remap(item["end"]))
+        moved["start"] = remap(source_start)
+        moved["end"] = remap(source_end)
+        if moved["end"] <= moved["start"]:
+            return None
         new_words.append(moved)
 
     return {
@@ -3890,18 +4149,25 @@ async def render_video(
     _, _, display_width, display_height = probe_summary(info)
     width, height = get_output_size(video_format, display_width, display_height)
 
-    # Render from a low-memory proxy instead of decoding the original camera file
-    # throughout the complex subtitle/B-roll filter graph. Preserve aspect ratio,
-    # cap the long edge at 960 px, and normalize to 24 fps.
-    proxy_scale = min(1.0, 960.0 / max(width, height))
-    proxy_width = even(width * proxy_scale)
-    proxy_height = even(height * proxy_scale)
+    # Build a low-memory proxy from the SOURCE dimensions, not the target
+    # canvas. Scaling a 16:9 source directly to 9:16 would distort it before
+    # the reframing stage ever sees the original aspect ratio.
+    proxy_scale = min(1.0, 960.0 / max(display_width, display_height))
+    proxy_width = even(display_width * proxy_scale)
+    proxy_height = even(display_height * proxy_scale)
     proxy_path = work_dir / "render_proxy.mp4"
+    clean_audio = options.get("clean_audio", "auto")
+    audio_filter = (
+        "highpass=f=70,afftdn=nr=8:nf=-30,"
+        "loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95"
+        if clean_audio == "auto" else None
+    )
     await run_command([
         "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-i", str(input_path),
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", f"scale={proxy_width}:{proxy_height}:flags=bilinear,setsar=1,fps=24",
+        *(["-af", audio_filter] if audio_filter else []),
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "29",
         "-pix_fmt", "yuv420p", "-threads", "1",
         "-c:a", "aac", "-b:a", "96k", "-ac", "2",
@@ -3947,7 +4213,10 @@ async def render_video(
     options = dict(
         options,
         scenes_final=scenes_final,
-        camera_eff=camera if camera in ("auto", "zoom_in", "zoom_out", "push", "shake", "dynamic", "off") else "",
+        # "dynamic" is the UI's request for director-led movement. Resolve it
+        # through semantic scene roles instead of applying a zoom to every caption.
+        camera_eff=("auto" if camera == "dynamic" else camera)
+                    if camera in ("auto", "zoom_in", "zoom_out", "push", "shake", "dynamic", "off") else "",
         scene_marks=([sc["start"] for sc in scenes_final[1:] if sc.get("importance", 0.5) >= 0.8]
                      if scenes_final else None),
         grade_filter=grade_filter(options.get("color"), options.get("grade", "off")),
@@ -3976,7 +4245,9 @@ async def render_video(
         )
 
     ass_name = "captions.ass"
-    base_filter = get_video_filter(video_format, width, height)
+    base_filter = get_video_filter(
+        video_format, width, height, display_width, display_height
+    )
     anim_log = []
     if options.get("subtitles", True):
         build_ass(
@@ -3991,6 +4262,10 @@ async def render_video(
             anim=options.get("anim"),
             anim_out=options.get("anim_out"),
             anim_log=anim_log,
+            hook_range=(
+                (options["edit_plan"]["hook"]["start"], options["edit_plan"]["hook"]["end"])
+                if (options.get("edit_plan") or {}).get("hook") else None
+            ),
         )
     fonts_option = ""
     if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
@@ -4140,7 +4415,7 @@ def clean_style(style):
     style = (style or "viral").strip().lower()
     if style not in ALLOWED_STYLES:
         raise HTTPException(status_code=400, detail="Неверный стиль субтитров.")
-    return style
+    return STYLE_ALIASES.get(style, style)
 
 
 def clean_format(video_format):
@@ -4153,7 +4428,8 @@ def clean_format(video_format):
 def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
                   font="", font2="", fontmix="0", cut="off", keys="1",
                   anim="", anim_out="", trans="off", broll="auto", sound="",
-                  camera="", grade="off", music="", music_level="normal", music_sync="1"):
+                  camera="", grade="off", music="", music_level="normal", music_sync="1",
+                  clean_audio="auto"):
     accent = (accent or "").strip().lstrip("#").upper()
     if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
         raise HTTPException(status_code=400, detail="Неверный цвет.")
@@ -4182,6 +4458,7 @@ def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
         "music": music if music in MOODS or music in ("auto", "off") else "",
         "music_level": music_level if music_level in MUSIC_LEVEL_DB else "normal",
         "music_sync": str(music_sync).strip().lower() not in ("0", "false", "off"),
+        "clean_audio": clean_audio if clean_audio in ("auto", "off") else "auto",
         "sound": sound if sound in ("off", "light", "normal", "strong") else "",
         "trans": trans if trans in TRANSITION_KINDS or trans == "auto" else "off",
     }
@@ -4224,10 +4501,12 @@ async def save_upload(file, work_dir):
 
 async def inspect_video(input_path):
     info, duration = await get_video_info(input_path)
-    has_video, has_audio, _, _ = probe_summary(info)
+    has_video, has_audio, width, height = probe_summary(info)
 
     if not has_video:
         raise UserError("В файле нет видеодорожки.")
+    if width < 2 or height < 2:
+        raise UserError("Не удалось определить корректный размер видеокадра.")
     if duration > MAX_DURATION:
         raise UserError(
             f"Длительность видео не должна превышать {MAX_DURATION} секунд.", 413
@@ -4247,10 +4526,31 @@ JOB_TASKS = set()
 ACTIVE_STATES = {"queued", "transcribing", "rendering"}
 
 
+def persist_job(job):
+    """Atomically persist the small JSON job manifest beside its media files."""
+    try:
+        if not job.get("dir"):
+            return False
+        job_dir = Path(job["dir"])
+        if not job_dir.is_dir():
+            return False
+        manifest = job_dir / "job_state.json"
+        temporary = job_dir / "job_state.json.tmp"
+        temporary.write_text(
+            json.dumps(job, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        os.replace(temporary, manifest)
+        return True
+    except Exception:
+        logger.exception("Could not persist job state for %s", job.get("id"))
+        return False
+
+
 def remove_job(job_id):
     job = JOBS.pop(job_id, None)
     if job:
-        shutil.rmtree(job["dir"], ignore_errors=True)
+        shutil.rmtree(Path(job["dir"]), ignore_errors=True)
 
 
 def purge_expired_jobs():
@@ -4265,6 +4565,67 @@ def purge_expired_jobs():
 def touch(job, **values):
     job.update(values)
     job["updated"] = time.time()
+    persist_job(job)
+
+
+def restore_jobs():
+    """Restore manifests from a persistent mount and mark interrupted jobs retryable."""
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    restored = 0
+    for manifest in BASE_DIR.glob("*/job_state.json"):
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            job_id = str(data.get("id") or "")
+            job_dir = Path(data.get("dir") or manifest.parent)
+            input_value = data.get("input")
+            if not job_id or not input_value:
+                continue
+            if time.time() - float(data.get("updated", 0)) > JOB_TTL_SECONDS:
+                shutil.rmtree(Path(data.get("dir") or manifest.parent), ignore_errors=True)
+                continue
+            input_path = Path(input_value)
+            if not job_dir.is_dir() or not input_path.is_file():
+                continue
+
+            data["dir"] = job_dir
+            data["input"] = input_path
+            if data.get("output"):
+                data["output"] = Path(data["output"])
+
+            if data.get("status") in ACTIVE_STATES:
+                partial = Path(data.get("output") or (job_dir / "gapcut_ai.mp4"))
+                with suppress(OSError):
+                    partial.unlink()
+                data.update(
+                    status="error",
+                    stage="Коркард ҳангоми бозоғоз қатъ шуд",
+                    progress=0,
+                    error="Сервер ҳангоми коркард бозоғоз шуд. Монтажро дубора оғоз кунед.",
+                    retryable=True,
+                    updated=time.time(),
+                    output=None,
+                )
+            elif data.get("status") == "done":
+                output = data.get("output")
+                if not output or not Path(output).is_file():
+                    data.update(
+                        status="error",
+                        stage="Файли натиҷа дастрас нест",
+                        progress=0,
+                        error="Файли тайёр баъди бозоғоз дастрас нест. Видеоро дубора фиристед.",
+                        retryable=True,
+                        updated=time.time(),
+                        output=None,
+                    )
+            data.setdefault("retryable", data.get("status") == "error")
+            JOBS[job_id] = data
+            persist_job(data)
+            restored += 1
+        except Exception:
+            logger.exception("Could not restore job manifest %s", manifest)
+
+    logger.info("Restored %s job manifests from %s", restored, BASE_DIR)
+    return restored
 
 
 def public_job(job):
@@ -4278,10 +4639,12 @@ def public_job(job):
         "updated": int(job.get("updated", time.time())),
         "duration": round(job["duration"], 2),
         "error": job["error"],
+        "retryable": bool(job.get("retryable", False)),
     }
     if job["status"] in ("transcribed", "rendering", "done") or job["lines"]:
         data["lines"] = job["lines"]
         data["detected"] = job["detected"]
+        data["transcript_qa"] = job.get("transcript_qa", {})
         data["cut_preview"] = job.get("cut_preview", {})
         data["scenes"] = job.get("scenes", [])
         data["topic"] = job.get("topic", "")
@@ -4293,6 +4656,16 @@ def public_job(job):
         data["cover"] = {"times": cover.get("times", []), "title": cover.get("title", "")}
         data["cards"] = [public_card(c) for c in job["cards"]]
         data["broll_info"] = job.get("broll_info", {})
+        plan = job.get("edit_plan") or {}
+        data["edit_plan_summary"] = {
+            "schema_version": plan.get("schema_version"),
+            "scene_count": len(plan.get("scenes") or []),
+            "caption_count": len(plan.get("captions") or []),
+            "motion_count": len(plan.get("motion") or []),
+            "broll_count": len(plan.get("broll") or []),
+            "hook_selected": bool(plan.get("hook")),
+            "output_duration": plan.get("output_duration"),
+        }
     if job["status"] == "done":
         data["download_url"] = f"/api/jobs/{job['id']}/download"
     return data
@@ -4313,10 +4686,17 @@ def spawn(coroutine):
 
 def fail_job(job, error):
     if isinstance(error, UserError):
-        touch(job, status="error", stage="Ошибка", error=error.message)
+        retryable = error.status_code >= 500 or error.status_code in (408, 429)
+        touch(
+            job, status="error", stage="Ошибка", error=error.message,
+            retryable=retryable,
+        )
     else:
         logger.error("Job %s failed", job["id"], exc_info=error)
-        touch(job, status="error", stage="Ошибка", error="Внутренняя ошибка сервера.")
+        touch(
+            job, status="error", stage="Ошибка",
+            error="Внутренняя ошибка сервера.", retryable=True,
+        )
 
 
 async def run_transcribe_job(job):
@@ -4334,6 +4714,9 @@ async def run_transcribe_job(job):
                 audio_path, work_dir, job["language"], job["duration"], report,
                 job.get("model"), job.get("glossary"),
             )
+            job["transcript_qa"] = build_transcript_qa(
+                words, job["duration"], detected
+            )
 
             report(95, "Подбираем карточки")
             report(96, "Анализируем сцены")
@@ -4343,12 +4726,21 @@ async def run_transcribe_job(job):
             job["topic"] = analysis["topic"]
             job["visual_cuts"] = len(cuts)
             job["color"] = await analyze_color(job["input"], work_dir, job["duration"])
-            job["music_mood"] = await choose_mood(words, job["topic"], job["duration"])
+            music_setting = (job.get("render_options") or {}).get("music") or "off"
+            if music_setting == "auto" or music_setting in MOODS:
+                job["music_mood"] = await choose_mood(words, job["topic"], job["duration"])
+            else:
+                # Do not spend an LLM request choosing music when the user did not ask for it.
+                job["music_mood"] = None
             job["cover"] = await prepare_cover(
                 job["input"], work_dir, job["duration"], words, job["topic"]
             )
             job["cards"], job["broll_info"] = await suggest_broll(
                 words, job["duration"], topic=job["topic"]
+            )
+            job["edit_plan"] = build_edit_decision_list(
+                words, job["scenes"], job["cards"], job["duration"],
+                job.get("render_style", "viral"), job.get("render_format", "9:16"),
             )
             job["cut_preview"] = cut_preview(words, job["duration"])
             touch(
@@ -4368,6 +4760,10 @@ async def run_transcribe_job(job):
             render_options = dict(job.get("render_options") or {})
             if render_options.get("broll", "auto") != "off":
                 render_options["cards"] = list(job.get("cards") or [])
+            # Scene analysis is only useful when it reaches the renderer.
+            render_options["scenes"] = list(job.get("scenes") or [])
+            render_options["color"] = job.get("color")
+            render_options["music_mood"] = job.get("music_mood")
             await run_render_job(
                 job,
                 job.get("render_style", "dynamic"),
@@ -4389,6 +4785,21 @@ async def run_render_job(job, style, video_format, lines, options):
             else:
                 words = job["words"]
 
+            cut_level = options.get("cut", "off")
+            cut_plan = plan_cuts(words, job["duration"], cut_level) if cut_level in CUT_LEVELS else None
+            job["edit_plan"] = build_edit_decision_list(
+                words, job.get("scenes") or [], job.get("cards") or [],
+                job["duration"], style, video_format,
+                keep_ranges=cut_plan["segments"] if cut_plan else None,
+            )
+            options = dict(
+                options,
+                edit_plan=job["edit_plan"],
+                scenes=list(job.get("scenes") or options.get("scenes") or []),
+                color=job.get("color") or options.get("color"),
+                music_mood=job.get("music_mood") or options.get("music_mood"),
+            )
+
             output_path = job["dir"] / "gapcut_ai.mp4"
             if output_path.exists():
                 output_path.unlink()
@@ -4401,21 +4812,24 @@ async def run_render_job(job, style, video_format, lines, options):
                 report(10, "Renderster AI монтаж мекунад")
                 try:
                     renderster_result = await renderster_auto_edit(
-                        job["input"], output_path, video_format
+                        job["input"], output_path, video_format,
+                        render_settings=options,
                     )
                     report(95, "Видеои Renderster гирифта шуд")
                     touch(job, renderster=renderster_result)
-                except UserError as render_error:
-                    error_text = str(render_error).lower()
-                    if "trial_required" not in error_text and "api (402)" not in error_text:
-                        raise
-                    # Renderster free trial has ended. Continue with GAPCUT's
-                    # built-in FFmpeg renderer instead of failing the user's job.
-                    logger.warning(
-                        "Renderster trial exhausted; falling back to local FFmpeg renderer for job %s",
+                except Exception:
+                    # Hybrid mode must be resilient: a Renderster outage, quota,
+                    # timeout, invalid response or exhausted trial must not make
+                    # the user's edit fail when the built-in renderer can run.
+                    logger.exception(
+                        "Renderster failed; falling back to GAPCUT FFmpeg renderer for job %s",
                         job["id"],
                     )
                     use_local_renderer = True
+                    # Never let a partial provider artifact be mistaken for a
+                    # completed render by the local pipeline.
+                    with suppress(OSError):
+                        output_path.unlink()
 
             if use_local_renderer:
                 report(12, "GAPCUT AI муҳаррики дохилӣ монтаж мекунад")
@@ -4428,8 +4842,23 @@ async def run_render_job(job, style, video_format, lines, options):
                     video_format, job["info"], job["duration"], report, options,
                 )
 
+            expected_duration = None
+            if use_local_renderer:
+                expected_duration = float(job["duration"])
+                cut_level = options.get("cut", "off")
+                if cut_level in CUT_LEVELS:
+                    safe_plan = plan_cuts(words, job["duration"], cut_level)
+                    if safe_plan:
+                        expected_duration = safe_plan["duration"]
+
+            validation = await validate_render_output(
+                output_path, expected_duration=expected_duration
+            )
+            logger.info("Render output validated: %s", validation)
+
             touch(
                 job,
+                render_validation=validation,
                 output=output_path,
                 status="done",
                 stage="Видео готово",
@@ -4472,8 +4901,8 @@ async def cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app_instance):
-    shutil.rmtree(BASE_DIR, ignore_errors=True)
     BASE_DIR.mkdir(parents=True, exist_ok=True)
+    restore_jobs()
 
     global AVAILABLE_FONTS
     AVAILABLE_FONTS = await asyncio.to_thread(detect_fonts)
@@ -4492,7 +4921,8 @@ async def lifespan(app_instance):
                 await task
         with suppress(Exception):
             await bot.session.close()
-        shutil.rmtree(BASE_DIR, ignore_errors=True)
+        # Keep job manifests and outputs. A configured persistent disk can
+        # restore completed jobs and mark interrupted jobs retryable.
 
 
 app = FastAPI(title="GAPCUT AI API", version=VERSION, lifespan=lifespan)
@@ -4698,9 +5128,29 @@ async def generate_standalone_image(
             )
 
 
+def current_rss_mb():
+    """Read resident memory from procfs without adding a runtime dependency."""
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                return round(int(line.split()[1]) / 1024.0, 1)
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
-    return {"status": "healthy", "service": "GAPCUT AI", "version": VERSION}
+    return {
+        "status": "healthy",
+        "service": "GAPCUT AI",
+        "version": VERSION,
+        "memory_rss_mb": current_rss_mb(),
+        "active_jobs": sum(1 for job in JOBS.values() if job.get("status") in ACTIVE_STATES),
+        "processing": PROCESS_LOCK.locked(),
+        "max_stored_jobs": MAX_STORED_JOBS,
+        "job_storage": "custom_path_configured" if STORAGE_DIR_CONFIGURED else "ephemeral_default",
+    }
 
 
 # ---------------------------------------------------------
@@ -4748,6 +5198,7 @@ async def api_process(
                 input_path, output_path, work_dir, words, style, video_format,
                 info, duration, lambda p, s: None,
             )
+            await validate_render_output(output_path, expected_duration=duration)
 
         return FileResponse(
             path=str(output_path),
@@ -4820,8 +5271,8 @@ async def create_job(
             cfg.get("anim_out", "auto"), cfg.get("trans", "auto"),
             cfg.get("broll", "auto"), cfg.get("sound", "normal"),
             cfg.get("camera", "auto"), cfg.get("grade", "auto"),
-            cfg.get("music", "auto"), cfg.get("music_level", "low"),
-            cfg.get("music_sync", "1"),
+            cfg.get("music", "off"), cfg.get("music_level", "low"),
+            cfg.get("music_sync", "1"), cfg.get("clean_audio", "auto"),
         )
     except (ValueError, TypeError, json.JSONDecodeError):
         raise HTTPException(status_code=400, detail="Неверные настройки монтажа.")
@@ -4900,6 +5351,7 @@ async def create_job(
         "updated": time.time(),
     }
     JOBS[job_id] = job
+    persist_job(job)
     spawn(run_transcribe_job(job))
 
     return public_job(job)
@@ -4913,6 +5365,66 @@ async def job_status(
 ):
     user = require_user(x_init_data, init_data)
     return public_job(get_job(job_id, user))
+
+
+@app.post("/api/jobs/{job_id}/retry", status_code=202)
+async def retry_job(
+    job_id: str,
+    init_data: str = Form(""),
+    x_init_data: str = Header(default=""),
+):
+    user = require_user(init_data, x_init_data)
+    job = get_job(job_id, user)
+    if job.get("status") != "error" or not job.get("retryable"):
+        raise HTTPException(status_code=409, detail="Ин вазифа барои такрор омода нест.")
+
+    input_path = Path(job.get("input") or "")
+    if not input_path.is_file():
+        raise HTTPException(
+            status_code=410,
+            detail="Файли аслӣ дастрас нест. Видеоро дубора фиристед.",
+        )
+
+    output_path = Path(job.get("output") or (Path(job["dir"]) / "gapcut_ai.mp4"))
+    with suppress(OSError):
+        output_path.unlink()
+    job["output"] = None
+    job["render_validation"] = None
+
+    if job.get("words") and job.get("auto_render"):
+        render_options = dict(job.get("render_options") or {})
+        if render_options.get("broll", "auto") != "off":
+            render_options["cards"] = list(job.get("cards") or [])
+        render_options["scenes"] = list(job.get("scenes") or [])
+        render_options["color"] = job.get("color")
+        render_options["music_mood"] = job.get("music_mood")
+        touch(
+            job, status="queued", stage="Монтажро дубора оғоз мекунем",
+            progress=5, error=None, retryable=False,
+        )
+        spawn(run_render_job(
+            job,
+            job.get("render_style", "dynamic"),
+            job.get("render_format", "9:16"),
+            job.get("retry_lines"),
+            render_options,
+        ))
+    else:
+        for key, default in (
+            ("words", []), ("lines", []), ("detected", []), ("cards", []),
+            ("scenes", []), ("topic", ""), ("visual_cuts", 0), ("color", None),
+            ("music_mood", None), ("cover", None), ("cut_preview", {}),
+            ("broll_info", {}), ("edit_plan", None), ("transcript_qa", None),
+            ("retry_lines", None),
+        ):
+            job[key] = default
+        touch(
+            job, status="queued", stage="Коркардро дубора оғоз мекунем",
+            progress=5, error=None, retryable=False,
+        )
+        spawn(run_transcribe_job(job))
+
+    return public_job(job)
 
 
 @app.post("/api/jobs/{job_id}/render", status_code=202)
@@ -4954,6 +5466,9 @@ async def start_render(
         cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
         music, music_level, music_sync,
     )
+    job["render_options"] = options
+    job["render_style"] = clean_style(style)
+    job["render_format"] = clean_format(video_format)
     options["music_mood"] = job.get("music_mood")
     options["scenes"] = job.get("scenes", [])
     options["color"] = job.get("color")
@@ -4983,6 +5498,10 @@ async def start_render(
         except UserError as error:
             raise HTTPException(status_code=400, detail=error.message)
 
+    job["retry_lines"] = parsed_lines
+    job["render_options"] = options
+    job["render_style"] = clean_style(style)
+    job["render_format"] = clean_format(video_format)
     touch(job, status="rendering", stage="В очереди", progress=0, error=None)
     spawn(run_render_job(job, style, video_format, parsed_lines, options))
     return public_job(job)

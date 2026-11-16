@@ -1,0 +1,26 @@
+name: GAPCUT backend tests
+
+on:
+  pull_request:
+    branches: [main, "feature/hybrid-viral-engine"]
+  push:
+    branches: [main, "feature/**"]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Run unit tests
+        env:
+          BOT_TOKEN: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+          GROQ_API_KEY: ""
+        run: python -m unittest discover -s tests -v
