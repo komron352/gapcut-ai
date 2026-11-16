@@ -161,7 +161,17 @@ BASE_DIR = Path(_STORAGE_DIR) if _STORAGE_DIR else Path(tempfile.gettempdir()) /
 FONTS_DIR = Path(os.getenv("FONTS_DIR", str(Path(__file__).resolve().parent / "fonts")))
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".flv", ".wmv", ".3gp", ".3g2", ".mpeg", ".mpg", ".ts", ".mts", ".m2ts", ".vob", ".ogv", ".mxf", ".asf", ".f4v"}
-ALLOWED_STYLES = {"viral", "brandly", "classic", "cinema", "podcast", "karaoke", "creator", "keyword", "minimal", "dynamic"}
+ALLOWED_STYLES = {
+    "viral", "brandly", "classic", "cinema", "podcast", "karaoke",
+    "creator", "keyword", "minimal", "dynamic",
+    "kinetic", "premium", "clean", "cinematic",
+}
+STYLE_ALIASES = {
+    "kinetic": "brandly",
+    "premium": "podcast",
+    "clean": "minimal",
+    "cinematic": "cinema",
+}
 ALLOWED_FORMATS = {"9:16", "16:9", "1:1", "original"}
 ALLOWED_LANGUAGES = {"tg", "ru", "tg_ru"}
 LANGUAGE_ALIASES = {"both": "tg_ru", "tg+ru": "tg_ru", "tg-ru": "tg_ru"}
@@ -4373,7 +4383,7 @@ def clean_style(style):
     style = (style or "viral").strip().lower()
     if style not in ALLOWED_STYLES:
         raise HTTPException(status_code=400, detail="Неверный стиль субтитров.")
-    return style
+    return STYLE_ALIASES.get(style, style)
 
 
 def clean_format(video_format):
