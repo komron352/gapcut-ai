@@ -90,6 +90,7 @@ Implemented in this branch:
 - Generic Renderster failure fallback to the built-in FFmpeg renderer, with partial output cleanup.
 - Mixed-mode transcript merge: keep the stronger Whisper pass as the backbone and recover non-overlapping words from the alternate language pass; assign language per recovered word and expose phrase-level detected ranges.
 - Safer pause cutting: reject malformed/non-finite/out-of-range or heavily overlapping word timestamps; retain at least 85% of the original timeline and 97% of the timestamped speech span; verify every recognized word remains inside a kept source range.
+- Validate the final output from either Renderster or FFmpeg with FFprobe before marking the job done: require video and audio streams, valid dimensions, a bounded duration, and (for local FFmpeg) duration agreement with the edit plan.
 - Regression tests added in tests/test_editing_safety.py for mixed-language recovery, duplicate suppression, malformed timestamps and word preservation.
 
-Not yet implemented: sentence-level semantic language alignment for conflicting overlapping words, full transcript QA reporting, output media decode validation and the Viral Director EDL. The new tests still need to be run in CI and the engine needs real Tajik/Russian sample renders before production rollout.
+Not yet implemented: sentence-level semantic language alignment for conflicting overlapping words, full transcript QA reporting, full frame-by-frame decode validation and the Viral Director EDL. The new tests still need to be run in CI and the engine needs real Tajik/Russian sample renders before production rollout.
