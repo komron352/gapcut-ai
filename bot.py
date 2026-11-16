@@ -4444,7 +4444,9 @@ ACTIVE_STATES = {"queued", "transcribing", "rendering"}
 def persist_job(job):
     """Atomically persist the small JSON job manifest beside its media files."""
     try:
-        job_dir = Path(job.get("dir") or "")
+        if not job.get("dir"):
+            return False
+        job_dir = Path(job["dir"])
         if not job_dir.is_dir():
             return False
         manifest = job_dir / "job_state.json"
@@ -4492,6 +4494,9 @@ def restore_jobs():
             job_dir = Path(data.get("dir") or manifest.parent)
             input_value = data.get("input")
             if not job_id or not input_value:
+                continue
+            if time.time() - float(data.get("updated", 0)) > JOB_TTL_SECONDS:
+                shutil.rmtree(Path(data.get("dir") or manifest.parent), ignore_errors=True)
                 continue
             input_path = Path(input_value)
             if not job_dir.is_dir() or not input_path.is_file():
@@ -5316,7 +5321,7 @@ async def retry_job(
             job,
             job.get("render_style", "dynamic"),
             job.get("render_format", "9:16"),
-            None,
+            job.get("retry_lines"),
             render_options,
         ))
     else:
@@ -5325,7 +5330,8 @@ async def retry_job(
             ("scenes", []), ("topic", ""), ("visual_cuts", 0), ("color", None),
             ("music_mood", None), ("cover", None), ("cut_preview", {}),
             ("broll_info", {}), ("edit_plan", None), ("transcript_qa", None),
-        ):
+            ("retry_lines", None),
+        ): 
             job[key] = default
         touch(
             job, status="queued", stage="Коркардро дубора оғоз мекунем",
@@ -5375,6 +5381,7 @@ async def start_render(
         cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
         music, music_level, music_sync,
     )
+    job["retry_lines"] = parsed_lines
     job["render_options"] = options
     job["render_style"] = clean_style(style)
     job["render_format"] = clean_format(video_format)
