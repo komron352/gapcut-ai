@@ -122,3 +122,10 @@ The backend accepts the five requested names without changing the Mini App:
 - `cinematic` → existing `cinema` serif/fade preset
 
 Legacy UI values remain accepted and retain their existing mappings. The Mini App markup and style selector are unchanged.
+
+## Opening hook treatment
+
+- The director only selects a hook candidate from a scene beginning within the first 2.5 seconds.
+- Hook text is copied from recognized source words and mapped through the EDL timeline after safe cuts.
+- The ASS renderer emphasizes the matching original caption phrase with a restrained size/accent treatment; it does not invent a title or reorder/mute the source audio.
+- If the scene analysis does not identify a credible opening hook, no hook treatment is added.
