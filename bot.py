@@ -4264,7 +4264,7 @@ async def render_video(
             anim_log=anim_log,
             hook_range=(
                 (options["edit_plan"]["hook"]["start"], options["edit_plan"]["hook"]["end"])
-                if options.get("edit_plan", {}).get("hook") else None
+                if (options.get("edit_plan") or {}).get("hook") else None
             ),
         )
     fonts_option = ""
