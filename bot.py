@@ -4418,10 +4418,12 @@ async def save_upload(file, work_dir):
 
 async def inspect_video(input_path):
     info, duration = await get_video_info(input_path)
-    has_video, has_audio, _, _ = probe_summary(info)
+    has_video, has_audio, width, height = probe_summary(info)
 
     if not has_video:
         raise UserError("В файле нет видеодорожки.")
+    if width < 2 or height < 2:
+        raise UserError("Не удалось определить корректный размер видеокадра.")
     if duration > MAX_DURATION:
         raise UserError(
             f"Длительность видео не должна превышать {MAX_DURATION} секунд.", 413
