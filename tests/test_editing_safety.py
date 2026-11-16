@@ -10,7 +10,7 @@ os.environ.setdefault("BOT_TOKEN", "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh
 
 import unittest
 
-from bot import clean_options, merge_mixed_transcripts, plan_cuts
+from bot import clean_options, get_video_filter, merge_mixed_transcripts, plan_cuts
 
 
 class MixedTranscriptTests(unittest.TestCase):
@@ -44,6 +44,19 @@ class MixedTranscriptTests(unittest.TestCase):
         ]}
         merged = merge_mixed_transcripts(tg, ru)
         self.assertEqual(len(merged), 1)
+
+
+class ReframingTests(unittest.TestCase):
+    def test_landscape_to_vertical_preserves_full_frame_with_blurred_fill(self):
+        chain = get_video_filter("9:16", 720, 1280, 1920, 1080)
+        self.assertIn("split=2", chain)
+        self.assertIn("force_original_aspect_ratio=decrease", chain)
+        self.assertIn("overlay=", chain)
+
+    def test_native_portrait_source_does_not_need_blurred_fill(self):
+        chain = get_video_filter("9:16", 720, 1280, 1080, 1920)
+        self.assertNotIn("split=2", chain)
+        self.assertIn("crop=720:1280", chain)
 
 
 class RenderPolicyTests(unittest.TestCase):
