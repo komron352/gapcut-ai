@@ -899,7 +899,7 @@ def script_score(parsed):
     # Mixed mode compares two Whisper transcripts for the same time chunk.
     # Reward native Tajik letters and words from the Tajik lexicon, instead
     # of choosing a whole chunk mainly by small log-probability differences.
-    tokens = [core_token(token).lower() for token in re.findall(r"[^\\W_]+", text, flags=re.UNICODE)]
+    tokens = [core_token(token).lower() for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)]
     tajik_hits = 0
     for token in tokens:
         if not token:
