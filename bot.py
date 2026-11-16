@@ -77,7 +77,7 @@ try:
 except ImportError:
     Image = ImageDraw = ImageFont = None
 
-from gapcut_engine import build_edit_decision_list
+from gapcut_engine import build_edit_decision_list, build_transcript_qa
 
 
 # =========================================================
@@ -1175,14 +1175,10 @@ def dictionary_fixes(words):
     # High-confidence corrections observed in Tajik speech recognition.
     # Keep a strict one-token-to-one-token mapping so subtitle timestamps
     # remain aligned with the original audio.
+    # Only unambiguous orthographic normalization is automatic here.
+    # Context-dependent or domain-specific tokens are left untouched for review.
     common_tajik_fixes = {
-        "ке": "ки",
         "имруз": "имрӯз",
-        "експерти": "экспертӣ",
-        "експерті": "экспертӣ",
-        "стартіг": "старти",
-        "стартиг": "старти",
-        "курсі": "курси",
     }
 
     for item in words:
@@ -4405,6 +4401,7 @@ def public_job(job):
     if job["status"] in ("transcribed", "rendering", "done") or job["lines"]:
         data["lines"] = job["lines"]
         data["detected"] = job["detected"]
+        data["transcript_qa"] = job.get("transcript_qa", {})
         data["cut_preview"] = job.get("cut_preview", {})
         data["scenes"] = job.get("scenes", [])
         data["topic"] = job.get("topic", "")
@@ -4466,6 +4463,9 @@ async def run_transcribe_job(job):
             words, detected = await transcribe_video(
                 audio_path, work_dir, job["language"], job["duration"], report,
                 job.get("model"), job.get("glossary"),
+            )
+            job["transcript_qa"] = build_transcript_qa(
+                words, job["duration"], detected
             )
 
             report(95, "Подбираем карточки")
