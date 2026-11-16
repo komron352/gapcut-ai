@@ -13,7 +13,7 @@ os.environ.setdefault("BOT_TOKEN", "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh
 import unittest
 
 import bot
-from bot import clean_options, get_video_filter, merge_mixed_transcripts, plan_cuts
+from bot import clean_options, clean_style, get_video_filter, merge_mixed_transcripts, plan_cuts
 
 
 class MixedTranscriptTests(unittest.TestCase):
@@ -102,6 +102,15 @@ class ReframingTests(unittest.TestCase):
         chain = get_video_filter("9:16", 720, 1280, 1080, 1920)
         self.assertNotIn("split=2", chain)
         self.assertIn("crop=720:1280", chain)
+
+
+class SubtitleStyleAliasTests(unittest.TestCase):
+    def test_five_named_styles_map_to_distinct_existing_presets(self):
+        self.assertEqual(clean_style("kinetic"), "brandly")
+        self.assertEqual(clean_style("premium"), "podcast")
+        self.assertEqual(clean_style("viral"), "viral")
+        self.assertEqual(clean_style("clean"), "minimal")
+        self.assertEqual(clean_style("cinematic"), "cinema")
 
 
 class RenderPolicyTests(unittest.TestCase):
