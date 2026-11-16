@@ -4991,6 +4991,7 @@ async def api_process(
                 input_path, output_path, work_dir, words, style, video_format,
                 info, duration, lambda p, s: None,
             )
+            await validate_render_output(output_path, expected_duration=duration)
 
         return FileResponse(
             path=str(output_path),
