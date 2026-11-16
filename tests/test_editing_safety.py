@@ -13,7 +13,7 @@ os.environ.setdefault("BOT_TOKEN", "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh
 import unittest
 
 import bot
-from bot import clean_options, clean_style, get_video_filter, merge_mixed_transcripts, plan_cuts
+from bot import build_ass, clean_options, clean_style, get_video_filter, merge_mixed_transcripts, plan_cuts
 
 
 class MixedTranscriptTests(unittest.TestCase):
@@ -102,6 +102,20 @@ class ReframingTests(unittest.TestCase):
         chain = get_video_filter("9:16", 720, 1280, 1080, 1920)
         self.assertNotIn("split=2", chain)
         self.assertIn("crop=720:1280", chain)
+
+
+class HookSubtitleTests(unittest.TestCase):
+    def test_source_grounded_hook_range_adds_emphasis_to_matching_caption(self):
+        words = [
+            {"word": "Чаро", "start": 0.1, "end": 0.35},
+            {"word": "ин", "start": 0.4, "end": 0.6},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "hook.ass"
+            build_ass(words, "brandly", 720, 1280, output, hook_range=(0.0, 0.7))
+            subtitle = output.read_text(encoding="utf-8")
+        self.assertIn(r"\\fs103", subtitle)
+        self.assertIn(r"\\rF0", subtitle)
 
 
 class SubtitleStyleAliasTests(unittest.TestCase):
