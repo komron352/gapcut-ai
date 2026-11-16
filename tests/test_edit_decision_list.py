@@ -1,6 +1,6 @@
 import unittest
 
-from gapcut_engine import build_edit_decision_list
+from gapcut_engine import build_edit_decision_list, build_transcript_qa
 
 
 class EditDecisionListTests(unittest.TestCase):
@@ -40,6 +40,18 @@ class EditDecisionListTests(unittest.TestCase):
     def test_rejects_invalid_duration(self):
         with self.assertRaises(ValueError):
             build_edit_decision_list([], [], [], float("nan"))
+
+    def test_transcript_qa_reports_segment_flags_without_claiming_word_confidence(self):
+        words = [
+            {"word": "Салом", "start": 0.1, "end": 0.4, "lang": "tg", "low": True},
+            {"word": "hello", "start": 2.0, "end": 2.3, "lang": "en",
+             "fixed": True, "orig": "helo"},
+        ]
+        qa = build_transcript_qa(words, 3.0)
+        self.assertEqual(qa["low_segment_logprob_count"], 1)
+        self.assertEqual(qa["correction_count"], 1)
+        self.assertEqual(qa["language_switches"][0]["to"], "en")
+        self.assertIn("not calibrated per-word", qa["confidence_note"])
 
 
 if __name__ == "__main__":
