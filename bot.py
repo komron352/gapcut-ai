@@ -710,9 +710,28 @@ def get_output_size(video_format, display_width, display_height):
     return even(width * factor), even(height * factor)
 
 
-def get_video_filter(video_format, width, height):
+def get_video_filter(video_format, width, height, source_width=None, source_height=None):
+    """Reframe without distorting or silently chopping off a wide/tall source."""
     if video_format == "original":
-        return f"scale={width}:{height},setsar=1"
+        return f"scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1"
+
+    target_ratio = float(width) / max(1.0, float(height))
+    source_ratio = (
+        float(source_width) / max(1.0, float(source_height))
+        if source_width and source_height else target_ratio
+    )
+    if source_ratio > target_ratio * 1.25 or source_ratio < target_ratio / 1.25:
+        # Safe fallback when local face tracking is unavailable: preserve the
+        # complete source frame over a soft blurred fill instead of center-cropping it.
+        return (
+            f"split=2[reframe_bg][reframe_fg];"
+            f"[reframe_bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},gblur=sigma=24:steps=2,"
+            f"eq=brightness=-0.18:saturation=0.82[reframe_fill];"
+            f"[reframe_fg]scale={width}:{height}:force_original_aspect_ratio=decrease:"
+            f"flags=lanczos[reframe_main];"
+            f"[reframe_fill][reframe_main]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1"
+        )
     return (
         f"scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height},setsar=1"
@@ -4049,12 +4068,12 @@ async def render_video(
     _, _, display_width, display_height = probe_summary(info)
     width, height = get_output_size(video_format, display_width, display_height)
 
-    # Render from a low-memory proxy instead of decoding the original camera file
-    # throughout the complex subtitle/B-roll filter graph. Preserve aspect ratio,
-    # cap the long edge at 960 px, and normalize to 24 fps.
-    proxy_scale = min(1.0, 960.0 / max(width, height))
-    proxy_width = even(width * proxy_scale)
-    proxy_height = even(height * proxy_scale)
+    # Build a low-memory proxy from the SOURCE dimensions, not the target
+    # canvas. Scaling a 16:9 source directly to 9:16 would distort it before
+    # the reframing stage ever sees the original aspect ratio.
+    proxy_scale = min(1.0, 960.0 / max(display_width, display_height))
+    proxy_width = even(display_width * proxy_scale)
+    proxy_height = even(display_height * proxy_scale)
     proxy_path = work_dir / "render_proxy.mp4"
     clean_audio = options.get("clean_audio", "auto")
     audio_filter = (
@@ -4145,7 +4164,9 @@ async def render_video(
         )
 
     ass_name = "captions.ass"
-    base_filter = get_video_filter(video_format, width, height)
+    base_filter = get_video_filter(
+        video_format, width, height, display_width, display_height
+    )
     anim_log = []
     if options.get("subtitles", True):
         build_ass(
