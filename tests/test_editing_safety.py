@@ -114,8 +114,8 @@ class HookSubtitleTests(unittest.TestCase):
             output = Path(tmp) / "hook.ass"
             build_ass(words, "brandly", 720, 1280, output, hook_range=(0.0, 0.7))
             subtitle = output.read_text(encoding="utf-8")
-        self.assertIn(r"\\fs103", subtitle)
-        self.assertIn(r"\\rF0", subtitle)
+        self.assertIn(r"\fs103", subtitle)
+        self.assertIn(r"\rF0", subtitle)
 
 
 class SubtitleStyleAliasTests(unittest.TestCase):
