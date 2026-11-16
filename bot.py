@@ -636,6 +636,41 @@ def even(value):
     return max(2, value - (value % 2))
 
 
+async def validate_render_output(output_path, expected_duration=None):
+    """Do not mark a job done until the output is a readable A/V video."""
+    path = Path(output_path)
+    if not path.exists() or path.stat().st_size < 1000:
+        raise UserError("Монтаж файл видеои тайёрро насохт.", 500)
+
+    info, actual_duration = await get_video_info(path)
+    has_video, has_audio, width, height = probe_summary(info)
+    if not has_video or not has_audio or width < 2 or height < 2:
+        raise UserError("Видеои тайёр роҳҳои тасвир ё садои дуруст надорад.", 500)
+    if actual_duration > float(MAX_DURATION) + 1.0:
+        raise UserError("Давомнокии видеои тайёр аз ҳадди иҷозат зиёд аст.", 500)
+
+    if expected_duration is not None:
+        expected = float(expected_duration)
+        tolerance = max(0.8, expected * 0.05)
+        if abs(actual_duration - expected) > tolerance:
+            logger.error(
+                "Render duration mismatch: expected %.3fs, got %.3fs",
+                expected, actual_duration,
+            )
+            raise UserError(
+                "Давомнокии видеои тайёр ба нақшаи монтаж мувофиқат намекунад.",
+                500,
+            )
+
+    return {
+        "duration": round(actual_duration, 3),
+        "width": width,
+        "height": height,
+        "has_audio": has_audio,
+        "size": path.stat().st_size,
+    }
+
+
 def get_output_size(video_format, display_width, display_height):
     if video_format == "9:16":
         return 720, 1280
@@ -4511,8 +4546,23 @@ async def run_render_job(job, style, video_format, lines, options):
                     video_format, job["info"], job["duration"], report, options,
                 )
 
+            expected_duration = None
+            if use_local_renderer:
+                expected_duration = float(job["duration"])
+                cut_level = options.get("cut", "off")
+                if cut_level in CUT_LEVELS:
+                    safe_plan = plan_cuts(words, job["duration"], cut_level)
+                    if safe_plan:
+                        expected_duration = safe_plan["duration"]
+
+            validation = await validate_render_output(
+                output_path, expected_duration=expected_duration
+            )
+            logger.info("Render output validated: %s", validation)
+
             touch(
                 job,
+                render_validation=validation,
                 output=output_path,
                 status="done",
                 stage="Видео готово",
