@@ -12,7 +12,7 @@ This branch introduces the first deterministic Edit Decision List (EDL) layer wh
 - A hook is emitted only when the existing scene analysis marks a hook/question/high-importance scene. The text is copied from recognized source words; no hook text is generated.
 - The existing scene, color, and audio-analysis results are now passed into the local renderer. Previously the scene analysis was stored on the job but not reliably forwarded into the local render options.
 - The UI's `dynamic` camera mode now resolves to the existing scene-aware `auto` motion logic, instead of only zooming at generic caption boundaries.
-- Renderster receives `music: none`, `stock_broll: false`, and `retakes: keep`. This matches the product rule that music is opt-in, avoids unrequested provider stock footage, and avoids provider retake deletion by default.
+- Renderster receives `music: none` by default and only receives music when explicitly requested in render settings. Its speech-matched stock B-roll is enabled only when the user's B-roll setting is `auto`; `off` disables it. Retakes are set to `keep` by default.
 - The Mini App files are unchanged.
 
 ### Not implemented yet
@@ -78,7 +78,7 @@ Both issues have been addressed in subsequent commits. A successful test run for
 
 ## Audio and output QA additions
 
-- The Renderster path requests `clean_audio: auto`, while music is explicitly disabled.
+- The Renderster path requests `clean_audio: auto`; music is disabled unless explicitly requested. Speech-matched stock B-roll follows the user's `auto`/`off` selection.
 - The local FFmpeg proxy now applies a conservative voice chain by default: high-pass rumble reduction, mild `afftdn` noise reduction, loudness normalization, and peak limiting. The `clean_audio: off` option bypasses this chain.
 - The final output is decoded once with FFmpeg in single-thread mode using `-xerror` before a job can be marked complete. Output size is also checked against the configured cap.
 
