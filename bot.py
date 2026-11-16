@@ -645,6 +645,8 @@ async def validate_render_output(output_path, expected_duration=None):
     path = Path(output_path)
     if not path.exists() or path.stat().st_size < 1000:
         raise UserError("Монтаж файл видеои тайёрро насохт.", 500)
+    if path.stat().st_size > MAX_OUTPUT_SIZE:
+        raise UserError("Андозаи видеои тайёр аз ҳадди иҷозат зиёд аст.", 500)
 
     info, actual_duration = await get_video_info(path)
     has_video, has_audio, width, height = probe_summary(info)
@@ -652,6 +654,18 @@ async def validate_render_output(output_path, expected_duration=None):
         raise UserError("Видеои тайёр роҳҳои тасвир ё садои дуруст надорад.", 500)
     if actual_duration > float(MAX_DURATION) + 1.0:
         raise UserError("Давомнокии видеои тайёр аз ҳадди иҷозат зиёд аст.", 500)
+
+    # Probe metadata alone does not prove every packet can be decoded.
+    # Run a bounded, single-threaded decode check before marking the job done.
+    await run_command(
+        [
+            "ffmpeg", "-v", "error", "-xerror", "-i", str(path),
+            "-map", "0:v:0", "-map", "0:a:0?", "-f", "null", "-",
+        ],
+        timeout=180,
+        cwd=path.parent,
+        capture=True,
+    )
 
     if expected_duration is not None:
         expected = float(expected_duration)
@@ -4499,7 +4513,12 @@ async def run_transcribe_job(job):
             job["topic"] = analysis["topic"]
             job["visual_cuts"] = len(cuts)
             job["color"] = await analyze_color(job["input"], work_dir, job["duration"])
-            job["music_mood"] = await choose_mood(words, job["topic"], job["duration"])
+            music_setting = (job.get("render_options") or {}).get("music") or "off"
+            if music_setting == "auto" or music_setting in MOODS:
+                job["music_mood"] = await choose_mood(words, job["topic"], job["duration"])
+            else:
+                # Do not spend an LLM request choosing music when the user did not ask for it.
+                job["music_mood"] = None
             job["cover"] = await prepare_cover(
                 job["input"], work_dir, job["duration"], words, job["topic"]
             )
@@ -5016,7 +5035,7 @@ async def create_job(
             cfg.get("anim_out", "auto"), cfg.get("trans", "auto"),
             cfg.get("broll", "auto"), cfg.get("sound", "normal"),
             cfg.get("camera", "auto"), cfg.get("grade", "auto"),
-            cfg.get("music", "auto"), cfg.get("music_level", "low"),
+            cfg.get("music", "off"), cfg.get("music_level", "low"),
             cfg.get("music_sync", "1"),
         )
     except (ValueError, TypeError, json.JSONDecodeError):
