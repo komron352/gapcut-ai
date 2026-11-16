@@ -1,9 +1,17 @@
 import unittest
 
+import webrtcvad
+
 from gapcut_engine import build_edit_decision_list, build_transcript_qa, vad_flags_to_silences
 
 
 class WebRTCVADBoundaryTests(unittest.TestCase):
+    def test_installed_webrtcvad_accepts_30ms_16khz_pcm(self):
+        detector = webrtcvad.Vad(1)
+        silence_frame = b"\\x00" * 960
+        self.assertFalse(detector.is_speech(silence_frame, 16000))
+
+
     def test_bridges_short_unvoiced_gap_inside_a_phrase(self):
         flags = [False] * 3 + [True] * 10 + [False] * 5 + [True] * 10 + [False] * 3
         silences = vad_flags_to_silences(flags, len(flags) * 0.03)
