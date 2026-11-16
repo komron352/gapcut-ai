@@ -2566,8 +2566,8 @@ def build_ass(words, style_name, width, height, output_path,
             pool = flagged or list(range(len(phrase)))
             key_idx = max(pool, key=lambda i: len(clean_token(phrase[i]["word"])))
             key_text = display(phrase[key_idx]["word"])
-            key_size = int(font_size * min(1.0, 9.0 / max(len(key_text), 1)))
-            lead_size = int(font_size * 0.52)
+            key_size = int(phrase_font_size * min(1.0, 9.0 / max(len(key_text), 1)))
+            lead_size = int(phrase_font_size * 0.52)
             key_color = ass_tag_color(style["active"])
 
             for w_index, token in enumerate(phrase):
