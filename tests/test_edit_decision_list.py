@@ -14,7 +14,7 @@ class EditDecisionListTests(unittest.TestCase):
         scenes = [{"start": 0.0, "end": 2.0, "role": "question", "importance": 0.9}]
         plan = build_edit_decision_list(words, scenes, [], 5.0)
         self.assertEqual(plan["hook"]["text"], "Чаро ин муҳим аст?")
-        self.assertEqual(plan["motion"][0]["kind"], "subtle_zoom")
+        self.assertEqual(plan["motion"][0]["kind"], "push_in")
         self.assertEqual(plan["captions"][0]["highlight_index"], 2)
         self.assertEqual(plan["policy"]["music"], "none")
 
