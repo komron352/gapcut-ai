@@ -76,8 +76,16 @@ try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
     Image = ImageDraw = ImageFont = None
+try:
+    import webrtcvad
+except ImportError:
+    webrtcvad = None
 
-from gapcut_engine import build_edit_decision_list, build_transcript_qa
+from gapcut_engine import (
+    build_edit_decision_list,
+    build_transcript_qa,
+    vad_flags_to_silences,
+)
 
 
 # =========================================================
@@ -1075,7 +1083,40 @@ def detected_language_ranges(words, start, end):
     return ranges
 
 
-async def detect_silences(audio_path, work_dir):
+async def detect_silences(audio_path, work_dir, duration=None):
+    # WebRTC VAD is lightweight and processes 30 ms PCM frames from disk, so
+    # long recordings are not loaded into RAM. FFmpeg energy detection remains
+    # the fallback if the optional VAD module or its PCM pass is unavailable.
+    if webrtcvad is not None:
+        pcm_path = Path(work_dir) / "vad_audio_16k_mono.pcm"
+        try:
+            await run_command(
+                [
+                    "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-i", str(audio_path), "-vn", "-ac", "1", "-ar", "16000",
+                    "-f", "s16le", str(pcm_path),
+                ],
+                timeout=90,
+                cwd=work_dir,
+            )
+            detector = webrtcvad.Vad(1)
+            flags = []
+            frame_bytes = 960  # 30 ms * 16 kHz * 16-bit mono
+            with pcm_path.open("rb") as pcm:
+                while True:
+                    frame = pcm.read(frame_bytes)
+                    if len(frame) != frame_bytes:
+                        break
+                    flags.append(detector.is_speech(frame, 16000))
+            if any(flags):
+                measured_duration = duration or len(flags) * 0.03
+                return vad_flags_to_silences(flags, measured_duration)
+        except Exception:
+            logger.warning("WebRTC VAD failed; falling back to FFmpeg silencedetect", exc_info=True)
+        finally:
+            with suppress(OSError):
+                pcm_path.unlink()
+
     stderr = await run_command(
         [
             "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info",
@@ -1088,8 +1129,8 @@ async def detect_silences(audio_path, work_dir):
         capture=True,
     )
 
-    starts = [float(x) for x in re.findall(r"silence_start:\s*(-?[\d.]+)", stderr)]
-    ends = [float(x) for x in re.findall(r"silence_end:\s*(-?[\d.]+)", stderr)]
+    starts = [float(x) for x in re.findall(r"silence_start:\\s*(-?[\\d.]+)", stderr)]
+    ends = [float(x) for x in re.findall(r"silence_end:\\s*(-?[\\d.]+)", stderr)]
     return [
         (max(0.0, s), e) for s, e in zip(starts, ends) if e > s
     ]
@@ -1381,7 +1422,7 @@ async def transcribe_video(audio_path, work_dir, language, audio_duration, repor
             detected = [{"start": 0.0, "end": audio_duration, "lang": language}]
         else:
             report(25, "Анализируем паузы")
-            silences = await detect_silences(audio_path, work_dir)
+            silences = await detect_silences(audio_path, work_dir, audio_duration)
             chunks = plan_chunks(audio_duration, silences)
 
             words = []
