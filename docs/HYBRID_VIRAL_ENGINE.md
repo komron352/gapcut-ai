@@ -86,6 +86,10 @@ Create a structured edit decision list (EDL), not ad-hoc FFmpeg filters:
 
 ## Status of this branch
 
-Implemented in this branch: generic Renderster failure fallback to the built-in FFmpeg renderer, with partial output cleanup.
+Implemented in this branch:
+- Generic Renderster failure fallback to the built-in FFmpeg renderer, with partial output cleanup.
+- Mixed-mode transcript merge: keep the stronger Whisper pass as the backbone and recover non-overlapping words from the alternate language pass; assign language per recovered word and expose phrase-level detected ranges.
+- Safer pause cutting: reject malformed/non-finite/out-of-range or heavily overlapping word timestamps; retain at least 85% of the original timeline and 97% of the timestamped speech span; verify every recognized word remains inside a kept source range.
+- Regression tests added in tests/test_editing_safety.py for mixed-language recovery, duplicate suppression, malformed timestamps and word preservation.
 
-Not yet implemented: mixed-language transcript merging, transcript QA, expanded cut/render tests, output validation and the Viral Director EDL. These require dedicated fixtures and runtime verification before production rollout.
+Not yet implemented: sentence-level semantic language alignment for conflicting overlapping words, full transcript QA reporting, output media decode validation and the Viral Director EDL. The new tests still need to be run in CI and the engine needs real Tajik/Russian sample renders before production rollout.
