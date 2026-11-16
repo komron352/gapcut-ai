@@ -5381,7 +5381,6 @@ async def start_render(
         cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
         music, music_level, music_sync,
     )
-    job["retry_lines"] = parsed_lines
     job["render_options"] = options
     job["render_style"] = clean_style(style)
     job["render_format"] = clean_format(video_format)
@@ -5414,6 +5413,10 @@ async def start_render(
         except UserError as error:
             raise HTTPException(status_code=400, detail=error.message)
 
+    job["retry_lines"] = parsed_lines
+    job["render_options"] = options
+    job["render_style"] = clean_style(style)
+    job["render_format"] = clean_format(video_format)
     touch(job, status="rendering", stage="В очереди", progress=0, error=None)
     spawn(run_render_job(job, style, video_format, parsed_lines, options))
     return public_job(job)
