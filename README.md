@@ -24,6 +24,8 @@ BOT_TOKEN="123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi" python -m unittest dis
 
 A real render also requires FFmpeg/FFprobe and configured service credentials. Never commit API keys or Telegram tokens.
 
+For job recovery across Render restarts, set `GAPCUT_STORAGE_DIR` to an actual persistent-disk mount path. Without that mount, the default temporary storage is ephemeral and cannot guarantee recovery.
+
 ## Rollout safety
 
 Feature work is developed on a dedicated branch and reviewed through a draft pull request. No production Render deployment or merge to `main` is performed without explicit approval and real-media validation.
