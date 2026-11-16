@@ -1,5 +1,7 @@
 import os
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,6 +12,7 @@ os.environ.setdefault("BOT_TOKEN", "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh
 
 import unittest
 
+import bot
 from bot import clean_options, get_video_filter, merge_mixed_transcripts, plan_cuts
 
 
@@ -44,6 +47,48 @@ class MixedTranscriptTests(unittest.TestCase):
         ]}
         merged = merge_mixed_transcripts(tg, ru)
         self.assertEqual(len(merged), 1)
+
+
+class JobPersistenceTests(unittest.TestCase):
+    def test_interrupted_job_restores_as_retryable_error(self):
+        original_base = bot.BASE_DIR
+        original_jobs = bot.JOBS
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                bot.BASE_DIR = Path(tmp)
+                job_dir = bot.BASE_DIR / "job-1"
+                job_dir.mkdir()
+                input_path = job_dir / "input.mp4"
+                input_path.write_bytes(b"test-video")
+                job = {
+                    "id": "job-1",
+                    "user_id": "123",
+                    "dir": job_dir,
+                    "input": input_path,
+                    "duration": 5.0,
+                    "language": "tg",
+                    "status": "rendering",
+                    "stage": "Rendering",
+                    "progress": 50,
+                    "error": None,
+                    "updated": time.time(),
+                    "words": [],
+                    "lines": [],
+                    "detected": [],
+                    "cards": [],
+                    "info": {},
+                    "output": None,
+                }
+                self.assertTrue(bot.persist_job(job))
+                bot.JOBS = {}
+                self.assertEqual(bot.restore_jobs(), 1)
+                restored = bot.JOBS["job-1"]
+                self.assertEqual(restored["status"], "error")
+                self.assertTrue(restored["retryable"])
+                self.assertTrue(restored["input"].is_file())
+        finally:
+            bot.BASE_DIR = original_base
+            bot.JOBS = original_jobs
 
 
 class ReframingTests(unittest.TestCase):
