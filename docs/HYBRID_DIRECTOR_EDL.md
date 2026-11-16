@@ -111,3 +111,14 @@ This is a safe fallback, not face tracking. Face-aware tracking remains availabl
 - Short unvoiced gaps inside phrases are bridged; only sufficiently long internal pauses become chunk boundaries. Leading/trailing silence is not used to create empty ASR chunks.
 - If the optional VAD pass fails or yields no speech frames, the existing FFmpeg `silencedetect` fallback remains active.
 - Unit tests cover short-gap bridging and long-pause detection. Real-media tuning is still pending.
+
+## Subtitle style aliases
+
+The backend accepts the five requested names without changing the Mini App:
+- `kinetic` → existing blue pop/animated `brandly` preset
+- `premium` → existing `podcast` highlight/boxed preset
+- `viral` → existing `viral` high-impact preset
+- `clean` → existing `minimal` plain preset
+- `cinematic` → existing `cinema` serif/fade preset
+
+Legacy UI values remain accepted and retain their existing mappings. The Mini App markup and style selector are unchanged.
