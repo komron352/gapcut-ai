@@ -968,6 +968,16 @@ def merge_mixed_transcripts(tg_parsed, ru_parsed):
     secondary = ru_words if primary_lang == "tg" else tg_words
 
     merged = list(primary)
+    common_tajik = {"салом", "ман", "ту", "шумо", "мо", "онҳо", "ҳаст", "нест"}
+
+    def has_tajik_evidence(item):
+        token = core_token(item.get("word", "")).lower()
+        return (
+            any(char in TG_LETTERS for char in token)
+            or token in common_tajik
+            or bool(TAJIK_INDEX.get(tg_key(token)))
+        )
+
     for candidate in secondary:
         try:
             c_start = float(candidate["start"])
@@ -977,17 +987,30 @@ def merge_mixed_transcripts(tg_parsed, ru_parsed):
         if c_end <= c_start or c_end - c_start > 2.5:
             continue
 
-        duplicate = False
+        collisions = []
         c_mid = (c_start + c_end) / 2
-        for existing in primary:
+        for existing in merged:
             e_start, e_end = float(existing["start"]), float(existing["end"])
             overlap = max(0.0, min(c_end, e_end) - max(c_start, e_start))
             shorter = max(0.04, min(c_end - c_start, e_end - e_start))
             e_mid = (e_start + e_end) / 2
             if overlap / shorter >= 0.30 or abs(c_mid - e_mid) <= 0.12:
-                duplicate = True
-                break
-        if not duplicate:
+                collisions.append(existing)
+
+        if not collisions:
+            merged.append(candidate)
+            continue
+
+        # Prefer a clearly Tajik token over a Russian-pass transliteration or
+        # translation at the same timestamp. Otherwise keep the chunk backbone.
+        replace = next((
+            existing for existing in collisions
+            if candidate.get("lang") == "tg"
+            and has_tajik_evidence(candidate)
+            and not has_tajik_evidence(existing)
+        ), None)
+        if replace is not None:
+            merged.remove(replace)
             merged.append(candidate)
 
     return normalize_words(merged)
