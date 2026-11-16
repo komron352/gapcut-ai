@@ -8,7 +8,7 @@ from gapcut_engine import build_edit_decision_list, build_transcript_qa, vad_fla
 class WebRTCVADBoundaryTests(unittest.TestCase):
     def test_installed_webrtcvad_accepts_30ms_16khz_pcm(self):
         detector = webrtcvad.Vad(1)
-        silence_frame = b"\\x00" * 960
+        silence_frame = b"\x00" * 960
         self.assertFalse(detector.is_speech(silence_frame, 16000))
 
 
