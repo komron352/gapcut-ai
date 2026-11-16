@@ -213,6 +213,7 @@ class UserError(Exception):
 # RENDERSTER AI AUTO-EDIT (optional external editing engine)
 # =========================================================
 RENDERSTER_API_KEY = os.getenv("RENDERSTER_API_KEY", "").strip()
+RENDLEY_API_KEY = os.getenv("RENDLEY_API_KEY", "").strip()
 RENDERSTER_AUTO_EDIT = os.getenv("RENDERSTER_AUTO_EDIT", "0").strip() == "1"
 RENDERSTER_EDIT_STYLE_ID = os.getenv("RENDERSTER_EDIT_STYLE_ID", "").strip()
 RENDERSTER_BASE_URL = "https://renderster.com"
@@ -4949,6 +4950,55 @@ async def home():
         "max_input_mb": MAX_INPUT_SIZE // (1024 * 1024),
         "max_duration_seconds": MAX_DURATION,
         "processing_concurrency": 1,
+    }
+
+
+@app.get("/api/rendley/connection")
+async def rendley_connection(
+    init_data: str = Query(default=""),
+    x_init_data: str = Header(default=""),
+):
+    """Read-only Rendley account check. Never starts an edit or spends credits."""
+    user = require_user(x_init_data, init_data)
+    if str(user.get("id")) != "5475524665":
+        raise HTTPException(status_code=403, detail="Танҳо соҳиби GAPCUT AI иҷозат дорад.")
+    if not RENDLEY_API_KEY:
+        raise HTTPException(status_code=503, detail="RENDLEY_API_KEY дар сервер танзим нашудааст.")
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            response = await client.get(
+                "https://api.rendley.com/v1/users/me",
+                headers={"Authorization": f"Bearer {RENDLEY_API_KEY}"},
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Rendley API ҷавоб надод (timeout).")
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Бо Rendley API пайваст шуда нашуд.")
+
+    if response.status_code == 401:
+        raise HTTPException(status_code=401, detail="Rendley API key қабул нашуд. Калидро санҷ.")
+    if response.status_code == 403:
+        raise HTTPException(status_code=403, detail="Калид дуруст аст, аммо дастрасӣ иҷозат нест ё subscription фаъол нест.")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Rendley API хатои HTTP {response.status_code} баргардонд.")
+
+    try:
+        payload = response.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Rendley ҷавоби JSON-и дуруст надод.")
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="Формати ҷавоби Rendley ғайричашмдошт аст.")
+
+    # Return only plan/credit metadata; never expose email, API key or raw payload.
+    return {
+        "status": "connected",
+        "provider": "rendley",
+        "plan": data.get("plan") or data.get("subscription"),
+        "credits": data.get("credits"),
+        "note": "Read-only check. No video edit or export was started.",
     }
 
 
