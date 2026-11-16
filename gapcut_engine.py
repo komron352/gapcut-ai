@@ -254,3 +254,82 @@ def build_edit_decision_list(
             "never_cut_unvalidated_speech": True,
         },
     }
+
+
+def build_transcript_qa(words: Iterable[dict], duration: float, detected: Iterable[dict] = None) -> dict:
+    """Summarize transcript integrity without pretending to have calibrated word confidence."""
+    duration_value = _finite(duration)
+    if duration_value is None or duration_value <= 0:
+        raise ValueError("duration must be a finite positive number")
+
+    source = list(words or [])
+    valid = _valid_words(source, duration_value)
+    low_flags = []
+    corrections = []
+    languages = {}
+    switches = []
+    long_pauses = []
+
+    previous = None
+    for item in valid:
+        language = item.get("lang") or "unknown"
+        languages[language] = languages.get(language, 0) + 1
+        if item.get("low"):
+            low_flags.append({
+                "word": item["word"],
+                "start": round(item["start"], 3),
+                "end": round(item["end"], 3),
+                "signal": "low_segment_logprob",
+            })
+        if item.get("fixed") and item.get("orig"):
+            corrections.append({
+                "from": str(item["orig"])[:80],
+                "to": item["word"][:80],
+                "start": round(item["start"], 3),
+            })
+        if previous is not None:
+            gap = item["start"] - previous["end"]
+            if gap >= 1.5:
+                long_pauses.append({
+                    "start": round(previous["end"], 3),
+                    "end": round(item["start"], 3),
+                    "duration": round(gap, 3),
+                })
+            if language != previous.get("lang", "unknown"):
+                switches.append({
+                    "at": round(item["start"], 3),
+                    "from": previous.get("lang", "unknown"),
+                    "to": language,
+                })
+        previous = item
+
+    invalid_count = max(0, len(source) - len(valid))
+    detected_ranges = []
+    for item in detected or []:
+        if not isinstance(item, dict):
+            continue
+        start, end = _finite(item.get("start")), _finite(item.get("end"))
+        if start is None or end is None or end <= start:
+            continue
+        detected_ranges.append({
+            "start": round(max(0.0, start), 3),
+            "end": round(min(duration_value, end), 3),
+            "lang": str(item.get("lang") or "unknown"),
+        })
+
+    return {
+        "word_count": len(valid),
+        "invalid_or_ambiguous_word_count": invalid_count,
+        "low_segment_logprob_flags": low_flags,
+        "low_segment_logprob_count": len(low_flags),
+        "correction_count": len(corrections),
+        "corrections": corrections,
+        "language_word_counts": languages,
+        "language_switches": switches,
+        "long_pauses": long_pauses[:50],
+        "detected_language_ranges": detected_ranges,
+        "confidence_note": (
+            "low flags are derived from provider segment-level average log probability; "
+            "they are not calibrated per-word confidence scores"
+        ),
+    }
