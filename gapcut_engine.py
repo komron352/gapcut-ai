@@ -333,3 +333,67 @@ def build_transcript_qa(words: Iterable[dict], duration: float, detected: Iterab
             "they are not calibrated per-word confidence scores"
         ),
     }
+
+
+def vad_flags_to_silences(
+    flags: Iterable[bool],
+    duration: float,
+    frame_ms: int = 30,
+    padding_ms: int = 150,
+    min_silence_ms: int = 250,
+) -> list[tuple[float, float]]:
+    """Convert WebRTC VAD frame decisions to padded internal silence ranges."""
+    duration_value = _finite(duration)
+    if duration_value is None or duration_value <= 0 or frame_ms not in (10, 20, 30):
+        return []
+    decisions = [bool(value) for value in flags]
+    if not decisions:
+        return []
+
+    # Bridge only very short unvoiced gaps between voiced frames so breaths and
+    # consonant closures are not treated as safe chunk boundaries.
+    max_gap_frames = max(1, int(min_silence_ms // frame_ms))
+    index = 0
+    while index < len(decisions):
+        if decisions[index]:
+            index += 1
+            continue
+        start = index
+        while index < len(decisions) and not decisions[index]:
+            index += 1
+        end = index
+        if (
+            start > 0 and end < len(decisions)
+            and decisions[start - 1] and decisions[end]
+            and end - start <= max_gap_frames
+        ):
+            for pos in range(start, end):
+                decisions[pos] = True
+
+    frame_seconds = frame_ms / 1000.0
+    padding = padding_ms / 1000.0
+    min_silence = min_silence_ms / 1000.0
+    speech_ranges = []
+    index = 0
+    while index < len(decisions):
+        if not decisions[index]:
+            index += 1
+            continue
+        start = index
+        while index < len(decisions) and decisions[index]:
+            index += 1
+        end = index
+        a = max(0.0, start * frame_seconds - padding)
+        b = min(duration_value, end * frame_seconds + padding)
+        if speech_ranges and a - speech_ranges[-1][1] <= min_silence:
+            speech_ranges[-1][1] = max(speech_ranges[-1][1], b)
+        else:
+            speech_ranges.append([a, b])
+
+    # Only internal pauses are useful chunk boundaries; leading/trailing
+    # silence should not create empty Whisper chunks.
+    silences = []
+    for left, right in zip(speech_ranges, speech_ranges[1:]):
+        if right[0] - left[1] >= min_silence:
+            silences.append((round(left[1], 3), round(right[0], 3)))
+    return silences
