@@ -4922,9 +4922,28 @@ async def generate_standalone_image(
             )
 
 
+def current_rss_mb():
+    """Read resident memory from procfs without adding a runtime dependency."""
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                return round(int(line.split()[1]) / 1024.0, 1)
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
-    return {"status": "healthy", "service": "GAPCUT AI", "version": VERSION}
+    return {
+        "status": "healthy",
+        "service": "GAPCUT AI",
+        "version": VERSION,
+        "memory_rss_mb": current_rss_mb(),
+        "active_jobs": sum(1 for job in JOBS.values() if job.get("status") in ACTIVE_STATES),
+        "processing": PROCESS_LOCK.locked(),
+        "max_stored_jobs": MAX_STORED_JOBS,
+    }
 
 
 # ---------------------------------------------------------
