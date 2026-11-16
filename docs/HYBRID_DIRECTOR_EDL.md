@@ -51,3 +51,27 @@ The EDL is JSON-serializable and uses source timestamps as the ground truth:
 - Merge to `main` is not authorized.
 - Run `python -m unittest discover -s tests -v` in CI before any production test.
 - Real sample videos are still required before claiming subtitle or render quality is fixed.
+
+## Transcript QA additions
+
+The backend now returns a transcript QA summary alongside the existing transcript:
+
+- total valid word count
+- invalid/ambiguous timing count
+- low segment-average-logprob flags with timestamps
+- corrections with original and corrected token text
+- language word counts and language switches
+- long-pause intervals
+- detected language ranges
+
+Important limitation: Groq's current word timing response does not provide a calibrated probability for every word in this implementation. The QA report labels low flags as segment-level average-logprob signals and does not misrepresent them as per-word confidence scores.
+
+Context-dependent Tajik token rewrites have been removed from the hard-coded dictionary list. Only the unambiguous `имруз` → `имрӯз` normalization remains there; other tokens are left to the language-aware dictionary/LLM checks, which preserve the original token when a correction is accepted.
+
+## Test status
+
+The first GitHub Actions test run executed 8 tests and exposed two failures:
+- the EDL test expected a subtle zoom for a high-importance scene, while the planner correctly chose a push-in;
+- the mixed transcript test exposed that a Russian-pass word could override a clearly Tajik token at the same timestamp.
+
+Both issues have been addressed in subsequent commits. A successful test run for the latest branch head has not yet been observed, so this milestone is not marked test-passed.
