@@ -2,7 +2,7 @@ name: GAPCUT backend tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "feature/hybrid-viral-engine"]
   push:
     branches: [main, "feature/**"]
 
