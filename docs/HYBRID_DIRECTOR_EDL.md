@@ -83,3 +83,7 @@ Both issues have been addressed in subsequent commits. A successful test run for
 - The final output is decoded once with FFmpeg in single-thread mode using `-xerror` before a job can be marked complete. Output size is also checked against the configured cap.
 
 These filters still need listening tests against real quiet/noisy Tajik and Russian samples. Their presence is not proof that every voice recording will sound better; they must be tuned against sample clips before production.
+
+## Runtime monitoring
+
+The existing `/health` response now includes best-effort resident-memory usage from Linux procfs, active job count, whether the single heavy-processing lock is held, and the configured stored-job cap. This is telemetry only; it does not make in-memory jobs restart-safe.
