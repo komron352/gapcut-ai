@@ -1129,8 +1129,8 @@ async def detect_silences(audio_path, work_dir, duration=None):
         capture=True,
     )
 
-    starts = [float(x) for x in re.findall(r"silence_start:\\s*(-?[\\d.]+)", stderr)]
-    ends = [float(x) for x in re.findall(r"silence_end:\\s*(-?[\\d.]+)", stderr)]
+    starts = [float(x) for x in re.findall(r"silence_start:\s*(-?[\d.]+)", stderr)]
+    ends = [float(x) for x in re.findall(r"silence_end:\s*(-?[\d.]+)", stderr)]
     return [
         (max(0.0, s), e) for s, e in zip(starts, ends) if e > s
     ]
