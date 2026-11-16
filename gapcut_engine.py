@@ -185,22 +185,29 @@ def build_edit_decision_list(
 
     hook_scene = next(
         (scene for scene in clean_scenes
-         if scene["role"] in ("hook", "question") or scene["importance"] >= 0.85),
+         if scene["start"] < min(2.5, duration)
+         and (scene["role"] in ("hook", "question") or scene["importance"] >= 0.85)),
         None,
     )
     hook = None
     if hook_scene:
         hook_words = [
             item for item in clean_words
-            if hook_scene["start"] <= item["start"] and item["end"] <= hook_scene["end"]
+            if hook_scene["start"] <= item["start"]
+            and item["end"] <= min(hook_scene["end"], 2.8)
         ][:9]
         if hook_words:
-            hook = {
-                "text": " ".join(item["word"] for item in hook_words),
-                "source_start": round(hook_words[0]["start"], 3),
-                "source_end": round(hook_words[-1]["end"], 3),
-                "note": "selected_from_source_transcript",
-            }
+            hook_start = _map_time(hook_words[0]["start"], timeline)
+            hook_end = _map_time(hook_words[-1]["end"], timeline)
+            if hook_start is not None and hook_end is not None and hook_end > hook_start:
+                hook = {
+                    "text": " ".join(item["word"] for item in hook_words),
+                    "source_start": round(hook_words[0]["start"], 3),
+                    "source_end": round(hook_words[-1]["end"], 3),
+                    "start": hook_start,
+                    "end": hook_end,
+                    "note": "selected_from_source_transcript",
+                }
 
     motion = []
     for scene in mapped_scenes:
