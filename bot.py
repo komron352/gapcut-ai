@@ -2321,7 +2321,8 @@ def transition_filters(points, width):
 
 def build_ass(words, style_name, width, height, output_path,
               accent=None, size="m", position="auto",
-              font=None, font2=None, mix=False, keys=True, anim=None, anim_out=None, anim_log=None):
+              font=None, font2=None, mix=False, keys=True, anim=None, anim_out=None,
+              anim_log=None, hook_range=None):
     style = dict(STYLES.get(style_name, STYLES["viral"]))
     if accent:
         style["active"] = accent
@@ -2447,6 +2448,19 @@ def build_ass(words, style_name, width, height, output_path,
         if p_index + 1 < len(phrases):
             phrase_end = min(phrase_end, phrases[p_index + 1][0]["start"] - 0.02)
         phrase_end = max(phrase_end, phrase_start + 0.15)
+        is_hook_phrase = False
+        if hook_range and len(hook_range) == 2:
+            try:
+                hook_start, hook_end = float(hook_range[0]), float(hook_range[1])
+                is_hook_phrase = phrase_start < hook_end and phrase_end > hook_start
+            except (TypeError, ValueError):
+                is_hook_phrase = False
+        phrase_font_size = int(font_size * 1.12) if is_hook_phrase else font_size
+        hook_prefix = (
+            "{\\fs%d\\1c%s\\b1}" % (phrase_font_size, ass_tag_color(style["active"]))
+            if is_hook_phrase else ""
+        )
+        hook_suffix = "{\\r%s}" % sname if is_hook_phrase else ""
 
         mode = style["mode"]
         if mode == "dynamic":
@@ -2460,11 +2474,11 @@ def build_ass(words, style_name, width, height, output_path,
                 pool = flagged or list(range(len(phrase)))
                 kidx = max(pool, key=lambda i: len(core_token(phrase[i]["word"])))
                 ktext = display(phrase[kidx]["word"])
-                ksize = int(font_size * min(1.0, 9.0 / max(len(ktext), 1)))
+                ksize = int(phrase_font_size * min(1.0, 9.0 / max(len(ktext), 1)))
                 lead = " ".join(display(t["word"]) for j, t in enumerate(phrase) if j != kidx)
                 pieces = []
                 if lead:
-                    pieces.append("{\\fs%d\\1c&HFFFFFF&}%s" % (int(font_size * 0.52), lead))
+                    pieces.append("{\\fs%d\\1c&HFFFFFF&}%s" % (int(phrase_font_size * 0.52), lead))
                 pieces.append("{\\fs%d\\1c%s%s}%s" % (ksize, act, font_tag, ktext))
                 block = "\\N".join(pieces)
             elif mode in ("pop", "highlight"):
@@ -2490,6 +2504,10 @@ def build_ass(words, style_name, width, height, output_path,
             else:
                 block = colored(phrase)
 
+            if is_hook_phrase:
+                block = hook_prefix + block + hook_suffix
+            phrase_ctx = dict(base_ctx, fs=phrase_font_size) if is_hook_phrase else base_ctx
+
             plain = " ".join(t["word"] for t in phrase)
             in_name = anim if anim in ANIM_IN else None
             if anim == "auto":
@@ -2505,7 +2523,7 @@ def build_ass(words, style_name, width, height, output_path,
                 out_name = ANIM_MIX_OUT[p_index % len(ANIM_MIX_OUT)]
             events.extend(animated_phrase_events(
                 block, phrase_start, phrase_end, sname, in_name, out_name,
-                base_ctx, random.Random(p_index + 11),
+                phrase_ctx, random.Random(p_index + 11),
             ))
             continue
 
@@ -2536,6 +2554,8 @@ def build_ass(words, style_name, width, height, output_path,
                     else:
                         parts.append(text)
 
+                if is_hook_phrase:
+                    parts = [hook_prefix + part + hook_suffix for part in parts]
                 events.append(
                     f"Dialogue: 0,{ass_time(start)},{ass_time(end)},{sname},,"
                     f"0,0,0,,{' '.join(parts)}"
@@ -2574,6 +2594,8 @@ def build_ass(words, style_name, width, height, output_path,
                     pieces.append(
                         f"{{\\fs{key_size}\\1c{key_color}{font_tag}{pop}}}{key_text}"
                     )
+                if is_hook_phrase:
+                    pieces = [hook_prefix + piece + hook_suffix for piece in pieces]
                 events.append(
                     f"Dialogue: 0,{ass_time(start)},{ass_time(end)},{sname},,"
                     "0,0,0,," + "\\N".join(pieces)
@@ -2588,6 +2610,8 @@ def build_ass(words, style_name, width, height, output_path,
                     span = phrase_end - token["start"]
                 centis = max(1, int(round(span * 100)))
                 parts.append(f"{{\\kf{centis}}}{display(token['word'])}")
+            if is_hook_phrase:
+                parts = [hook_prefix + part + hook_suffix for part in parts]
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
                 f"{sname},,0,0,0,,{' '.join(parts)}"
@@ -2595,6 +2619,8 @@ def build_ass(words, style_name, width, height, output_path,
 
         elif mode == "fade":
             text = colored(phrase)
+            if is_hook_phrase:
+                text = hook_prefix + text + hook_suffix
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
                 f"{sname},,0,0,0,,{{\\fad(250,200)}}{text}"
@@ -2602,6 +2628,8 @@ def build_ass(words, style_name, width, height, output_path,
 
         else:
             text = colored(phrase)
+            if is_hook_phrase:
+                text = hook_prefix + text + hook_suffix
             events.append(
                 f"Dialogue: 0,{ass_time(phrase_start)},{ass_time(phrase_end)},"
                 f"{sname},,0,0,0,,{text}"
@@ -4234,6 +4262,10 @@ async def render_video(
             anim=options.get("anim"),
             anim_out=options.get("anim_out"),
             anim_log=anim_log,
+            hook_range=(
+                (options["edit_plan"]["hook"]["start"], options["edit_plan"]["hook"]["end"])
+                if options.get("edit_plan", {}).get("hook") else None
+            ),
         )
     fonts_option = ""
     if FONTS_DIR.is_dir() and any(FONTS_DIR.iterdir()):
