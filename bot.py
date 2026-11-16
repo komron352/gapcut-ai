@@ -147,7 +147,9 @@ LLM_MODEL = os.getenv("LLM_MODEL", os.getenv("KEYWORD_MODEL", "auto")).strip() o
 LLM_CHAT_URL = f"{LLM_BASE_URL}/chat/completions" if LLM_BASE_URL else ""
 FFMPEG_PRESET = os.getenv("FFMPEG_PRESET", "ultrafast").strip() or "ultrafast"
 
-BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
+_STORAGE_DIR = os.getenv("GAPCUT_STORAGE_DIR", "").strip()
+STORAGE_DIR_CONFIGURED = bool(_STORAGE_DIR)
+BASE_DIR = Path(_STORAGE_DIR) if _STORAGE_DIR else Path(tempfile.gettempdir()) / "gapcut_ai"
 FONTS_DIR = Path(os.getenv("FONTS_DIR", str(Path(__file__).resolve().parent / "fonts")))
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".flv", ".wmv", ".3gp", ".3g2", ".mpeg", ".mpg", ".ts", ".mts", ".m2ts", ".vob", ".ogv", ".mxf", ".asf", ".f4v"}
@@ -4439,10 +4441,29 @@ JOB_TASKS = set()
 ACTIVE_STATES = {"queued", "transcribing", "rendering"}
 
 
+def persist_job(job):
+    """Atomically persist the small JSON job manifest beside its media files."""
+    try:
+        job_dir = Path(job.get("dir") or "")
+        if not job_dir.is_dir():
+            return False
+        manifest = job_dir / "job_state.json"
+        temporary = job_dir / "job_state.json.tmp"
+        temporary.write_text(
+            json.dumps(job, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        os.replace(temporary, manifest)
+        return True
+    except Exception:
+        logger.exception("Could not persist job state for %s", job.get("id"))
+        return False
+
+
 def remove_job(job_id):
     job = JOBS.pop(job_id, None)
     if job:
-        shutil.rmtree(job["dir"], ignore_errors=True)
+        shutil.rmtree(Path(job["dir"]), ignore_errors=True)
 
 
 def purge_expired_jobs():
@@ -4457,6 +4478,64 @@ def purge_expired_jobs():
 def touch(job, **values):
     job.update(values)
     job["updated"] = time.time()
+    persist_job(job)
+
+
+def restore_jobs():
+    """Restore manifests from a persistent mount and mark interrupted jobs retryable."""
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    restored = 0
+    for manifest in BASE_DIR.glob("*/job_state.json"):
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            job_id = str(data.get("id") or "")
+            job_dir = Path(data.get("dir") or manifest.parent)
+            input_value = data.get("input")
+            if not job_id or not input_value:
+                continue
+            input_path = Path(input_value)
+            if not job_dir.is_dir() or not input_path.is_file():
+                continue
+
+            data["dir"] = job_dir
+            data["input"] = input_path
+            if data.get("output"):
+                data["output"] = Path(data["output"])
+
+            if data.get("status") in ACTIVE_STATES:
+                partial = Path(data.get("output") or (job_dir / "gapcut_ai.mp4"))
+                with suppress(OSError):
+                    partial.unlink()
+                data.update(
+                    status="error",
+                    stage="Коркард ҳангоми бозоғоз қатъ шуд",
+                    progress=0,
+                    error="Сервер ҳангоми коркард бозоғоз шуд. Монтажро дубора оғоз кунед.",
+                    retryable=True,
+                    updated=time.time(),
+                    output=None,
+                )
+            elif data.get("status") == "done":
+                output = data.get("output")
+                if not output or not Path(output).is_file():
+                    data.update(
+                        status="error",
+                        stage="Файли натиҷа дастрас нест",
+                        progress=0,
+                        error="Файли тайёр баъди бозоғоз дастрас нест. Видеоро дубора фиристед.",
+                        retryable=True,
+                        updated=time.time(),
+                        output=None,
+                    )
+            data.setdefault("retryable", data.get("status") == "error")
+            JOBS[job_id] = data
+            persist_job(data)
+            restored += 1
+        except Exception:
+            logger.exception("Could not restore job manifest %s", manifest)
+
+    logger.info("Restored %s job manifests from %s", restored, BASE_DIR)
+    return restored
 
 
 def public_job(job):
@@ -4470,6 +4549,7 @@ def public_job(job):
         "updated": int(job.get("updated", time.time())),
         "duration": round(job["duration"], 2),
         "error": job["error"],
+        "retryable": bool(job.get("retryable", False)),
     }
     if job["status"] in ("transcribed", "rendering", "done") or job["lines"]:
         data["lines"] = job["lines"]
@@ -4516,10 +4596,17 @@ def spawn(coroutine):
 
 def fail_job(job, error):
     if isinstance(error, UserError):
-        touch(job, status="error", stage="Ошибка", error=error.message)
+        retryable = error.status_code >= 500 or error.status_code in (408, 429)
+        touch(
+            job, status="error", stage="Ошибка", error=error.message,
+            retryable=retryable,
+        )
     else:
         logger.error("Job %s failed", job["id"], exc_info=error)
-        touch(job, status="error", stage="Ошибка", error="Внутренняя ошибка сервера.")
+        touch(
+            job, status="error", stage="Ошибка",
+            error="Внутренняя ошибка сервера.", retryable=True,
+        )
 
 
 async def run_transcribe_job(job):
@@ -4724,8 +4811,8 @@ async def cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app_instance):
-    shutil.rmtree(BASE_DIR, ignore_errors=True)
     BASE_DIR.mkdir(parents=True, exist_ok=True)
+    restore_jobs()
 
     global AVAILABLE_FONTS
     AVAILABLE_FONTS = await asyncio.to_thread(detect_fonts)
@@ -4744,7 +4831,8 @@ async def lifespan(app_instance):
                 await task
         with suppress(Exception):
             await bot.session.close()
-        shutil.rmtree(BASE_DIR, ignore_errors=True)
+        # Keep job manifests and outputs. A configured persistent disk can
+        # restore completed jobs and mark interrupted jobs retryable.
 
 
 app = FastAPI(title="GAPCUT AI API", version=VERSION, lifespan=lifespan)
@@ -4971,6 +5059,7 @@ async def health():
         "active_jobs": sum(1 for job in JOBS.values() if job.get("status") in ACTIVE_STATES),
         "processing": PROCESS_LOCK.locked(),
         "max_stored_jobs": MAX_STORED_JOBS,
+        "job_storage": "persistent_mount" if STORAGE_DIR_CONFIGURED else "ephemeral",
     }
 
 
@@ -5172,6 +5261,7 @@ async def create_job(
         "updated": time.time(),
     }
     JOBS[job_id] = job
+    persist_job(job)
     spawn(run_transcribe_job(job))
 
     return public_job(job)
@@ -5226,6 +5316,9 @@ async def start_render(
         cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
         music, music_level, music_sync,
     )
+    job["render_options"] = options
+    job["render_style"] = clean_style(style)
+    job["render_format"] = clean_format(video_format)
     options["music_mood"] = job.get("music_mood")
     options["scenes"] = job.get("scenes", [])
     options["color"] = job.get("color")
