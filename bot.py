@@ -5277,6 +5277,65 @@ async def job_status(
     return public_job(get_job(job_id, user))
 
 
+@app.post("/api/jobs/{job_id}/retry", status_code=202)
+async def retry_job(
+    job_id: str,
+    init_data: str = Form(""),
+    x_init_data: str = Header(default=""),
+):
+    user = require_user(init_data, x_init_data)
+    job = get_job(job_id, user)
+    if job.get("status") != "error" or not job.get("retryable"):
+        raise HTTPException(status_code=409, detail="Ин вазифа барои такрор омода нест.")
+
+    input_path = Path(job.get("input") or "")
+    if not input_path.is_file():
+        raise HTTPException(
+            status_code=410,
+            detail="Файли аслӣ дастрас нест. Видеоро дубора фиристед.",
+        )
+
+    output_path = Path(job.get("output") or (Path(job["dir"]) / "gapcut_ai.mp4"))
+    with suppress(OSError):
+        output_path.unlink()
+    job["output"] = None
+    job["render_validation"] = None
+
+    if job.get("words") and job.get("auto_render"):
+        render_options = dict(job.get("render_options") or {})
+        if render_options.get("broll", "auto") != "off":
+            render_options["cards"] = list(job.get("cards") or [])
+        render_options["scenes"] = list(job.get("scenes") or [])
+        render_options["color"] = job.get("color")
+        render_options["music_mood"] = job.get("music_mood")
+        touch(
+            job, status="queued", stage="Монтажро дубора оғоз мекунем",
+            progress=5, error=None, retryable=False,
+        )
+        spawn(run_render_job(
+            job,
+            job.get("render_style", "dynamic"),
+            job.get("render_format", "9:16"),
+            None,
+            render_options,
+        ))
+    else:
+        for key, default in (
+            ("words", []), ("lines", []), ("detected", []), ("cards", []),
+            ("scenes", []), ("topic", ""), ("visual_cuts", 0), ("color", None),
+            ("music_mood", None), ("cover", None), ("cut_preview", {}),
+            ("broll_info", {}), ("edit_plan", None), ("transcript_qa", None),
+        ):
+            job[key] = default
+        touch(
+            job, status="queued", stage="Коркардро дубора оғоз мекунем",
+            progress=5, error=None, retryable=False,
+        )
+        spawn(run_transcribe_job(job))
+
+    return public_job(job)
+
+
 @app.post("/api/jobs/{job_id}/render", status_code=202)
 async def start_render(
     job_id: str,
