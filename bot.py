@@ -912,6 +912,64 @@ def script_score(parsed):
     score += min(1.2, native_letters * 0.30)
     return score
 
+def merge_mixed_transcripts(tg_parsed, ru_parsed):
+    """Keep the stronger transcript, then recover clearly non-overlapping words
+    from the other language pass. Never duplicate words covering the same audio.
+    """
+    tg_words = [dict(w, lang="tg") for w in tg_parsed.get("words", [])]
+    ru_words = [dict(w, lang="ru") for w in ru_parsed.get("words", [])]
+    if not tg_words:
+        return normalize_words(ru_words)
+    if not ru_words:
+        return normalize_words(tg_words)
+
+    primary_lang = "tg" if script_score(tg_parsed) >= script_score(ru_parsed) else "ru"
+    primary = tg_words if primary_lang == "tg" else ru_words
+    secondary = ru_words if primary_lang == "tg" else tg_words
+
+    merged = list(primary)
+    for candidate in secondary:
+        try:
+            c_start = float(candidate["start"])
+            c_end = float(candidate["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if c_end <= c_start or c_end - c_start > 2.5:
+            continue
+
+        duplicate = False
+        c_mid = (c_start + c_end) / 2
+        for existing in primary:
+            e_start, e_end = float(existing["start"]), float(existing["end"])
+            overlap = max(0.0, min(c_end, e_end) - max(c_start, e_start))
+            shorter = max(0.04, min(c_end - c_start, e_end - e_start))
+            e_mid = (e_start + e_end) / 2
+            if overlap / shorter >= 0.30 or abs(c_mid - e_mid) <= 0.12:
+                duplicate = True
+                break
+        if not duplicate:
+            merged.append(candidate)
+
+    return normalize_words(merged)
+
+
+def detected_language_ranges(words, start, end):
+    """Compact per-word language tags into phrase-level detected ranges."""
+    ranges = []
+    for word in words:
+        lang = word.get("lang")
+        if lang not in ("tg", "ru"):
+            continue
+        a = max(float(start), float(word["start"]))
+        b = min(float(end), float(word["end"]))
+        if b <= a:
+            continue
+        if ranges and ranges[-1]["lang"] == lang and a - ranges[-1]["end"] <= 0.8:
+            ranges[-1]["end"] = b
+        else:
+            ranges.append({"start": a, "end": b, "lang": lang})
+    return ranges
+
 
 async def detect_silences(audio_path, work_dir):
     stderr = await run_command(
@@ -1263,19 +1321,14 @@ async def transcribe_video(audio_path, work_dir, language, audio_duration, repor
 
                 if not tg_parsed["words"] and not ru_parsed["words"]:
                     continue
-                if not ru_parsed["words"]:
-                    chosen, lang = tg_parsed, "tg"
-                elif not tg_parsed["words"]:
-                    chosen, lang = ru_parsed, "ru"
-                elif script_score(tg_parsed) >= script_score(ru_parsed):
-                    chosen, lang = tg_parsed, "tg"
-                else:
-                    chosen, lang = ru_parsed, "ru"
 
-                for item in chosen["words"]:
-                    item["lang"] = lang
-                words.extend(chosen["words"])
-                detected.append({"start": start, "end": end, "lang": lang})
+                # Do not label an entire 8–18 second chunk as one language.
+                # Keep the stronger pass as the backbone and recover words
+                # present only in the alternate pass when their timestamps do
+                # not collide with an already recognized word.
+                chunk_words = merge_mixed_transcripts(tg_parsed, ru_parsed)
+                words.extend(chunk_words)
+                detected.extend(detected_language_ranges(chunk_words, start, end))
 
     words = normalize_words(words)
     if not words:
