@@ -93,3 +93,13 @@ The existing `/health` response now includes best-effort resident-memory usage f
 The local proxy now preserves the source aspect ratio instead of resizing every source directly to the requested output canvas. For a large source/target aspect-ratio mismatch, the renderer uses a blurred, darkened fill behind the complete source frame. This avoids distorting a landscape speaker into a vertical frame or silently center-cropping the subject.
 
 This is a safe fallback, not face tracking. Face-aware tracking remains available only through the optional Renderster path at this stage; the local FFmpeg renderer does not yet detect or follow faces.
+
+## Job manifests and retry recovery
+
+- Each job writes an atomic `job_state.json` manifest beside its uploaded source and generated media.
+- The backend no longer deletes the whole work directory on startup or shutdown.
+- On startup, completed jobs are restored when their source/output files still exist. Jobs interrupted in `queued`, `transcribing`, or `rendering` are marked as recoverable errors; partial MP4 output is removed.
+- Authenticated `POST /api/jobs/{job_id}/retry` re-runs the render when a transcript already exists, or re-runs transcription when it does not.
+- The existing job TTL cleanup still removes expired job directories.
+
+**Storage caveat:** the default path remains the system temporary directory and is reported as `ephemeral_default`. For recovery across Render instance replacement, set `GAPCUT_STORAGE_DIR` to an actual persistent-disk mount path. A configured path is reported as `custom_path_configured`; the health endpoint cannot verify that the path is truly backed by persistent storage. No Render environment variable or disk setting was changed in this branch.
