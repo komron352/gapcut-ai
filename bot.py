@@ -4050,11 +4050,18 @@ async def render_video(
     proxy_width = even(width * proxy_scale)
     proxy_height = even(height * proxy_scale)
     proxy_path = work_dir / "render_proxy.mp4"
+    clean_audio = options.get("clean_audio", "auto")
+    audio_filter = (
+        "highpass=f=70,afftdn=nr=8:nf=-30,"
+        "loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95"
+        if clean_audio == "auto" else None
+    )
     await run_command([
         "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-i", str(input_path),
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", f"scale={proxy_width}:{proxy_height}:flags=bilinear,setsar=1,fps=24",
+        *(["-af", audio_filter] if audio_filter else []),
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "29",
         "-pix_fmt", "yuv420p", "-threads", "1",
         "-c:a", "aac", "-b:a", "96k", "-ac", "2",
@@ -4309,7 +4316,8 @@ def clean_format(video_format):
 def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
                   font="", font2="", fontmix="0", cut="off", keys="1",
                   anim="", anim_out="", trans="off", broll="auto", sound="",
-                  camera="", grade="off", music="", music_level="normal", music_sync="1"):
+                  camera="", grade="off", music="", music_level="normal", music_sync="1",
+                  clean_audio="auto"):
     accent = (accent or "").strip().lstrip("#").upper()
     if accent and not re.fullmatch(r"[0-9A-F]{6}", accent):
         raise HTTPException(status_code=400, detail="Неверный цвет.")
@@ -4338,6 +4346,7 @@ def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
         "music": music if music in MOODS or music in ("auto", "off") else "",
         "music_level": music_level if music_level in MUSIC_LEVEL_DB else "normal",
         "music_sync": str(music_sync).strip().lower() not in ("0", "false", "off"),
+        "clean_audio": clean_audio if clean_audio in ("auto", "off") else "auto",
         "sound": sound if sound in ("off", "light", "normal", "strong") else "",
         "trans": trans if trans in TRANSITION_KINDS or trans == "auto" else "off",
     }
@@ -5036,7 +5045,7 @@ async def create_job(
             cfg.get("broll", "auto"), cfg.get("sound", "normal"),
             cfg.get("camera", "auto"), cfg.get("grade", "auto"),
             cfg.get("music", "off"), cfg.get("music_level", "low"),
-            cfg.get("music_sync", "1"),
+            cfg.get("music_sync", "1"), cfg.get("clean_audio", "auto"),
         )
     except (ValueError, TypeError, json.JSONDecodeError):
         raise HTTPException(status_code=400, detail="Неверные настройки монтажа.")
