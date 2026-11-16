@@ -35,9 +35,17 @@ class EditDecisionListTests(unittest.TestCase):
         scenes = [{"start": 0.0, "end": 2.0, "role": "question", "importance": 0.9}]
         plan = build_edit_decision_list(words, scenes, [], 5.0)
         self.assertEqual(plan["hook"]["text"], "Чаро ин муҳим аст?")
+        self.assertAlmostEqual(plan["hook"]["start"], 0.2)
+        self.assertAlmostEqual(plan["hook"]["end"], 1.3)
         self.assertEqual(plan["motion"][0]["kind"], "push_in")
         self.assertEqual(plan["captions"][0]["highlight_index"], 2)
         self.assertEqual(plan["policy"]["music"], "none")
+
+    def test_does_not_select_late_scene_as_opening_hook(self):
+        words = [{"word": "Биёед", "start": 3.1, "end": 3.5}]
+        scenes = [{"start": 3.0, "end": 5.0, "role": "question", "importance": 0.9}]
+        plan = build_edit_decision_list(words, scenes, [], 6.0)
+        self.assertIsNone(plan["hook"])
 
     def test_never_fabricates_hook_when_no_scene_is_marked(self):
         words = [{"word": "Салом", "start": 0.1, "end": 0.4}]
