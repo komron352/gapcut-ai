@@ -44,8 +44,8 @@ class SubmagicClientTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             self.assertEqual(request.method, "POST")
             self.assertEqual(request.url.path, "/v1/projects/upload")
-            self.assertIn("name=\"file\"", request.headers["content-type"])
             body = request.read().decode("latin-1")
+            self.assertIn('name="file"', body)
             self.assertIn('name="magicZooms"\r\n\r\ntrue', body)
             self.assertIn('name="magicBrolls"\r\n\r\nfalse', body)
             self.assertIn('name="removeBadTakes"\r\n\r\nfalse', body)
