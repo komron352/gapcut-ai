@@ -75,3 +75,11 @@ The first GitHub Actions test run executed 8 tests and exposed two failures:
 - the mixed transcript test exposed that a Russian-pass word could override a clearly Tajik token at the same timestamp.
 
 Both issues have been addressed in subsequent commits. A successful test run for the latest branch head has not yet been observed, so this milestone is not marked test-passed.
+
+## Audio and output QA additions
+
+- The Renderster path requests `clean_audio: auto`, while music is explicitly disabled.
+- The local FFmpeg proxy now applies a conservative voice chain by default: high-pass rumble reduction, mild `afftdn` noise reduction, loudness normalization, and peak limiting. The `clean_audio: off` option bypasses this chain.
+- The final output is decoded once with FFmpeg in single-thread mode using `-xerror` before a job can be marked complete. Output size is also checked against the configured cap.
+
+These filters still need listening tests against real quiet/noisy Tajik and Russian samples. Their presence is not proof that every voice recording will sound better; they must be tuned against sample clips before production.
