@@ -10,7 +10,7 @@ os.environ.setdefault("BOT_TOKEN", "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh
 
 import unittest
 
-from bot import merge_mixed_transcripts, plan_cuts
+from bot import clean_options, merge_mixed_transcripts, plan_cuts
 
 
 class MixedTranscriptTests(unittest.TestCase):
@@ -44,6 +44,13 @@ class MixedTranscriptTests(unittest.TestCase):
         ]}
         merged = merge_mixed_transcripts(tg, ru)
         self.assertEqual(len(merged), 1)
+
+
+class RenderPolicyTests(unittest.TestCase):
+    def test_music_is_off_and_voice_cleanup_is_conservative_by_default(self):
+        options = clean_options("", "m", "auto", "1")
+        self.assertEqual(options["music"], "")
+        self.assertEqual(options["clean_audio"], "auto")
 
 
 class SafeCutTests(unittest.TestCase):
