@@ -2505,13 +2505,34 @@ def plan_cuts(words, duration, level):
 
     speech = []
     fillers = 0
-    # Never delete a recognized word automatically: Whisper can mislabel
-    # Tajik/Russian words as fillers or repeat adjacent words in its output.
-    # Keep every timestamped token and only consider long pauses between them.
+    # Fail closed when ASR timestamps are malformed. A bad word time must
+    # never become a destructive edit decision.
+    previous_start = -1.0
     for item in words:
+        try:
+            word_start = float(item["start"])
+            word_end = float(item["end"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if (
+            not math.isfinite(word_start)
+            or not math.isfinite(word_end)
+            or word_start < 0
+            or word_end <= word_start
+            or word_end > duration + 0.25
+            or word_start < previous_start
+        ):
+            return None
+        previous_start = word_start
         speech.append((item, False))
+
     if len(speech) < 3:
         return None
+    # Refuse heavily overlapping word intervals: the source-to-output map
+    # cannot safely decide which spoken token owns that time.
+    for (left, _), (right, _) in zip(speech, speech[1:]):
+        if float(left["end"]) - float(right["start"]) > 0.08:
+            return None
 
     groups = []
     first = speech[0][0]
@@ -2540,13 +2561,13 @@ def plan_cuts(words, duration, level):
             segments.append([a, b])
 
     new_duration = sum(b - a for a, b in segments)
-    # Conservative safety gate: retain at least 75% of the original timeline
-    # and at least 90% of the timestamped speech span. If recognition timing is
+    # Conservative safety gate: retain at least 85% of the original timeline
+    # and at least 97% of the timestamped speech span. If recognition timing is
     # poor or the proposed edit is too aggressive, keep the source unchanged.
     spoken = max(0.0, speech[-1][0]["end"] - speech[0][0]["start"])
     if new_duration < 1.0:
         return None
-    if new_duration < 0.75 * duration or new_duration < 0.90 * spoken:
+    if new_duration < 0.85 * duration or new_duration < 0.97 * spoken:
         return None
     if duration - new_duration < 0.50:
         return None
@@ -2568,9 +2589,15 @@ def plan_cuts(words, duration, level):
 
     new_words = []
     for item, _ in speech:
+        source_start, source_end = float(item["start"]), float(item["end"])
+        # Every recognized word must remain fully inside one kept source range.
+        if not any(a <= source_start and source_end <= b for a, b in segments):
+            return None
         moved = dict(item)
-        moved["start"] = remap(item["start"])
-        moved["end"] = max(moved["start"] + 0.04, remap(item["end"]))
+        moved["start"] = remap(source_start)
+        moved["end"] = remap(source_end)
+        if moved["end"] <= moved["start"]:
+            return None
         new_words.append(moved)
 
     return {
