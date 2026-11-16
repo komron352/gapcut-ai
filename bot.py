@@ -198,21 +198,27 @@ RENDERSTER_EDIT_STYLE_ID = os.getenv("RENDERSTER_EDIT_STYLE_ID", "").strip()
 RENDERSTER_BASE_URL = "https://renderster.com"
 
 
-async def renderster_auto_edit(input_path, output_path, video_format="9:16", style_id=""):
+async def renderster_auto_edit(
+    input_path, output_path, video_format="9:16", style_id="", render_settings=None
+):
     """Run Renderster's async /media auto_edit job and download its finished MP4."""
     if not RENDERSTER_API_KEY:
         raise UserError("RENDERSTER_API_KEY дар сервер танзим нашудааст.", 503)
 
+    render_settings = render_settings or {}
     orientation = "vertical" if video_format == "9:16" else (
         "horizontal" if video_format == "16:9" else "original"
     )
-    # Renderster documents "none" as the explicit no-music option.
-    # Do not add unrequested stock footage or discard abandoned takes.
+    # Music is opt-in. Renderster's stock B-roll is only enabled when the user
+    # selected automatic B-roll; its API matches stock footage to the speech.
+    music_setting = render_settings.get("music") or "off"
+    provider_music = "none" if music_setting in ("", "off") else music_setting
+    broll_mode = render_settings.get("broll", "auto")
     options = {
         "orientation": orientation,
-        "music": "none",
-        "stock_broll": False,
-        "clean_audio": "auto",
+        "music": provider_music,
+        "stock_broll": broll_mode == "auto",
+        "clean_audio": render_settings.get("clean_audio", "auto"),
         "retakes": "keep",
     }
     chosen_style = style_id or RENDERSTER_EDIT_STYLE_ID
@@ -4608,7 +4614,8 @@ async def run_render_job(job, style, video_format, lines, options):
                 report(10, "Renderster AI монтаж мекунад")
                 try:
                     renderster_result = await renderster_auto_edit(
-                        job["input"], output_path, video_format
+                        job["input"], output_path, video_format,
+                        render_settings=options,
                     )
                     report(95, "Видеои Renderster гирифта шуд")
                     touch(job, renderster=renderster_result)
