@@ -5064,7 +5064,7 @@ async def health():
         "active_jobs": sum(1 for job in JOBS.values() if job.get("status") in ACTIVE_STATES),
         "processing": PROCESS_LOCK.locked(),
         "max_stored_jobs": MAX_STORED_JOBS,
-        "job_storage": "persistent_mount" if STORAGE_DIR_CONFIGURED else "ephemeral",
+        "job_storage": "custom_path_configured" if STORAGE_DIR_CONFIGURED else "ephemeral_default",
     }
 
 
@@ -5331,7 +5331,7 @@ async def retry_job(
             ("music_mood", None), ("cover", None), ("cut_preview", {}),
             ("broll_info", {}), ("edit_plan", None), ("transcript_qa", None),
             ("retry_lines", None),
-        ): 
+        ):
             job[key] = default
         touch(
             job, status="queued", stage="Коркардро дубора оғоз мекунем",
