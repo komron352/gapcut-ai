@@ -1,6 +1,19 @@
 import unittest
 
-from gapcut_engine import build_edit_decision_list, build_transcript_qa
+from gapcut_engine import build_edit_decision_list, build_transcript_qa, vad_flags_to_silences
+
+
+class WebRTCVADBoundaryTests(unittest.TestCase):
+    def test_bridges_short_unvoiced_gap_inside_a_phrase(self):
+        flags = [False] * 3 + [True] * 10 + [False] * 5 + [True] * 10 + [False] * 3
+        silences = vad_flags_to_silences(flags, len(flags) * 0.03)
+        self.assertEqual(silences, [])
+
+    def test_reports_long_internal_pause_with_padding(self):
+        flags = [False] * 3 + [True] * 10 + [False] * 25 + [True] * 10 + [False] * 3
+        silences = vad_flags_to_silences(flags, len(flags) * 0.03)
+        self.assertEqual(len(silences), 1)
+        self.assertGreater(silences[0][1] - silences[0][0], 0.25)
 
 
 class EditDecisionListTests(unittest.TestCase):
