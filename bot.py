@@ -4998,11 +4998,14 @@ async def rendley_connection(
         raise HTTPException(status_code=502, detail="Формати ҷавоби Rendley ғайричашмдошт аст.")
 
     # Return only plan/credit metadata; never expose email, API key or raw payload.
+    subscription = data.get("subscription") if isinstance(data.get("subscription"), dict) else {}
+    credit_data = data.get("credits") if isinstance(data.get("credits"), dict) else {}
     return {
         "status": "connected",
         "provider": "rendley",
-        "plan": data.get("plan") or data.get("subscription"),
-        "credits": data.get("credits"),
+        "plan": subscription.get("plan_name"),
+        "subscription_status": subscription.get("status"),
+        "credits_balance": credit_data.get("balance"),
         "note": "Read-only check. No video edit or export was started.",
     }
 
