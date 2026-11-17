@@ -182,6 +182,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("gapcut-ai")
 
+# httpx logs complete request URLs at INFO level. Pixabay requires its API key
+# in the query string, so suppress those transport logs to prevent key leakage.
+# Keep application-level logs (including status/error handling) enabled.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не указан в Environment Variables.")
 if not GROQ_API_KEY:
@@ -213,6 +218,7 @@ class UserError(Exception):
 # RENDERSTER AI AUTO-EDIT (optional external editing engine)
 # =========================================================
 RENDERSTER_API_KEY = os.getenv("RENDERSTER_API_KEY", "").strip()
+RENDLEY_API_KEY = os.getenv("RENDLEY_API_KEY", "").strip()
 RENDERSTER_AUTO_EDIT = os.getenv("RENDERSTER_AUTO_EDIT", "0").strip() == "1"
 RENDERSTER_EDIT_STYLE_ID = os.getenv("RENDERSTER_EDIT_STYLE_ID", "").strip()
 RENDERSTER_BASE_URL = "https://renderster.com"
@@ -1807,7 +1813,7 @@ STYLES = {
         "font": "Noto Sans", "size": 80, "bold": 1, "spacing": 0,
         "primary": "FFFFFF", "secondary": "FFFFFF", "active": "5CFFA8",
         "outline": "000000", "outline_w": 6, "shadow": 2,
-        "border_style": 1, "box_alpha": 0, "mode": "pop",
+        "border_style": 1, "box_alpha": 0, "mode": "dynamic",
         "max_words": 3, "max_chars": 24, "upper": False, "margin": 0.20,
     },
     "classic": {
@@ -4425,6 +4431,33 @@ def clean_format(video_format):
     return video_format
 
 
+def apply_creator_profile(options, style_name):
+    """Apply the Creator editing profile without cutting spoken content or adding music."""
+    if style_name != "creator":
+        return options
+    profile = dict(options)
+    profile.update({
+        "subtitles": True,
+        "zoom": True,
+        "fx": True,
+        "sfx": True,
+        "keys": True,
+        "anim": "auto",
+        "anim_out": "auto",
+        "trans": "auto",
+        "broll": "auto",
+        "sound": "normal",
+        "camera": "auto",
+        "grade": "cinematic",
+        "music": "off",
+        "music_sync": False,
+        "clean_audio": "auto",
+        # Do not remove speech automatically in Creator mode.
+        "cut": "off",
+    })
+    return profile
+
+
 def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
                   font="", font2="", fontmix="0", cut="off", keys="1",
                   anim="", anim_out="", trans="off", broll="auto", sound="",
@@ -4952,6 +4985,58 @@ async def home():
     }
 
 
+@app.get("/api/rendley/connection")
+async def rendley_connection(
+    init_data: str = Query(default=""),
+    x_init_data: str = Header(default=""),
+):
+    """Read-only Rendley account check. Never starts an edit or spends credits."""
+    user = require_user(x_init_data, init_data)
+    if str(user.get("id")) != "5475524665":
+        raise HTTPException(status_code=403, detail="Танҳо соҳиби GAPCUT AI иҷозат дорад.")
+    if not RENDLEY_API_KEY:
+        raise HTTPException(status_code=503, detail="RENDLEY_API_KEY дар сервер танзим нашудааст.")
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            response = await client.get(
+                "https://api.rendley.com/v1/users/me",
+                headers={"Authorization": f"Bearer {RENDLEY_API_KEY}"},
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Rendley API ҷавоб надод (timeout).")
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Бо Rendley API пайваст шуда нашуд.")
+
+    if response.status_code == 401:
+        raise HTTPException(status_code=401, detail="Rendley API key қабул нашуд. Калидро санҷ.")
+    if response.status_code == 403:
+        raise HTTPException(status_code=403, detail="Калид дуруст аст, аммо дастрасӣ иҷозат нест ё subscription фаъол нест.")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Rendley API хатои HTTP {response.status_code} баргардонд.")
+
+    try:
+        payload = response.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Rendley ҷавоби JSON-и дуруст надод.")
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="Формати ҷавоби Rendley ғайричашмдошт аст.")
+
+    # Return only plan/credit metadata; never expose email, API key or raw payload.
+    subscription = data.get("subscription") if isinstance(data.get("subscription"), dict) else {}
+    credit_data = data.get("credits") if isinstance(data.get("credits"), dict) else {}
+    return {
+        "status": "connected",
+        "provider": "rendley",
+        "plan": subscription.get("plan_name"),
+        "subscription_status": subscription.get("status"),
+        "credits_balance": credit_data.get("balance"),
+        "note": "Read-only check. No video edit or export was started.",
+    }
+
+
 @app.post("/api/renderster/learn-style")
 async def learn_renderster_style(
     file: UploadFile = File(...),
@@ -5274,6 +5359,7 @@ async def create_job(
             cfg.get("music", "off"), cfg.get("music_level", "low"),
             cfg.get("music_sync", "1"), cfg.get("clean_audio", "auto"),
         )
+        render_options = apply_creator_profile(render_options, render_style)
     except (ValueError, TypeError, json.JSONDecodeError):
         raise HTTPException(status_code=400, detail="Неверные настройки монтажа.")
 
@@ -5461,13 +5547,15 @@ async def start_render(
 ):
     user = require_user(init_data, x_init_data)
     job = get_job(job_id, user)
+    render_style = clean_style(style)
     options = clean_options(
         accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix,
         cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
         music, music_level, music_sync,
     )
+    options = apply_creator_profile(options, render_style)
     job["render_options"] = options
-    job["render_style"] = clean_style(style)
+    job["render_style"] = render_style
     job["render_format"] = clean_format(video_format)
     options["music_mood"] = job.get("music_mood")
     options["scenes"] = job.get("scenes", [])
