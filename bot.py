@@ -1813,7 +1813,7 @@ STYLES = {
         "font": "Noto Sans", "size": 80, "bold": 1, "spacing": 0,
         "primary": "FFFFFF", "secondary": "FFFFFF", "active": "5CFFA8",
         "outline": "000000", "outline_w": 6, "shadow": 2,
-        "border_style": 1, "box_alpha": 0, "mode": "pop",
+        "border_style": 1, "box_alpha": 0, "mode": "dynamic",
         "max_words": 3, "max_chars": 24, "upper": False, "margin": 0.20,
     },
     "classic": {
@@ -4431,6 +4431,33 @@ def clean_format(video_format):
     return video_format
 
 
+def apply_creator_profile(options, style_name):
+    """Apply the Creator editing profile without cutting spoken content or adding music."""
+    if style_name != "creator":
+        return options
+    profile = dict(options)
+    profile.update({
+        "subtitles": True,
+        "zoom": True,
+        "fx": True,
+        "sfx": True,
+        "keys": True,
+        "anim": "auto",
+        "anim_out": "auto",
+        "trans": "auto",
+        "broll": "auto",
+        "sound": "normal",
+        "camera": "auto",
+        "grade": "cinematic",
+        "music": "off",
+        "music_sync": False,
+        "clean_audio": "auto",
+        # Do not remove speech automatically in Creator mode.
+        "cut": "off",
+    })
+    return profile
+
+
 def clean_options(accent, size, position, subtitles, zoom="1", fx="1", sfx="1",
                   font="", font2="", fontmix="0", cut="off", keys="1",
                   anim="", anim_out="", trans="off", broll="auto", sound="",
@@ -5332,6 +5359,7 @@ async def create_job(
             cfg.get("music", "off"), cfg.get("music_level", "low"),
             cfg.get("music_sync", "1"), cfg.get("clean_audio", "auto"),
         )
+        render_options = apply_creator_profile(render_options, render_style)
     except (ValueError, TypeError, json.JSONDecodeError):
         raise HTTPException(status_code=400, detail="Неверные настройки монтажа.")
 
@@ -5519,13 +5547,15 @@ async def start_render(
 ):
     user = require_user(init_data, x_init_data)
     job = get_job(job_id, user)
+    render_style = clean_style(style)
     options = clean_options(
         accent, size, position, subtitles, zoom, fx, sfx, font, font2, fontmix,
         cut, keys, anim, anim_out, trans, broll, sound, camera, grade,
         music, music_level, music_sync,
     )
+    options = apply_creator_profile(options, render_style)
     job["render_options"] = options
-    job["render_style"] = clean_style(style)
+    job["render_style"] = render_style
     job["render_format"] = clean_format(video_format)
     options["music_mood"] = job.get("music_mood")
     options["scenes"] = job.get("scenes", [])
