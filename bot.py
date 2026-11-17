@@ -182,6 +182,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("gapcut-ai")
 
+# httpx logs complete request URLs at INFO level. Pixabay requires its API key
+# in the query string, so suppress those transport logs to prevent key leakage.
+# Keep application-level logs (including status/error handling) enabled.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не указан в Environment Variables.")
 if not GROQ_API_KEY:
