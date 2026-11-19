@@ -1214,7 +1214,7 @@ async def llm_fixes(words, language, glossary):
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
             response = await llm_chat_completion(payload, timeout=25.0)
-        if response.status_code != 200:
+        if response is None or response.status_code != 200:
             return {}
         raw = json.loads(response.json()["choices"][0]["message"]["content"])
         out = {}
@@ -1424,8 +1424,8 @@ async def llm_keys(words):
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await llm_chat_completion(payload, timeout=25.0)
-        if response.status_code != 200:
-            logger.warning("Keyword LLM status %s", response.status_code)
+        if response is None or response.status_code != 200:
+            logger.warning("Keyword LLM unavailable or returned HTTP %s", response.status_code if response is not None else "no response")
             return None
         content = response.json()["choices"][0]["message"]["content"]
         raw = json.loads(content).get("keys", [])
@@ -1475,7 +1475,7 @@ async def suggest_cards(words, work_dir):
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
             response = await llm_chat_completion(payload, timeout=25.0)
-            if response.status_code != 200:
+            if response is None or response.status_code != 200:
                 return []
             raw = json.loads(response.json()["choices"][0]["message"]["content"])
             last_at = -10.0
@@ -2649,7 +2649,7 @@ async def llm_json(client, system, user):
     }
     try:
         response = await llm_chat_completion(payload, client=client)
-        if response.status_code != 200:
+        if response is None or response.status_code != 200:
             return None
         return json.loads(response.json()["choices"][0]["message"]["content"])
     except Exception:
