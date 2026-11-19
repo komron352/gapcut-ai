@@ -142,6 +142,10 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
 LLM_MODEL = os.getenv("LLM_MODEL", os.getenv("KEYWORD_MODEL", "auto")).strip() or "auto"
 LLM_CHAT_URL = f"{LLM_BASE_URL}/chat/completions" if LLM_BASE_URL else ""
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/auto").strip() or "openrouter/auto"
+OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+LLM_AVAILABLE = bool(OPENROUTER_API_KEY or (LLM_AVAILABLE))
 FFMPEG_PRESET = os.getenv("FFMPEG_PRESET", "ultrafast").strip() or "ultrafast"
 
 BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
@@ -163,7 +167,7 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не указан в Environment Variables.")
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY не указан: распознавание речи работать не будет.")
-if not (LLM_API_KEY and LLM_CHAT_URL):
+if not (LLM_AVAILABLE):
     logger.warning("FreeLLMAPI не настроен: AI-анализ будет использовать резервные правила.")
 else:
     logger.info("FreeLLMAPI configured; model=%s", LLM_MODEL)
@@ -175,6 +179,51 @@ dp = Dispatcher()
 PROCESS_LOCK = asyncio.Lock()
 IMAGE_GENERATION_LOCK = asyncio.Lock()
 IMAGE_GENERATION_LAST_REQUEST = 0.0
+
+
+async def llm_chat_completion(payload, timeout=25.0, client=None):
+    """Call OpenRouter first, then the existing FreeLLMAPI endpoint as fallback."""
+    providers = []
+    if OPENROUTER_API_KEY:
+        openrouter_payload = dict(payload)
+        openrouter_payload["model"] = OPENROUTER_MODEL
+        providers.append((
+            "openrouter",
+            OPENROUTER_CHAT_URL,
+            OPENROUTER_API_KEY,
+            openrouter_payload,
+            {
+                "HTTP-Referer": os.getenv("OPENROUTER_SITE_URL", "https://gapcut-ai-web.vercel.app"),
+                "X-Title": os.getenv("OPENROUTER_APP_NAME", "GAPCUT AI"),
+            },
+        ))
+    if LLM_AVAILABLE:
+        fallback_payload = dict(payload)
+        fallback_payload["model"] = LLM_MODEL
+        providers.append(("freellmapi", LLM_CHAT_URL, LLM_API_KEY, fallback_payload, {}))
+
+    if not providers:
+        return None
+
+    own_client = client is None
+    active_client = client or httpx.AsyncClient(timeout=timeout)
+    try:
+        for provider_name, url, api_key, request_payload, extra_headers in providers:
+            try:
+                response = await active_client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {api_key}", **extra_headers},
+                    json=request_payload,
+                )
+                if response.status_code == 200:
+                    return response
+                logger.warning("%s LLM returned HTTP %s", provider_name, response.status_code)
+            except Exception:
+                logger.warning("%s LLM request failed; trying next provider", provider_name, exc_info=True)
+        return None
+    finally:
+        if own_client:
+            await active_client.aclose()
 
 
 class UserError(Exception):
@@ -1133,7 +1182,7 @@ def glossary_fixes(words, glossary):
 
 async def llm_fixes(words, language, glossary):
     """Ask the LLM for single-word spelling fixes. Returns {index: new_word}."""
-    if not (CORRECT_LLM and LLM_API_KEY and LLM_CHAT_URL) or len(words) < 3:
+    if not (CORRECT_LLM and LLM_AVAILABLE) or len(words) < 3:
         return {}
     numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words[:260]))
     hint = ""
@@ -1163,11 +1212,7 @@ async def llm_fixes(words, language, glossary):
     }
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
-            response = await client.post(
-                LLM_CHAT_URL,
-                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
-                json=payload,
-            )
+            response = await llm_chat_completion(payload, timeout=25.0)
         if response.status_code != 200:
             return {}
         raw = json.loads(response.json()["choices"][0]["message"]["content"])
@@ -1353,7 +1398,7 @@ def heuristic_keys(words):
 
 
 async def llm_keys(words):
-    if not (KEYWORDS_LLM and LLM_API_KEY and LLM_CHAT_URL) or len(words) < 3:
+    if not (KEYWORDS_LLM and LLM_AVAILABLE) or len(words) < 3:
         return None
     numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
     payload = {
@@ -1377,11 +1422,7 @@ async def llm_keys(words):
     }
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(
-                LLM_CHAT_URL,
-                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
-                json=payload,
-            )
+            response = await llm_chat_completion(payload, timeout=25.0)
         if response.status_code != 200:
             logger.warning("Keyword LLM status %s", response.status_code)
             return None
@@ -1408,7 +1449,7 @@ async def mark_keywords(words):
 
 async def suggest_cards(words, work_dir):
     """Up to 3 cards: {id, at, query, thumb, credit, file}. Never raises."""
-    if not (PIXABAY_API_KEY and LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 6:
+    if not (PIXABAY_API_KEY and LLM_AVAILABLE and KEYWORDS_LLM) or len(words) < 6:
         return []
     numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
     payload = {
@@ -1432,11 +1473,7 @@ async def suggest_cards(words, work_dir):
     cards = []
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
-            response = await client.post(
-                LLM_CHAT_URL,
-                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
-                json=payload,
-            )
+            response = await llm_chat_completion(payload, timeout=25.0)
             if response.status_code != 200:
                 return []
             raw = json.loads(response.json()["choices"][0]["message"]["content"])
@@ -2610,11 +2647,7 @@ async def llm_json(client, system, user):
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
     }
     try:
-        response = await client.post(
-            LLM_CHAT_URL,
-            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
-            json=payload,
-        )
+        response = await llm_chat_completion(payload, client=client)
         if response.status_code != 200:
             return None
         return json.loads(response.json()["choices"][0]["message"]["content"])
@@ -2767,7 +2800,7 @@ async def suggest_broll(words, duration, client=None, topic=""):
         # Brandly needs several short visual beats in its final B-roll outro.
         limit = max(1, min(4, int(duration // 6)))
         raw = None
-        if LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM:
+        if LLM_AVAILABLE and KEYWORDS_LLM:
             numbered = " ".join(f"{i}:{w['word']}" for i, w in enumerate(words))
             if topic:
                 numbered = f"Video topic: {topic}\\n" + numbered
@@ -3040,7 +3073,7 @@ def heuristic_scenes(words, duration):
 async def analyze_scenes(words, duration, client=None):
     """Topic and scenes (role, importance). Uses the LLM, falls back to rules."""
     result = {"topic": "", "scenes": heuristic_scenes(words, duration)}
-    if not (LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 8:
+    if not (LLM_AVAILABLE and KEYWORDS_LLM) or len(words) < 8:
         return result
     own = client is None
     if own:
@@ -3427,7 +3460,7 @@ async def choose_mood(words, topic, duration, client=None):
     """{mood, reason}: the LLM picks by topic and tone, rules are the fallback."""
     mood, reason = mood_by_rules(topic, words, duration)
     result = {"mood": mood, "reason": reason, "bpm": MOODS[mood]["bpm"]}
-    if not (LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 8:
+    if not (LLM_AVAILABLE and KEYWORDS_LLM) or len(words) < 8:
         return result
     own = client is None
     if own:
@@ -3556,7 +3589,7 @@ def fallback_title(scenes_words):
 
 async def suggest_cover_title(words, topic, client=None):
     fallback = fallback_title([w["word"] for w in words[:8]])
-    if not (LLM_API_KEY and LLM_CHAT_URL and KEYWORDS_LLM) or len(words) < 6:
+    if not (LLM_AVAILABLE and KEYWORDS_LLM) or len(words) < 6:
         return fallback
     own = client is None
     if own:
