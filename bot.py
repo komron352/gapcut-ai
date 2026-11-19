@@ -145,7 +145,7 @@ LLM_CHAT_URL = f"{LLM_BASE_URL}/chat/completions" if LLM_BASE_URL else ""
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/auto").strip() or "openrouter/auto"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-LLM_AVAILABLE = bool(OPENROUTER_API_KEY or (LLM_AVAILABLE))
+LLM_AVAILABLE = bool(OPENROUTER_API_KEY or (LLM_API_KEY and LLM_CHAT_URL))
 FFMPEG_PRESET = os.getenv("FFMPEG_PRESET", "ultrafast").strip() or "ultrafast"
 
 BASE_DIR = Path(tempfile.gettempdir()) / "gapcut_ai"
@@ -167,10 +167,11 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не указан в Environment Variables.")
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY не указан: распознавание речи работать не будет.")
-if not (LLM_AVAILABLE):
-    logger.warning("FreeLLMAPI не настроен: AI-анализ будет использовать резервные правила.")
+if not LLM_AVAILABLE:
+    logger.warning("No LLM provider configured: AI analysis will use fallback rules.")
 else:
-    logger.info("FreeLLMAPI configured; model=%s", LLM_MODEL)
+    logger.info("LLM providers configured; OpenRouter=%s; FreeLLMAPI fallback=%s",
+                bool(OPENROUTER_API_KEY), bool(LLM_API_KEY and LLM_CHAT_URL))
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -197,7 +198,7 @@ async def llm_chat_completion(payload, timeout=25.0, client=None):
                 "X-Title": os.getenv("OPENROUTER_APP_NAME", "GAPCUT AI"),
             },
         ))
-    if LLM_AVAILABLE:
+    if LLM_API_KEY and LLM_CHAT_URL:
         fallback_payload = dict(payload)
         fallback_payload["model"] = LLM_MODEL
         providers.append(("freellmapi", LLM_CHAT_URL, LLM_API_KEY, fallback_payload, {}))
